@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:ai_planning;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+app:
+  security:
+    jwt:
+      issuer: ai-planning-backend-test
+      secret: test-secret-that-is-longer-than-thirty-two-characters
+      expiration: PT1H
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+  bootstrap:
+    admin:
+      enabled: true
+      username: admin
+      password: Admin@123
+      full-name: Test Administrator
