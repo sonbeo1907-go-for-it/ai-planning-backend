@@ -1,8 +1,12 @@
 package com.codegym.aiplanning.service.auth;
 
-import com.codegym.aiplanning.service.auth.model.AuthToken;
+import com.codegym.aiplanning.service.auth.model.AuthResult;
 
 public interface AuthService {
 
-    AuthToken login(String username, String password);
+    AuthResult login(String username, String password);
+
+    AuthResult refresh(String refreshToken);
+
+    void logout(String authorizationHeader, String refreshToken);
 }
