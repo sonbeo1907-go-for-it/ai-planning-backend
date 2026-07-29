@@ -77,6 +77,26 @@ must not expose different messages to the client.
 
 Passwords and access tokens must never be written to logs.
 
+### Failed login limiting
+
+Failed password attempts are counted per existing active account. After
+`LOGIN_MAX_ATTEMPTS` consecutive failures, login for that account is
+temporarily blocked for `LOGIN_BLOCK_DURATION`.
+
+Defaults:
+
+- maximum consecutive failures: `5`;
+- temporary block duration: `PT15M` (15 minutes).
+
+A successful login resets the failure count. Once the temporary block expires,
+the next failed attempt starts a new counting window. Attempts against unknown,
+inactive or administratively locked accounts are not persisted. All failures,
+including a temporary block, return the same generic authentication response
+and do not reveal whether an account exists or why authentication was denied.
+
+Temporary login blocking is separate from the persistent `LOCKED` account
+status. It is stored in `failed_login_attempts` and `login_blocked_until`.
+
 ## Current profile
 
 ### Endpoint
@@ -121,5 +141,9 @@ Role and data-scope authorization must be enforced by the backend.
 - Wrong password returns the generic authentication error.
 - Unknown username returns the same generic error.
 - Locked and inactive accounts cannot log in.
+- An active account is temporarily blocked after the configured number of
+  consecutive failures.
+- A successful login resets the consecutive-failure count.
+- Temporary blocking returns the same generic authentication error.
 - Valid JWT can access the profile endpoint.
 - Missing, expired, incorrectly signed or wrong-issuer JWT is rejected.

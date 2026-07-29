@@ -6,6 +6,7 @@ import com.codegym.aiplanning.config.JwtProperties;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.service.auth.AuthService;
+import com.codegym.aiplanning.service.auth.LoginAttemptService;
 import com.codegym.aiplanning.service.auth.model.AuthToken;
 import java.time.Instant;
 import java.util.List;
@@ -25,21 +26,24 @@ public class AuthServiceImpl implements AuthService {
 
     private final AuthenticationManager authenticationManager;
     private final UserAccountRepository userAccountRepository;
+    private final LoginAttemptService loginAttemptService;
     private final JwtEncoder jwtEncoder;
     private final JwtProperties jwtProperties;
 
     public AuthServiceImpl(
             AuthenticationManager authenticationManager,
             UserAccountRepository userAccountRepository,
+            LoginAttemptService loginAttemptService,
             JwtEncoder jwtEncoder,
             JwtProperties jwtProperties) {
         this.authenticationManager = authenticationManager;
         this.userAccountRepository = userAccountRepository;
+        this.loginAttemptService = loginAttemptService;
         this.jwtEncoder = jwtEncoder;
         this.jwtProperties = jwtProperties;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     @Override
     public AuthToken login(String username, String password) {
         String normalizedUsername = username.trim();
@@ -47,14 +51,16 @@ public class AuthServiceImpl implements AuthService {
             authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(
                     normalizedUsername, password));
         } catch (AuthenticationException exception) {
+            loginAttemptService.recordFailedLogin(normalizedUsername);
             throw new BusinessException(
                     ErrorCode.INVALID_CREDENTIALS, "Invalid username or password.");
         }
 
         UserAccount account = userAccountRepository
-                .findByUsernameIgnoreCase(normalizedUsername)
+                .findByUsernameIgnoreCaseForUpdate(normalizedUsername)
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.INVALID_CREDENTIALS, "Invalid username or password."));
+        account.clearLoginFailures();
 
         Instant issuedAt = Instant.now();
         Instant expiresAt = issuedAt.plus(jwtProperties.expiration());

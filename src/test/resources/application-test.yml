@@ -14,6 +14,9 @@ app:
       issuer: ai-planning-backend-test
       secret: test-secret-that-is-longer-than-thirty-two-characters
       expiration: PT1H
+    login-attempts:
+      max-attempts: 3
+      block-duration: PT15M
   cors:
     allowed-origins:
       - http://localhost:5173

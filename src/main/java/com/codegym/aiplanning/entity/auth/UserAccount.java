@@ -6,6 +6,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
+import java.time.Duration;
+import java.time.Instant;
 
 @Entity
 @Table(name = "user_accounts")
@@ -28,6 +30,12 @@ public class UserAccount extends BaseEntity {
     @Column(nullable = false, length = 30)
     private AccountStatus status;
 
+    @Column(name = "failed_login_attempts", nullable = false)
+    private int failedLoginAttempts;
+
+    @Column(name = "login_blocked_until")
+    private Instant loginBlockedUntil;
+
     protected UserAccount() {}
 
     public static UserAccount create(
@@ -42,6 +50,7 @@ public class UserAccount extends BaseEntity {
         account.fullName = fullName;
         account.role = role;
         account.status = status;
+        account.failedLoginAttempts = 0;
         return account;
     }
 
@@ -71,5 +80,38 @@ public class UserAccount extends BaseEntity {
 
     public boolean isLocked() {
         return status == AccountStatus.LOCKED;
+    }
+
+    public boolean isLoginBlocked(Instant now) {
+        return loginBlockedUntil != null && loginBlockedUntil.isAfter(now);
+    }
+
+    public void recordFailedLogin(Instant now, int maxAttempts, Duration blockDuration) {
+        if (!isActive() || isLocked() || isLoginBlocked(now)) {
+            return;
+        }
+
+        if (loginBlockedUntil != null) {
+            failedLoginAttempts = 0;
+            loginBlockedUntil = null;
+        }
+
+        failedLoginAttempts++;
+        if (failedLoginAttempts >= maxAttempts) {
+            loginBlockedUntil = now.plus(blockDuration);
+        }
+    }
+
+    public void clearLoginFailures() {
+        failedLoginAttempts = 0;
+        loginBlockedUntil = null;
+    }
+
+    public int getFailedLoginAttempts() {
+        return failedLoginAttempts;
+    }
+
+    public Instant getLoginBlockedUntil() {
+        return loginBlockedUntil;
     }
 }

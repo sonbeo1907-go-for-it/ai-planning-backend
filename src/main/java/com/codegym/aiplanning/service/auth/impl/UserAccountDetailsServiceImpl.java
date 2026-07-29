@@ -2,6 +2,7 @@ package com.codegym.aiplanning.service.auth.impl;
 
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import java.time.Instant;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -28,7 +29,7 @@ public class UserAccountDetailsServiceImpl implements UserDetailsService {
                 .password(account.getPasswordHash())
                 .roles(account.getRole().name())
                 .disabled(!account.isActive() && !account.isLocked())
-                .accountLocked(account.isLocked())
+                .accountLocked(account.isLocked() || account.isLoginBlocked(Instant.now()))
                 .build();
     }
 }
