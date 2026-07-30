@@ -72,4 +72,32 @@ public class UserAccount extends BaseEntity {
     public boolean isLocked() {
         return status == AccountStatus.LOCKED;
     }
+
+    public void updateProfile(String fullName, UserRole role, AccountStatus status) {
+        if (fullName != null && !fullName.isBlank()) {
+            this.fullName = fullName;
+        }
+        if (role != null) {
+            this.role = role;
+        }
+        if (status != null) {
+            this.status = status;
+        }
+    }
+
+    public void changePassword(String newPasswordHash) {
+        if (newPasswordHash != null && !newPasswordHash.isBlank()) {
+            this.passwordHash = newPasswordHash;
+        }
+    }
+
+    public void setStatus(AccountStatus status) {
+        if (status != null) {
+            this.status = status;
+        }
+    }
+
+    public void deactivate() {
+        this.status = AccountStatus.INACTIVE;
+    }
 }
