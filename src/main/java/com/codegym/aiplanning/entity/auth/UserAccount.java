@@ -114,4 +114,9 @@ public class UserAccount extends BaseEntity {
     public Instant getLoginBlockedUntil() {
         return loginBlockedUntil;
     }
+
+    public void changePassword(String newPasswordHash) {
+        this.passwordHash = newPasswordHash;
+        clearLoginFailures();
+    }
 }
