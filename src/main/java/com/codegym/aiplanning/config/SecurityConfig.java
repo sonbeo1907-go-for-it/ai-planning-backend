@@ -48,8 +48,7 @@ public class SecurityConfig {
             HttpSecurity http,
             CorsConfigurationSource corsConfigurationSource,
             JwtAuthenticationConverter jwtAuthenticationConverter,
-            BearerTokenResolver bearerTokenResolver,
-            ApiSecurityErrorHandler apiSecurityErrorHandler)
+            BearerTokenResolver bearerTokenResolver)
             throws Exception {
         return http.csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
@@ -69,13 +68,8 @@ public class SecurityConfig {
                         .permitAll()
                         .anyRequest()
                         .authenticated())
-                .exceptionHandling(exceptionHandling -> exceptionHandling
-                        .authenticationEntryPoint(apiSecurityErrorHandler)
-                        .accessDeniedHandler(apiSecurityErrorHandler))
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .bearerTokenResolver(bearerTokenResolver)
-                        .authenticationEntryPoint(apiSecurityErrorHandler)
-                        .accessDeniedHandler(apiSecurityErrorHandler)
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .build();

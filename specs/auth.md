@@ -81,7 +81,9 @@ must not expose different messages to the client.
 {
   "status": 401,
   "code": "INVALID_CREDENTIALS",
-  "message": "Invalid username or password."
+  "message": "Invalid username or password.",
+  "path": "/api/v1/auth/login",
+  "requestId": "<request-id>"
 }
 ```
 
