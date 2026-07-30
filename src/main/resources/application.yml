@@ -69,7 +69,7 @@ app:
       max-attempts: ${LOGIN_MAX_ATTEMPTS:5}
       block-duration: ${LOGIN_BLOCK_DURATION:PT15M}
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
   bootstrap:
     admin:
       enabled: false
