@@ -111,7 +111,11 @@ class AuthControllerIntegrationTest {
         mockMvc.perform(get(ApiConstant.PROFILE).header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.username").value("admin"))
-                .andExpect(jsonPath("$.data.roles[0]").value("ROLE_ADMIN"));
+                .andExpect(jsonPath("$.data.role").value("ADMIN"))
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.status").doesNotExist())
+                .andExpect(jsonPath("$.code").doesNotExist())
+                .andExpect(jsonPath("$.message").doesNotExist());
     }
 
     @Test
@@ -205,8 +209,7 @@ class AuthControllerIntegrationTest {
         MvcResult result = mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andReturn();
-        JsonNode document =
-                objectMapper.readTree(result.getResponse().getContentAsString());
+        JsonNode document = objectMapper.readTree(result.getResponse().getContentAsString());
 
         org.assertj.core.api.Assertions.assertThat(document
                         .at("/components/securitySchemes/bearerAuth/type")
