@@ -19,15 +19,16 @@ Error responses use:
 
 ```json
 {
-  "timestamp": "2026-07-28T07:00:00Z",
   "status": 400,
   "code": "VALIDATION_FAILED",
-  "message": "Request validation failed.",
-  "path": "/api/v1/example",
-  "requestId": "<request-id>",
-  "violations": []
+  "message": "Request validation failed."
 }
 ```
+
+Only HTTP `200` responses contain a `data` field. Error responses contain only
+`status`, `code` and `message`; the HTTP status remains the authoritative
+status for client control flow. Responses with no body, such as HTTP `204`,
+remain empty.
 
 ## Versioning and concurrency
 

@@ -155,8 +155,9 @@ For example, DailyPlan uses `controller/daily`, `service/daily`,
 - All public endpoints are versioned under `/api/v1` through `ApiConstant`.
 - Request DTOs are validated at the API boundary.
 - Successful payloads use `{ "data": ... }`.
-- Errors contain `code`, `message`, `path`, `requestId`, and optional field
-  violations.
+- HTTP `200` responses contain only `data`. Error responses contain only
+  `status`, `code`, and `message`; the request ID remains available in the
+  `X-Request-ID` response header.
 - Database schema changes require a new Flyway migration.
 - Timestamps are stored in UTC.
 - Entities use UUID identifiers and optimistic-locking versions.

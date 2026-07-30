@@ -62,23 +62,55 @@ class AuthControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.tokenType").value("Bearer"))
                 .andExpect(jsonPath("$.data.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.status").doesNotExist())
+                .andExpect(jsonPath("$.code").doesNotExist())
+                .andExpect(jsonPath("$.message").doesNotExist())
                 .andReturn();
 
         JsonNode body = objectMapper.readTree(loginResult.getResponse().getContentAsString());
+        org.assertj.core.api.Assertions.assertThat(body.size()).isEqualTo(1);
         String token = body.path("data").path("accessToken").asText();
 
         mockMvc.perform(get(ApiConstant.PROFILE).header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.username").value("admin"))
-                .andExpect(jsonPath("$.data.roles[0]").value("ROLE_ADMIN"));
+                .andExpect(jsonPath("$.data.roles[0]").value("ROLE_ADMIN"))
+                .andExpect(jsonPath("$.status").doesNotExist())
+                .andExpect(jsonPath("$.code").doesNotExist())
+                .andExpect(jsonPath("$.message").doesNotExist());
     }
 
     @Test
     void rejectInvalidCredentialsWithoutLeakingAccountState() throws Exception {
-        login("admin", "wrong-password")
+        MvcResult result = login("admin", "wrong-password")
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
-                .andExpect(jsonPath("$.message").value("Invalid username or password."));
+                .andExpect(jsonPath("$.message").value("Invalid username or password."))
+                .andReturn();
+
+        assertErrorOnly(result, 401, "INVALID_CREDENTIALS");
+    }
+
+    @Test
+    void validationErrorsContainOnlyStatusCodeAndMessage() throws Exception {
+        MvcResult result = mockMvc.perform(post(ApiConstant.AUTH_LOGIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andReturn();
+
+        assertErrorOnly(result, 400, "VALIDATION_FAILED");
+    }
+
+    @Test
+    void missingBearerTokenUsesTheSameErrorEnvelope() throws Exception {
+        MvcResult result = mockMvc.perform(get(ApiConstant.PROFILE))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"))
+                .andReturn();
+
+        assertErrorOnly(result, 401, "AUTHENTICATION_REQUIRED");
     }
 
     @Test
@@ -152,5 +184,13 @@ class AuthControllerIntegrationTest {
                 username,
                 UserRole.STUDENT,
                 status));
+    }
+
+    private void assertErrorOnly(MvcResult result, int status, String code) throws Exception {
+        JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
+        org.assertj.core.api.Assertions.assertThat(body.size()).isEqualTo(3);
+        org.assertj.core.api.Assertions.assertThat(body.path("status").asInt()).isEqualTo(status);
+        org.assertj.core.api.Assertions.assertThat(body.path("code").asText()).isEqualTo(code);
+        org.assertj.core.api.Assertions.assertThat(body.path("message").asText()).isNotBlank();
     }
 }
