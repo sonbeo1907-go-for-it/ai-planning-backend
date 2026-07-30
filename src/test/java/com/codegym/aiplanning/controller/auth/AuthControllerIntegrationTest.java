@@ -9,9 +9,9 @@ import com.codegym.aiplanning.common.constant.ApiConstant;
 import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
-import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.repository.auth.AuthSessionRepository;
 import com.codegym.aiplanning.repository.auth.RefreshTokenRepository;
+import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
@@ -105,6 +105,8 @@ class AuthControllerIntegrationTest {
         org.assertj.core.api.Assertions.assertThat(jwt.getClaimAsString("sid")).isNotBlank();
         org.assertj.core.api.Assertions.assertThat(jwt.getClaimAsString("typ"))
                 .isEqualTo("access");
+        org.assertj.core.api.Assertions.assertThat(jwt.getExpiresAt())
+                .isEqualTo(jwt.getIssuedAt().plusSeconds(900));
 
         mockMvc.perform(get(ApiConstant.PROFILE).header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
@@ -243,6 +245,59 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    void expiredBearerTokenUsesTheSessionExpiredErrorEnvelope() throws Exception {
+        Instant now = Instant.now();
+        JwtClaimsSet expiredClaims = JwtClaimsSet.builder()
+                .issuer("ai-planning-backend-test")
+                .issuedAt(now.minusSeconds(7200))
+                .expiresAt(now.minusSeconds(3600))
+                .id(UUID.randomUUID().toString())
+                .subject(UUID.randomUUID().toString())
+                .claim("uid", UUID.randomUUID().toString())
+                .claim("preferred_username", "expired-user")
+                .claim("full_name", "Expired User")
+                .claim("roles", java.util.List.of("ROLE_STUDENT"))
+                .build();
+        String expiredToken = jwtEncoder
+                .encode(JwtEncoderParameters.from(
+                        JwsHeader.with(MacAlgorithm.HS256).build(), expiredClaims))
+                .getTokenValue();
+
+        MvcResult result = mockMvc.perform(get(ApiConstant.PROFILE)
+                        .header("Authorization", "Bearer " + expiredToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"))
+                .andExpect(jsonPath("$.message").value("Your session has expired. Please sign in again."))
+                .andReturn();
+
+        assertStandardApiError(result, 401, "SESSION_EXPIRED");
+    }
+
+    @Test
+    void malformedBearerTokenUsesTheAuthenticationRequiredErrorEnvelope() throws Exception {
+        MvcResult result = mockMvc.perform(get(ApiConstant.PROFILE)
+                        .header("Authorization", "Bearer not-a-jwt"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"))
+                .andReturn();
+
+        assertStandardApiError(result, 401, "AUTHENTICATION_REQUIRED");
+    }
+
+    @Test
+    void openApiDocumentsSessionExpiryForProtectedEndpoint() throws Exception {
+        MvcResult result = mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode document = objectMapper.readTree(result.getResponse().getContentAsString());
+        org.assertj.core.api.Assertions.assertThat(document
+                        .at("/paths/~1api~1v1~1profile/get/responses/401/description")
+                        .asText())
+                .contains("session has expired");
+    }
+
+    @Test
     void temporarilyBlockAccountAfterConfiguredFailedAttemptLimit() throws Exception {
         login("admin", "wrong-password").andExpect(status().isUnauthorized());
         login("admin", "wrong-password").andExpect(status().isUnauthorized());
@@ -328,5 +383,17 @@ class AuthControllerIntegrationTest {
                 UserRole.STUDENT,
                 status));
     }
+    private void assertStandardApiError(MvcResult result, int status, String code) throws Exception {
+        JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
+        org.assertj.core.api.Assertions.assertThat(body.path("timestamp").asText()).isNotBlank();
+        org.assertj.core.api.Assertions.assertThat(body.path("status").asInt()).isEqualTo(status);
+        org.assertj.core.api.Assertions.assertThat(body.path("code").asText()).isEqualTo(code);
+        org.assertj.core.api.Assertions.assertThat(body.path("message").asText()).isNotBlank();
+        org.assertj.core.api.Assertions.assertThat(body.path("path").asText())
+                .isEqualTo(ApiConstant.PROFILE);
+        org.assertj.core.api.Assertions.assertThat(body.path("requestId").asText()).isNotBlank();
+        org.assertj.core.api.Assertions.assertThat(body.path("violations").isMissingNode()).isTrue();
+    }
+
     private record LoginSession(String accessToken, Cookie refreshCookie) {}
 }

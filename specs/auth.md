@@ -72,6 +72,32 @@ The access JWT contains:
 - authorities in `roles`;
 - issuer, issued time and expiration time.
 
+## Session expiry (AUTH-03)
+
+Access-token lifetime is configured with `JWT_EXPIRATION`; the default is
+`PT15M`. Each login response includes the effective lifetime in `expiresIn`
+(seconds). The backend validates token expiry on every protected request.
+
+When a previously valid access token has expired, protected APIs return:
+
+```json
+{
+  "timestamp": "2026-07-28T07:00:00Z",
+  "status": 401,
+  "code": "SESSION_EXPIRED",
+  "message": "Your session has expired. Please sign in again.",
+  "path": "/api/v1/profile",
+  "requestId": "<request-id>"
+}
+```
+
+Missing, malformed, incorrectly signed or wrong-issuer tokens return `401`
+with `AUTHENTICATION_REQUIRED`. Clients must treat `401` with
+`SESSION_EXPIRED` as an authentication event: preserve any locally held draft
+state, warn about unsaved form data when navigation can be intercepted, then
+send the user to the login screen. The backend never deletes persisted data
+when a token expires.
+
 ### Failure response
 
 Invalid credentials, inactive accounts, locked accounts and unknown usernames
@@ -215,3 +241,4 @@ Role and data-scope authorization must be enforced by the backend.
 - Reuse of an old refresh token revokes the entire session.
 - Logout is idempotent.
 - Protected API access remains fail-closed when Redis is unavailable.
+- Expired JWT returns `401 SESSION_EXPIRED` using the standard error envelope.
