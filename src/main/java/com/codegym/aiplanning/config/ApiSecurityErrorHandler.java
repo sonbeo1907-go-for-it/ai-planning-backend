@@ -10,12 +10,15 @@ import java.io.IOException;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.oauth2.jwt.JwtValidationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.stereotype.Component;
 
 @Component
 public class ApiSecurityErrorHandler implements AuthenticationEntryPoint, AccessDeniedHandler {
+
+    private static final String EXPIRED_TOKEN_VALIDATION_CODE = "token_expired";
 
     private final ObjectMapper objectMapper;
 
@@ -29,6 +32,10 @@ public class ApiSecurityErrorHandler implements AuthenticationEntryPoint, Access
             HttpServletResponse response,
             AuthenticationException authenticationException)
             throws IOException {
+        if (hasExpiredToken(authenticationException)) {
+            write(response, ErrorCode.SESSION_EXPIRED, "Your session has expired. Please sign in again.");
+            return;
+        }
         write(response, ErrorCode.AUTHENTICATION_REQUIRED, "Authentication is required.");
     }
 
@@ -48,5 +55,18 @@ public class ApiSecurityErrorHandler implements AuthenticationEntryPoint, Access
         objectMapper.writeValue(
                 response.getOutputStream(),
                 new ApiError(errorCode.status().value(), errorCode.name(), message));
+    }
+
+    private boolean hasExpiredToken(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof JwtValidationException jwtValidationException
+                    && jwtValidationException.getErrors().stream()
+                            .anyMatch(error -> EXPIRED_TOKEN_VALIDATION_CODE.equals(error.getErrorCode()))) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }

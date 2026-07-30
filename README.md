@@ -92,7 +92,7 @@ Do not commit `.env`.
 | `DB_USERNAME` | Database user |
 | `DB_PASSWORD` | Database password |
 | `JWT_SECRET` | HMAC secret, minimum 32 characters |
-| `JWT_EXPIRATION` | ISO-8601 duration, for example `PT8H` |
+| `JWT_EXPIRATION` | Access-token lifetime as an ISO-8601 duration; default `PT8H` |
 | `LOGIN_MAX_ATTEMPTS` | Consecutive failed logins before temporary blocking |
 | `LOGIN_BLOCK_DURATION` | Temporary login block as an ISO-8601 duration |
 | `CORS_ALLOWED_ORIGINS` | Frontend origin list |

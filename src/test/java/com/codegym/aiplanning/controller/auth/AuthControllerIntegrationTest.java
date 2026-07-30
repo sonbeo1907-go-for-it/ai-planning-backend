@@ -12,6 +12,8 @@ import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +21,13 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -41,6 +50,12 @@ class AuthControllerIntegrationTest {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private JwtDecoder jwtDecoder;
+
+    @Autowired
+    private JwtEncoder jwtEncoder;
+
     @BeforeEach
     void clearAdminLoginFailures() {
         userAccountRepository.findByUsernameIgnoreCase("admin").ifPresent(account -> {
@@ -61,6 +76,7 @@ class AuthControllerIntegrationTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.tokenType").value("Bearer"))
+                .andExpect(jsonPath("$.data.expiresIn").value(3600))
                 .andExpect(jsonPath("$.data.accessToken").isNotEmpty())
                 .andExpect(jsonPath("$.status").doesNotExist())
                 .andExpect(jsonPath("$.code").doesNotExist())
@@ -70,6 +86,9 @@ class AuthControllerIntegrationTest {
         JsonNode body = objectMapper.readTree(loginResult.getResponse().getContentAsString());
         org.assertj.core.api.Assertions.assertThat(body.size()).isEqualTo(1);
         String token = body.path("data").path("accessToken").asText();
+        Jwt jwt = jwtDecoder.decode(token);
+        org.assertj.core.api.Assertions.assertThat(jwt.getExpiresAt())
+                .isEqualTo(jwt.getIssuedAt().plusSeconds(3600));
 
         mockMvc.perform(get(ApiConstant.PROFILE).header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
@@ -111,6 +130,59 @@ class AuthControllerIntegrationTest {
                 .andReturn();
 
         assertErrorOnly(result, 401, "AUTHENTICATION_REQUIRED");
+    }
+
+    @Test
+    void expiredBearerTokenUsesTheSessionExpiredErrorEnvelope() throws Exception {
+        Instant now = Instant.now();
+        JwtClaimsSet expiredClaims = JwtClaimsSet.builder()
+                .issuer("ai-planning-backend-test")
+                .issuedAt(now.minusSeconds(7200))
+                .expiresAt(now.minusSeconds(3600))
+                .id(UUID.randomUUID().toString())
+                .subject(UUID.randomUUID().toString())
+                .claim("uid", UUID.randomUUID().toString())
+                .claim("preferred_username", "expired-user")
+                .claim("full_name", "Expired User")
+                .claim("roles", java.util.List.of("ROLE_STUDENT"))
+                .build();
+        String expiredToken = jwtEncoder
+                .encode(JwtEncoderParameters.from(
+                        JwsHeader.with(MacAlgorithm.HS256).build(), expiredClaims))
+                .getTokenValue();
+
+        MvcResult result = mockMvc.perform(get(ApiConstant.PROFILE)
+                        .header("Authorization", "Bearer " + expiredToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"))
+                .andExpect(jsonPath("$.message").value("Your session has expired. Please sign in again."))
+                .andReturn();
+
+        assertErrorOnly(result, 401, "SESSION_EXPIRED");
+    }
+
+    @Test
+    void malformedBearerTokenUsesTheAuthenticationRequiredErrorEnvelope() throws Exception {
+        MvcResult result = mockMvc.perform(get(ApiConstant.PROFILE)
+                        .header("Authorization", "Bearer not-a-jwt"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"))
+                .andReturn();
+
+        assertErrorOnly(result, 401, "AUTHENTICATION_REQUIRED");
+    }
+
+    @Test
+    void openApiDocumentsSessionExpiryForProtectedEndpoint() throws Exception {
+        MvcResult result = mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode document = objectMapper.readTree(result.getResponse().getContentAsString());
+        org.assertj.core.api.Assertions.assertThat(document
+                        .at("/paths/~1api~1v1~1profile/get/responses/401/description")
+                        .asText())
+                .contains("session has expired");
     }
 
     @Test

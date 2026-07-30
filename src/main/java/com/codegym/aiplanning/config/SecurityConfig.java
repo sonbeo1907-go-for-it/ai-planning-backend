@@ -23,6 +23,11 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
@@ -91,8 +96,17 @@ public class SecurityConfig {
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(jwtSecret(properties))
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();
-        decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(properties.issuer()));
+        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
+                expiredAccessTokenValidator(),
+                JwtValidators.createDefaultWithIssuer(properties.issuer())));
         return decoder;
+    }
+
+    private OAuth2TokenValidator<Jwt> expiredAccessTokenValidator() {
+        return jwt -> jwt.getExpiresAt() != null && !jwt.getExpiresAt().isAfter(java.time.Instant.now())
+                ? OAuth2TokenValidatorResult.failure(new OAuth2Error(
+                        "token_expired", "The access token has expired.", null))
+                : OAuth2TokenValidatorResult.success();
     }
 
     @Bean
