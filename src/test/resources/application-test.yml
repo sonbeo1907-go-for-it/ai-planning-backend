@@ -13,7 +13,15 @@ app:
     jwt:
       issuer: ai-planning-backend-test
       secret: test-secret-that-is-longer-than-thirty-two-characters
-      expiration: PT1H
+      expiration: PT15M
+    session:
+      absolute-expiration: P14D
+      refresh-lock-duration: PT10S
+      refresh-cookie-name: refresh_token
+      refresh-cookie-path: /api/v1/auth
+      refresh-cookie-secure: false
+      refresh-cookie-same-site: Strict
+      redis-enabled: false
     login-attempts:
       max-attempts: 3
       block-duration: PT15M

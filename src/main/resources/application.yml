@@ -17,6 +17,13 @@ spring:
           time_zone: UTC
   flyway:
     enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: ${REDIS_TIMEOUT:2s}
+      repositories:
+        enabled: false
   jackson:
     default-property-inclusion: non_null
 
@@ -49,7 +56,15 @@ app:
     jwt:
       issuer: ai-planning-backend
       secret: ${JWT_SECRET}
-      expiration: ${JWT_EXPIRATION:PT8H}
+      expiration: ${JWT_EXPIRATION:PT15M}
+    session:
+      absolute-expiration: ${AUTH_SESSION_EXPIRATION:P14D}
+      refresh-lock-duration: ${REFRESH_LOCK_DURATION:PT10S}
+      refresh-cookie-name: ${REFRESH_COOKIE_NAME:refresh_token}
+      refresh-cookie-path: /api/v1/auth
+      refresh-cookie-secure: ${REFRESH_COOKIE_SECURE:true}
+      refresh-cookie-same-site: ${REFRESH_COOKIE_SAME_SITE:Strict}
+      redis-enabled: ${AUTH_REDIS_ENABLED:true}
     login-attempts:
       max-attempts: ${LOGIN_MAX_ATTEMPTS:5}
       block-duration: ${LOGIN_BLOCK_DURATION:PT15M}

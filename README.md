@@ -11,9 +11,10 @@ advanced dashboards are not part of this baseline.
 
 - Java 17
 - Spring Boot 3.5.16
-- Spring Security with stateless JWT
+- Spring Security with short-lived access JWTs and rotated refresh tokens
 - Spring Data JPA
 - PostgreSQL 17
+- Redis 8 for revocation acceleration and refresh concurrency locks
 - Flyway
 - OpenAPI and Swagger UI
 - JUnit 5, MockMvc, H2 for baseline integration tests
@@ -22,16 +23,16 @@ advanced dashboards are not part of this baseline.
 ## Prerequisites
 
 - JDK 17+
-- Docker Desktop or a local PostgreSQL instance
+- Docker Desktop or local PostgreSQL and Redis instances
 
 Maven does not need to be installed. Use `mvnw` or `mvnw.cmd`.
 
 ## Run locally
 
-1. Start PostgreSQL:
+1. Start PostgreSQL and Redis:
 
    ```bash
-   docker compose up -d postgres
+   docker compose up -d postgres redis
    ```
 
 2. Start the API:
@@ -81,6 +82,15 @@ curl http://localhost:8080/api/v1/profile \
   -H "Authorization: Bearer <access-token>"
 ```
 
+The login response also sets an HttpOnly `refresh_token` cookie. Logout revokes
+the current login session immediately:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/logout \
+  -H "Authorization: Bearer <access-token>" \
+  -b "refresh_token=<refresh-token>"
+```
+
 ## Environment variables
 
 Copy `.env.example` when Docker Compose environment customization is needed.
@@ -92,7 +102,16 @@ Do not commit `.env`.
 | `DB_USERNAME` | Database user |
 | `DB_PASSWORD` | Database password |
 | `JWT_SECRET` | HMAC secret, minimum 32 characters |
-| `JWT_EXPIRATION` | ISO-8601 duration, for example `PT8H` |
+| `JWT_EXPIRATION` | Access-token lifetime; default `PT15M` |
+| `AUTH_SESSION_EXPIRATION` | Absolute refresh-session lifetime; default `P14D` |
+| `REFRESH_LOCK_DURATION` | Redis refresh-rotation lock lifetime |
+| `REFRESH_COOKIE_NAME` | HttpOnly refresh-cookie name |
+| `REFRESH_COOKIE_SECURE` | Require HTTPS for the refresh cookie; use `true` outside local development |
+| `REFRESH_COOKIE_SAME_SITE` | Refresh-cookie SameSite policy; default `Strict` |
+| `AUTH_REDIS_ENABLED` | Enable Redis revocation keys and refresh locks |
+| `REDIS_HOST` | Redis host |
+| `REDIS_PORT` | Redis port |
+| `REDIS_TIMEOUT` | Redis connection timeout |
 | `LOGIN_MAX_ATTEMPTS` | Consecutive failed logins before temporary blocking |
 | `LOGIN_BLOCK_DURATION` | Temporary login block as an ISO-8601 duration |
 | `CORS_ALLOWED_ORIGINS` | Frontend origin list |
