@@ -112,10 +112,64 @@ Authorization: Bearer <access-token>
     "id": "<uuid>",
     "username": "admin",
     "fullName": "System Administrator",
-    "roles": ["ROLE_ADMIN"]
+    "role": "ADMIN",
+    "status": "ACTIVE"
   }
 }
 ```
+
+`username` is the user code issued by the center. The endpoint always derives
+the account from the authenticated JWT subject; it accepts no user ID, so a
+client cannot retrieve another user's profile by changing a URL or request.
+
+For a student, the response additionally contains a `student` section. For an
+instructor, it additionally contains an `instructor` section:
+
+```json
+{
+  "data": {
+    "role": "STUDENT",
+    "student": {
+      "currentEnrollments": [
+        {
+          "enrollmentId": "<uuid>",
+          "classId": "<uuid>",
+          "classCode": "SE-2026-01",
+          "className": "Software Engineering 2026.01",
+          "courseId": "<uuid>",
+          "courseCode": "JAVA-CORE",
+          "courseName": "Java Core"
+        }
+      ]
+    }
+  }
+}
+```
+
+```json
+{
+  "data": {
+    "role": "INSTRUCTOR",
+    "instructor": {
+      "assignedClasses": [
+        {
+          "classId": "<uuid>",
+          "classCode": "SE-2026-01",
+          "className": "Software Engineering 2026.01",
+          "courseId": "<uuid>",
+          "courseCode": "JAVA-CORE",
+          "courseName": "Java Core"
+        }
+      ]
+    }
+  }
+}
+```
+
+The current codebase has no enrollment or instructor-assignment persistence
+module, so these role-specific collections are currently empty. Future modules
+add a Spring `ProfileRoleDetailsProvider` for their role to populate them;
+neither the endpoint path nor its self-service authorization model changes.
 
 ## Account statuses
 

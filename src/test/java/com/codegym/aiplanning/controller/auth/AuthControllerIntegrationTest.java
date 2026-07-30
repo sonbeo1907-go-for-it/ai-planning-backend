@@ -74,7 +74,8 @@ class AuthControllerIntegrationTest {
         mockMvc.perform(get(ApiConstant.PROFILE).header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.username").value("admin"))
-                .andExpect(jsonPath("$.data.roles[0]").value("ROLE_ADMIN"))
+                .andExpect(jsonPath("$.data.role").value("ADMIN"))
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"))
                 .andExpect(jsonPath("$.status").doesNotExist())
                 .andExpect(jsonPath("$.code").doesNotExist())
                 .andExpect(jsonPath("$.message").doesNotExist());
