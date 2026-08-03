@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
+@Schema(description = "Internal account credentials")
 public record LoginRequest(
         @Schema(description = "Internal username issued by the center", example = "admin")
                 @NotBlank

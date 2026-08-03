@@ -3,6 +3,7 @@ package com.codegym.aiplanning.controller.auth.dto;
 import com.codegym.aiplanning.service.auth.model.AuthToken;
 import io.swagger.v3.oas.annotations.media.Schema;
 
+@Schema(description = "Short-lived access-token response")
 public record TokenResponse(
         @Schema(description = "Short-lived access JWT", example = "eyJhbGciOiJIUzI1NiJ9...")
                 String accessToken,
