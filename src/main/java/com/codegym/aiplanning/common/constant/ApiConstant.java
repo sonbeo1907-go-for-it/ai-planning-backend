@@ -14,6 +14,7 @@ public final class ApiConstant {
     public static final String PROFILE = API_V1 + "/profile";
 
     public static final String USERS = API_V1 + "/users";
+    public static final String ADMIN_USERS = API_V1 + "/admin/users";
     public static final String CLASSES = API_V1 + "/classes";
     public static final String COURSES = API_V1 + "/courses";
     public static final String ENROLLMENTS = API_V1 + "/enrollments";

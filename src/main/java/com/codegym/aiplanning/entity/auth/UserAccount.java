@@ -130,6 +130,7 @@ public class UserAccount extends BaseEntity {
     public void changePassword(String newPasswordHash) {
         if (newPasswordHash != null && !newPasswordHash.isBlank()) {
             this.passwordHash = newPasswordHash;
+            clearLoginFailures();
         }
     }
 
