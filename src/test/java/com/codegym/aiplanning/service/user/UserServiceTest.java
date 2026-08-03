@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.codegym.aiplanning.common.api.PageResponse;
@@ -20,6 +21,8 @@ import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
+import com.codegym.aiplanning.service.auth.AccountSecurityNotifier;
+import com.codegym.aiplanning.service.auth.UserSessionRevocationService;
 import com.codegym.aiplanning.service.user.impl.UserServiceImpl;
 import java.time.Instant;
 import java.util.List;
@@ -49,13 +52,24 @@ class UserServiceTest {
     @Mock
     private AuditLogService auditLogService;
 
+    @Mock
+    private UserSessionRevocationService userSessionRevocationService;
+
+    @Mock
+    private AccountSecurityNotifier accountSecurityNotifier;
+
     private UserServiceImpl userService;
     private Jwt actorJwt;
     private UUID actorId;
 
     @BeforeEach
     void setUp() {
-        userService = new UserServiceImpl(userRepository, passwordEncoder, auditLogService);
+        userService = new UserServiceImpl(
+                userRepository,
+                passwordEncoder,
+                auditLogService,
+                userSessionRevocationService,
+                accountSecurityNotifier);
         actorId = UUID.randomUUID();
         actorJwt = Jwt.withTokenValue("token_val")
                 .header("alg", "none")
@@ -226,12 +240,15 @@ class UserServiceTest {
         UserAccount existing = createTestAccount("user_disable", "Disable Name", UserRole.STUDENT, AccountStatus.ACTIVE);
         ReflectionTestUtils.setField(existing, "id", userId);
 
-        when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(existing));
         when(userRepository.save(any(UserAccount.class))).thenAnswer(i -> i.getArgument(0));
 
         UserResponse response = userService.deactivateUser(userId, actorJwt);
 
         assertThat(response.status()).isEqualTo(AccountStatus.INACTIVE);
+        verify(userSessionRevocationService).revokeAllActiveSessions(
+                userId, "ACCOUNT_DEACTIVATED");
+        verify(accountSecurityNotifier).accountDeactivated(userId);
 
         verify(auditLogService).logAction(
                 eq(actorId),
@@ -240,6 +257,44 @@ class UserServiceTest {
                 eq("USER"),
                 eq(userId.toString()),
                 any());
+    }
+
+    @Test
+    void deactivateUser_adminAccount_throwsProtectedAccountError() {
+        UUID userId = UUID.randomUUID();
+        UserAccount admin = createTestAccount(
+                "protected_admin", "Protected Admin", UserRole.ADMIN, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(admin, "id", userId);
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(admin));
+
+        assertThatThrownBy(() -> userService.deactivateUser(userId, actorJwt))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).errorCode())
+                .isEqualTo(ErrorCode.ADMIN_ACCOUNT_PROTECTED);
+
+        assertThat(admin.getStatus()).isEqualTo(AccountStatus.ACTIVE);
+        verifyNoInteractions(
+                userSessionRevocationService, accountSecurityNotifier, auditLogService);
+    }
+
+    @Test
+    void updateUser_cannotBypassAdminDeactivationProtection() {
+        UUID userId = UUID.randomUUID();
+        UserAccount admin = createTestAccount(
+                "protected_admin_update", "Protected Admin", UserRole.ADMIN, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(admin, "id", userId);
+        UpdateUserRequest request = new UpdateUserRequest(
+                null, "Protected Admin", UserRole.STUDENT, AccountStatus.INACTIVE, null);
+        when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(admin));
+
+        assertThatThrownBy(() -> userService.updateUser(userId, request, actorJwt))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).errorCode())
+                .isEqualTo(ErrorCode.ADMIN_ACCOUNT_PROTECTED);
+
+        assertThat(admin.getStatus()).isEqualTo(AccountStatus.ACTIVE);
+        verifyNoInteractions(
+                userSessionRevocationService, accountSecurityNotifier, auditLogService);
     }
 
     @Test

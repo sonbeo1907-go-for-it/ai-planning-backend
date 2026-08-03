@@ -4,6 +4,7 @@ import com.codegym.aiplanning.entity.auth.AuthSession;
 import com.codegym.aiplanning.entity.auth.AuthSessionStatus;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -19,4 +20,14 @@ public interface AuthSessionRepository extends JpaRepository<AuthSession, UUID> 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select session from AuthSession session where session.id = :id")
     Optional<AuthSession> findByIdForUpdate(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select session from AuthSession session "
+            + "where session.user.id = :userId "
+            + "and session.status = :status "
+            + "and session.expiresAt > :now")
+    List<AuthSession> findAllActiveByUserIdForUpdate(
+            @Param("userId") UUID userId,
+            @Param("status") AuthSessionStatus status,
+            @Param("now") Instant now);
 }

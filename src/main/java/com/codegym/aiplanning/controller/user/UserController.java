@@ -83,6 +83,7 @@ public class UserController {
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Cập nhật thành công"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Dữ liệu cập nhật không hợp lệ"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Không thể vô hiệu hóa tài khoản Admin"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Không tìm thấy người dùng")
     })
     public ApiResponse<UserResponse> updateUser(
@@ -94,9 +95,13 @@ public class UserController {
     }
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "Vô hiệu hóa tài khoản người dùng (Soft disable)", description = "Chuyển trạng thái tài khoản thành INACTIVE thay vì xóa cứng khỏi CSDL.")
+    @Operation(
+            summary = "Vô hiệu hóa tài khoản người dùng (Soft disable)",
+            description = "Chuyển tài khoản không phải Admin thành INACTIVE, thu hồi toàn bộ "
+                    + "phiên đăng nhập và refresh token thay vì xóa cứng khỏi CSDL.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Vô hiệu hóa tài khoản thành công"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Không thể vô hiệu hóa tài khoản Admin"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Không tìm thấy người dùng")
     })
     public ApiResponse<UserResponse> deactivateUser(

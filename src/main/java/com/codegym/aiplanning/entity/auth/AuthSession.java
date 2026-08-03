@@ -58,6 +58,10 @@ public class AuthSession extends BaseEntity {
         return revokedAt;
     }
 
+    public String getRevokeReason() {
+        return revokeReason;
+    }
+
     public boolean isActive(Instant now) {
         return status == AuthSessionStatus.ACTIVE && expiresAt.isAfter(now);
     }

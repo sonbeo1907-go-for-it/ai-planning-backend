@@ -10,8 +10,11 @@ import com.codegym.aiplanning.controller.user.dto.UserSearchParam;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserAccount;
+import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
+import com.codegym.aiplanning.service.auth.AccountSecurityNotifier;
+import com.codegym.aiplanning.service.auth.UserSessionRevocationService;
 import com.codegym.aiplanning.service.user.UserService;
 import jakarta.persistence.criteria.Predicate;
 import java.util.ArrayList;
@@ -27,21 +30,31 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class UserServiceImpl implements UserService {
 
+    private static final String ACCOUNT_DEACTIVATED_REASON = "ACCOUNT_DEACTIVATED";
+
     private final UserAccountRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuditLogService auditLogService;
+    private final UserSessionRevocationService userSessionRevocationService;
+    private final AccountSecurityNotifier accountSecurityNotifier;
 
     public UserServiceImpl(
             UserAccountRepository userRepository,
             PasswordEncoder passwordEncoder,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            UserSessionRevocationService userSessionRevocationService,
+            AccountSecurityNotifier accountSecurityNotifier) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.auditLogService = auditLogService;
+        this.userSessionRevocationService = userSessionRevocationService;
+        this.accountSecurityNotifier = accountSecurityNotifier;
     }
 
     @Override
@@ -125,12 +138,16 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public UserResponse updateUser(UUID id, UpdateUserRequest request, Jwt actorJwt) {
-        UserAccount account = userRepository
-                .findById(id)
+        UserAccount account = (request.status() == AccountStatus.INACTIVE
+                        ? userRepository.findByIdForUpdate(id)
+                        : userRepository.findById(id))
                 .orElseThrow(() ->
                         new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "User not found with id: " + id));
 
         AccountStatus oldStatus = account.getStatus();
+        if (request.status() == AccountStatus.INACTIVE) {
+            ensureAdminAccountIsNotDeactivated(account, request.role());
+        }
         if (request.email() != null && !request.email().isBlank()) {
             String normalizedEmail = normalizeEmail(request.email());
             if (!account.getEmail().equals(normalizedEmail)
@@ -147,6 +164,11 @@ public class UserServiceImpl implements UserService {
         }
 
         UserAccount updated = userRepository.save(account);
+        if (oldStatus != AccountStatus.INACTIVE
+                && updated.getStatus() == AccountStatus.INACTIVE) {
+            userSessionRevocationService.revokeAllActiveSessions(
+                    updated.getId(), ACCOUNT_DEACTIVATED_REASON);
+        }
 
         AuditEventAction action = (oldStatus != updated.getStatus())
                 ? AuditEventAction.USER_STATUS_CHANGED
@@ -160,6 +182,11 @@ public class UserServiceImpl implements UserService {
                 updated.getId().toString(),
                 String.format("Updated user '%s', role='%s', status='%s'", updated.getUsername(), updated.getRole(), updated.getStatus()));
 
+        if (oldStatus != AccountStatus.INACTIVE
+                && updated.getStatus() == AccountStatus.INACTIVE) {
+            notifyAccountDeactivatedAfterCommit(updated.getId());
+        }
+
         return UserResponse.from(updated);
     }
 
@@ -167,12 +194,15 @@ public class UserServiceImpl implements UserService {
     @Transactional
     public UserResponse deactivateUser(UUID id, Jwt actorJwt) {
         UserAccount account = userRepository
-                .findById(id)
+                .findByIdForUpdate(id)
                 .orElseThrow(() ->
                         new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "User not found with id: " + id));
 
+        ensureAdminAccountIsNotDeactivated(account, account.getRole());
         account.deactivate();
         UserAccount updated = userRepository.save(account);
+        int revokedSessionCount = userSessionRevocationService.revokeAllActiveSessions(
+                updated.getId(), ACCOUNT_DEACTIVATED_REASON);
 
         auditLogService.logAction(
                 extractActorId(actorJwt),
@@ -180,7 +210,11 @@ public class UserServiceImpl implements UserService {
                 AuditEventAction.USER_DISABLED,
                 "USER",
                 updated.getId().toString(),
-                String.format("Disabled user account '%s'", updated.getUsername()));
+                String.format(
+                        "Disabled user account '%s' and revoked %d active session(s)",
+                        updated.getUsername(), revokedSessionCount));
+
+        notifyAccountDeactivatedAfterCommit(updated.getId());
 
         return UserResponse.from(updated);
     }
@@ -206,5 +240,29 @@ public class UserServiceImpl implements UserService {
 
     private String normalizeEmail(String email) {
         return email.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private void ensureAdminAccountIsNotDeactivated(
+            UserAccount account, UserRole resultingRole) {
+        if (account.getRole() == UserRole.ADMIN || resultingRole == UserRole.ADMIN) {
+            throw new BusinessException(
+                    ErrorCode.ADMIN_ACCOUNT_PROTECTED,
+                    "Admin accounts cannot be deactivated.");
+        }
+    }
+
+    private void notifyAccountDeactivatedAfterCommit(UUID userId) {
+        Runnable notification = () -> accountSecurityNotifier.accountDeactivated(userId);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(
+                    new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            notification.run();
+                        }
+                    });
+            return;
+        }
+        notification.run();
     }
 }

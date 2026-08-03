@@ -18,6 +18,10 @@ public interface UserAccountRepository
     Optional<UserAccount> findByEmailIgnoreCase(String email);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select account from UserAccount account where account.id = :id")
+    Optional<UserAccount> findByIdForUpdate(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select account from UserAccount account "
             + "where lower(account.username) = lower(:username)")
     Optional<UserAccount> findByUsernameIgnoreCaseForUpdate(@Param("username") String username);

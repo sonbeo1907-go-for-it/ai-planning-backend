@@ -12,8 +12,10 @@ import com.codegym.aiplanning.common.constant.ApiConstant;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.audit.AuditLog;
 import com.codegym.aiplanning.repository.audit.AuditLogRepository;
+import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.Cookie;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +40,9 @@ class UserControllerIntegrationTest {
 
     @Autowired
     private AuditLogRepository auditLogRepository;
+
+    @Autowired
+    private UserAccountRepository userAccountRepository;
 
     private String adminToken;
 
@@ -313,6 +318,82 @@ class UserControllerIntegrationTest {
         mockMvc.perform(get(ApiConstant.USERS)
                         .header("Authorization", "Bearer " + instructorToken))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void deactivateUser_revokesAccessAndRefreshSessionsImmediately() throws Exception {
+        MvcResult createResult = mockMvc.perform(post(ApiConstant.USERS)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username": "deactivation_session_user",
+                                  "email": "deactivation_session_user@example.com",
+                                  "password": "Password@123",
+                                  "fullName": "Deactivation Session User",
+                                  "role": "STUDENT"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String userId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+
+        MvcResult loginResult = mockMvc.perform(post(ApiConstant.AUTH_LOGIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "deactivation_session_user@example.com",
+                                  "password": "Password@123"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        String accessToken = objectMapper.readTree(loginResult.getResponse().getContentAsString())
+                .path("data").path("accessToken").asText();
+        Cookie refreshCookie = loginResult.getResponse().getCookie("refresh_token");
+        assertThat(refreshCookie).isNotNull();
+
+        mockMvc.perform(delete(ApiConstant.USERS + "/" + userId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("INACTIVE"));
+
+        mockMvc.perform(get(ApiConstant.PROFILE)
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post(ApiConstant.AUTH_REFRESH).cookie(refreshCookie))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_SESSION"));
+        mockMvc.perform(post(ApiConstant.AUTH_LOGIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "deactivation_session_user@example.com",
+                                  "password": "Password@123"
+                                }
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
+    }
+
+    @Test
+    void deactivateAdminAccount_isRejectedAndKeepsCurrentSessionActive() throws Exception {
+        String adminId = userAccountRepository
+                .findByEmailIgnoreCase("admin@aiplanning.local")
+                .orElseThrow()
+                .getId()
+                .toString();
+
+        mockMvc.perform(delete(ApiConstant.USERS + "/" + adminId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ADMIN_ACCOUNT_PROTECTED"));
+
+        mockMvc.perform(get(ApiConstant.PROFILE)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"));
     }
 
     @Test
