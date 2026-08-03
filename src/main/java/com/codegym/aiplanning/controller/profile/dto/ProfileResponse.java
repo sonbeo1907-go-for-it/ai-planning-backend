@@ -12,6 +12,7 @@ import java.util.UUID;
 public record ProfileResponse(
         UUID id,
         String username,
+        String email,
         String fullName,
         UserRole role,
         AccountStatus status,
@@ -22,6 +23,7 @@ public record ProfileResponse(
         return new ProfileResponse(
                 account.getId(),
                 account.getUsername(),
+                account.getEmail(),
                 account.getFullName(),
                 account.getRole(),
                 account.getStatus(),

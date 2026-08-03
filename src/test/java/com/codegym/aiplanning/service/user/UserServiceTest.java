@@ -65,7 +65,8 @@ class UserServiceTest {
     }
 
     private UserAccount createTestAccount(String username, String fullName, UserRole role, AccountStatus status) {
-        UserAccount account = UserAccount.create(username, "encoded_pass", fullName, role, status);
+        UserAccount account = UserAccount.create(
+                username, username + "@example.com", "encoded_pass", fullName, role, status);
         ReflectionTestUtils.setField(account, "id", UUID.randomUUID());
         ReflectionTestUtils.setField(account, "createdAt", Instant.now());
         ReflectionTestUtils.setField(account, "updatedAt", Instant.now());
@@ -75,7 +76,12 @@ class UserServiceTest {
     @Test
     void createUser_success_savesAccountAndLogsAudit() {
         CreateUserRequest request = new CreateUserRequest(
-                "student_test", "Password@123", "Student Test", UserRole.STUDENT, AccountStatus.ACTIVE);
+                "student_test",
+                "Student_Test@Example.com",
+                "Password@123",
+                "Student Test",
+                UserRole.STUDENT,
+                AccountStatus.ACTIVE);
 
         when(userRepository.existsByUsernameIgnoreCase("student_test")).thenReturn(false);
         when(passwordEncoder.encode("Password@123")).thenReturn("encodedPassword");
@@ -87,6 +93,7 @@ class UserServiceTest {
 
         assertThat(response).isNotNull();
         assertThat(response.username()).isEqualTo("student_test");
+        assertThat(response.email()).isEqualTo("student_test@example.com");
         assertThat(response.role()).isEqualTo(UserRole.STUDENT);
 
         verify(auditLogService).logAction(
@@ -101,9 +108,33 @@ class UserServiceTest {
     @Test
     void createUser_duplicateUsername_throwsConflictException() {
         CreateUserRequest request = new CreateUserRequest(
-                "existing_user", "Password@123", "Existing User", UserRole.STUDENT, AccountStatus.ACTIVE);
+                "existing_user",
+                "existing@example.com",
+                "Password@123",
+                "Existing User",
+                UserRole.STUDENT,
+                AccountStatus.ACTIVE);
 
         when(userRepository.existsByUsernameIgnoreCase("existing_user")).thenReturn(true);
+
+        assertThatThrownBy(() -> userService.createUser(request, actorJwt))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).errorCode())
+                .isEqualTo(ErrorCode.CONFLICT);
+    }
+
+    @Test
+    void createUser_duplicateEmail_throwsConflictException() {
+        CreateUserRequest request = new CreateUserRequest(
+                "new_user",
+                "existing@example.com",
+                "Password@123",
+                "New User",
+                UserRole.STUDENT,
+                AccountStatus.ACTIVE);
+
+        when(userRepository.existsByUsernameIgnoreCase("new_user")).thenReturn(false);
+        when(userRepository.existsByEmailIgnoreCase("existing@example.com")).thenReturn(true);
 
         assertThatThrownBy(() -> userService.createUser(request, actorJwt))
                 .isInstanceOf(BusinessException.class)
@@ -144,7 +175,8 @@ class UserServiceTest {
         UserAccount existing = createTestAccount("user_update", "Old Name", UserRole.STUDENT, AccountStatus.ACTIVE);
         ReflectionTestUtils.setField(existing, "id", userId);
 
-        UpdateUserRequest updateRequest = new UpdateUserRequest("New Name", UserRole.INSTRUCTOR, AccountStatus.ACTIVE, null);
+        UpdateUserRequest updateRequest = new UpdateUserRequest(
+                null, "New Name", UserRole.INSTRUCTOR, AccountStatus.ACTIVE, null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
         when(userRepository.save(any(UserAccount.class))).thenAnswer(i -> i.getArgument(0));
@@ -169,7 +201,8 @@ class UserServiceTest {
         UserAccount existing = createTestAccount("user_status", "User Name", UserRole.STUDENT, AccountStatus.ACTIVE);
         ReflectionTestUtils.setField(existing, "id", userId);
 
-        UpdateUserRequest updateRequest = new UpdateUserRequest("User Name", UserRole.STUDENT, AccountStatus.LOCKED, null);
+        UpdateUserRequest updateRequest = new UpdateUserRequest(
+                null, "User Name", UserRole.STUDENT, AccountStatus.LOCKED, null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
         when(userRepository.save(any(UserAccount.class))).thenAnswer(i -> i.getArgument(0));

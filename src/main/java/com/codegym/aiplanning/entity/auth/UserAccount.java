@@ -8,6 +8,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Locale;
 
 @Entity
 @Table(name = "user_accounts")
@@ -15,6 +16,9 @@ public class UserAccount extends BaseEntity {
 
     @Column(nullable = false, unique = true, length = 100)
     private String username;
+
+    @Column(nullable = false, unique = true, length = 254)
+    private String email;
 
     @Column(name = "password_hash", nullable = false, length = 100)
     private String passwordHash;
@@ -40,12 +44,14 @@ public class UserAccount extends BaseEntity {
 
     public static UserAccount create(
             String username,
+            String email,
             String passwordHash,
             String fullName,
             UserRole role,
             AccountStatus status) {
         UserAccount account = new UserAccount();
-        account.username = username;
+        account.username = username.trim();
+        account.email = normalizeEmail(email);
         account.passwordHash = passwordHash;
         account.fullName = fullName;
         account.role = role;
@@ -56,6 +62,10 @@ public class UserAccount extends BaseEntity {
 
     public String getUsername() {
         return username;
+    }
+
+    public String getEmail() {
+        return email;
     }
 
     public String getPasswordHash() {
@@ -127,6 +137,12 @@ public class UserAccount extends BaseEntity {
         }
     }
 
+    public void changeEmail(String newEmail) {
+        if (newEmail != null && !newEmail.isBlank()) {
+            this.email = normalizeEmail(newEmail);
+        }
+    }
+
     public void changePassword(String newPasswordHash) {
         if (newPasswordHash != null && !newPasswordHash.isBlank()) {
             this.passwordHash = newPasswordHash;
@@ -142,5 +158,9 @@ public class UserAccount extends BaseEntity {
 
     public void deactivate() {
         this.status = AccountStatus.INACTIVE;
+    }
+
+    private static String normalizeEmail(String email) {
+        return email.trim().toLowerCase(Locale.ROOT);
     }
 }

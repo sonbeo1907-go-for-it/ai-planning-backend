@@ -50,6 +50,7 @@ class ProfileControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(student.getId().toString()))
                 .andExpect(jsonPath("$.data.username").value("profile-student"))
+                .andExpect(jsonPath("$.data.email").value("profile-student@example.com"))
                 .andExpect(jsonPath("$.data.fullName").value("Student Profile"))
                 .andExpect(jsonPath("$.data.role").value("STUDENT"))
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"))
@@ -83,7 +84,8 @@ class ProfileControllerIntegrationTest {
                         .header("Authorization", "Bearer " + accessToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(authenticatedStudent.getId().toString()))
-                .andExpect(jsonPath("$.data.username").value("profile-self"));
+                .andExpect(jsonPath("$.data.username").value("profile-self"))
+                .andExpect(jsonPath("$.data.email").value("profile-self@example.com"));
     }
 
     @Test
@@ -103,6 +105,7 @@ class ProfileControllerIntegrationTest {
         userAccountRepository.findByUsernameIgnoreCase(username).ifPresent(userAccountRepository::delete);
         return userAccountRepository.saveAndFlush(UserAccount.create(
                 username,
+                username + "@example.com",
                 passwordEncoder.encode("Password@123"),
                 fullName,
                 role,
@@ -113,7 +116,9 @@ class ProfileControllerIntegrationTest {
         MvcResult result = mockMvc.perform(post(ApiConstant.AUTH_LOGIN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                java.util.Map.of("username", username, "password", "Password@123"))))
+                                java.util.Map.of(
+                                        "email", username + "@example.com",
+                                        "password", "Password@123"))))
                 .andExpect(status().isOk())
                 .andReturn();
         return objectMapper

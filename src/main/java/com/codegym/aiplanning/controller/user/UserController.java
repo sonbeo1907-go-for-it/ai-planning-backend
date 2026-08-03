@@ -57,7 +57,7 @@ public class UserController {
     }
 
     @GetMapping
-    @Operation(summary = "Lấy danh sách người dùng phân trang & tìm kiếm", description = "Hỗ trợ lọc theo role, status và tìm kiếm từ khóa username/fullName.")
+    @Operation(summary = "Lấy danh sách người dùng phân trang & tìm kiếm", description = "Hỗ trợ lọc theo role, status và tìm kiếm từ khóa username/email/fullName.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Lấy danh sách thành công"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Không có quyền Admin")
@@ -106,4 +106,3 @@ public class UserController {
         return ApiResponse.of(userService.deactivateUser(id, actorJwt));
     }
 }
-

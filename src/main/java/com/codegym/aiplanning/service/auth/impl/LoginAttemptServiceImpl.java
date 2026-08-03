@@ -22,8 +22,8 @@ public class LoginAttemptServiceImpl implements LoginAttemptService {
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void recordFailedLogin(String username) {
-        userAccountRepository.findByUsernameIgnoreCaseForUpdate(username).ifPresent(account ->
+    public void recordFailedLogin(String email) {
+        userAccountRepository.findByEmailIgnoreCaseForUpdate(email).ifPresent(account ->
                 account.recordFailedLogin(
                         Instant.now(), properties.maxAttempts(), properties.blockDuration()));
     }

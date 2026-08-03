@@ -38,7 +38,12 @@ class AdminUserServiceImplTest {
     @BeforeEach
     void setUp() {
         userAccount = UserAccount.create(
-                "testuser", "oldHash", "Test User", UserRole.STUDENT, AccountStatus.ACTIVE);
+                "testuser",
+                "testuser@example.com",
+                "oldHash",
+                "Test User",
+                UserRole.STUDENT,
+                AccountStatus.ACTIVE);
     }
 
     @Test

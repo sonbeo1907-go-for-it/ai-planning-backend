@@ -20,6 +20,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -84,21 +85,21 @@ public class AuthServiceImpl implements AuthService {
 
     @Transactional
     @Override
-    public AuthResult login(String username, String password) {
-        String normalizedUsername = username.trim();
+    public AuthResult login(String email, String password) {
+        String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
         try {
             authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(
-                    normalizedUsername, password));
+                    normalizedEmail, password));
         } catch (AuthenticationException exception) {
-            loginAttemptService.recordFailedLogin(normalizedUsername);
+            loginAttemptService.recordFailedLogin(normalizedEmail);
             throw new BusinessException(
-                    ErrorCode.INVALID_CREDENTIALS, "Invalid username or password.");
+                    ErrorCode.INVALID_CREDENTIALS, "Invalid email or password.");
         }
 
         UserAccount account = userAccountRepository
-                .findByUsernameIgnoreCaseForUpdate(normalizedUsername)
+                .findByEmailIgnoreCaseForUpdate(normalizedEmail)
                 .orElseThrow(() -> new BusinessException(
-                        ErrorCode.INVALID_CREDENTIALS, "Invalid username or password."));
+                        ErrorCode.INVALID_CREDENTIALS, "Invalid email or password."));
         account.clearLoginFailures();
 
         Instant now = Instant.now();
@@ -229,6 +230,7 @@ public class AuthServiceImpl implements AuthService {
                 .claim("typ", "access")
                 .claim("sid", sessionId.toString())
                 .claim("uid", account.getId().toString())
+                .claim("email", account.getEmail())
                 .claim("preferred_username", account.getUsername())
                 .claim("full_name", account.getFullName())
                 .claim("roles", List.of(role))

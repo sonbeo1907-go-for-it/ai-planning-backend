@@ -6,7 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 @Schema(description = "Tham số tìm kiếm và phân trang người dùng")
 public record UserSearchParam(
-        @Schema(description = "Từ khóa tìm kiếm theo username hoặc họ tên", example = "student")
+        @Schema(description = "Từ khóa tìm kiếm theo username, email hoặc họ tên", example = "student")
         String search,
 
         @Schema(description = "Lọc theo vai trò (STUDENT, INSTRUCTOR, ADMIN)", example = "STUDENT")
@@ -29,4 +29,3 @@ public record UserSearchParam(
         return size != null && size > 0 && size <= 100 ? size : 10;
     }
 }
-

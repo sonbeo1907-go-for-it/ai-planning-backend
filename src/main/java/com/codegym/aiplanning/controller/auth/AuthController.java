@@ -46,7 +46,7 @@ public class AuthController {
     @SecurityRequirements
     @Operation(
             summary = "Log in",
-            description = "Authenticates an active internal account, creates a 14-day session, "
+            description = "Authenticates an active internal account by email, creates a 14-day session, "
                     + "returns a 15-minute access JWT and sets the rotated refresh token as an "
                     + "HttpOnly cookie.")
     @ApiResponses({
@@ -71,7 +71,7 @@ public class AuthController {
     })
     public ResponseEntity<ApiResponse<TokenResponse>> login(
             @Valid @RequestBody LoginRequest request) {
-        AuthResult result = authService.login(request.username(), request.password());
+        AuthResult result = authService.login(request.email(), request.password());
         return tokenResponse(result);
     }
 

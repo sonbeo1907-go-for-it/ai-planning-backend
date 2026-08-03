@@ -2,7 +2,7 @@
 
 ## Scope
 
-The MVP uses internal accounts. An administrator creates accounts and resets
+The MVP uses internal accounts identified for login by email. An administrator creates accounts and resets
 passwords. Authentication uses short-lived access JWTs and database-backed,
 rotated refresh tokens. SSO and self-service password recovery remain outside
 the current baseline.
@@ -34,16 +34,17 @@ Content-Type: application/json
 
 ```json
 {
-  "username": "admin",
+  "email": "admin@aiplanning.local",
   "password": "Admin@123"
 }
 ```
 
 Validation:
 
-- `username` is required and at most 100 characters.
+- `email` is required, must be a valid email address and is at most 254 characters.
 - `password` is required and at most 200 characters.
-- The username lookup is case-insensitive.
+- Email lookup is case-insensitive. Email values are normalized to lowercase before storage and authentication.
+- `username` remains a unique internal/display identifier but is no longer accepted by the login endpoint.
 
 ### Successful response
 
@@ -67,6 +68,7 @@ The access JWT contains:
 - unique access-token ID in `jti`;
 - login-session ID in `sid`;
 - token purpose `typ=access`;
+- normalized login email in `email`;
 - username in `preferred_username`;
 - display name in `full_name`;
 - authorities in `roles`;
@@ -100,14 +102,14 @@ when a token expires.
 
 ### Failure response
 
-Invalid credentials, inactive accounts, locked accounts and unknown usernames
+Invalid credentials, inactive accounts, locked accounts and unknown emails
 must not expose different messages to the client.
 
 ```json
 {
   "status": 401,
   "code": "INVALID_CREDENTIALS",
-  "message": "Invalid username or password.",
+  "message": "Invalid email or password.",
   "path": "/api/v1/auth/login",
   "requestId": "<request-id>"
 }
@@ -200,6 +202,7 @@ Authorization: Bearer <access-token>
   "data": {
     "id": "<uuid>",
     "username": "admin",
+    "email": "admin@aiplanning.local",
     "fullName": "System Administrator",
     "role": "ADMIN",
     "status": "ACTIVE"
@@ -207,7 +210,8 @@ Authorization: Bearer <access-token>
 }
 ```
 
-`username` is the user code issued by the center. The endpoint always derives
+`email` is the primary login identifier. `username` is retained temporarily as
+the user code/display identifier issued by the center. The endpoint always derives
 the account from the authenticated JWT subject; it accepts no user ID, so a
 client cannot retrieve another user's profile by changing a URL or request.
 
@@ -276,11 +280,26 @@ neither the endpoint path nor its self-service authorization model changes.
 
 Role and data-scope authorization must be enforced by the backend.
 
+## Email migration (AUTH-06)
+
+Flyway migration `V5__add_email_login_identifier.sql` adds a non-null, unique,
+lowercase `email` column. Existing accounts are backfilled as
+`<lowercase-username>@legacy.local`; these placeholder addresses must be
+replaced with real addresses through account management. The local bootstrap
+Admin is created with `BOOTSTRAP_ADMIN_EMAIL`, defaulting to
+`admin@aiplanning.local`. On an existing local database, the local seeder updates
+the bootstrap Admin's placeholder address to the configured email.
+
+New accounts require both a unique email and the temporarily retained unique
+username. User-management responses and the current-profile response expose both.
+
 ## Required tests
 
-- Active account can log in.
+- Active account can log in by email.
+- Email login is case-insensitive and the legacy username login payload is rejected.
+- Duplicate account emails are rejected.
 - Wrong password returns the generic authentication error.
-- Unknown username returns the same generic error.
+- Unknown email returns the same generic error.
 - Locked and inactive accounts cannot log in.
 - An active account is temporarily blocked after the configured number of
   consecutive failures.

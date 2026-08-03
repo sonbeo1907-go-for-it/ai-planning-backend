@@ -12,8 +12,11 @@ public record UserResponse(
         @Schema(description = "ID định danh UUID của người dùng", example = "a8c6cae3-cd19-425c-a4c1-a2ed63290854")
         UUID id,
 
-        @Schema(description = "Tên/Mã đăng nhập", example = "student_01")
+        @Schema(description = "Mã người dùng nội bộ/hiển thị", example = "student_01")
         String username,
+
+        @Schema(description = "Email đăng nhập", example = "student01@example.com")
+        String email,
 
         @Schema(description = "Họ và tên người dùng", example = "Nguyen Van A")
         String fullName,
@@ -34,6 +37,7 @@ public record UserResponse(
         return new UserResponse(
                 account.getId(),
                 account.getUsername(),
+                account.getEmail(),
                 account.getFullName(),
                 account.getRole(),
                 account.getStatus(),
@@ -41,4 +45,3 @@ public record UserResponse(
                 account.getUpdatedAt());
     }
 }
-

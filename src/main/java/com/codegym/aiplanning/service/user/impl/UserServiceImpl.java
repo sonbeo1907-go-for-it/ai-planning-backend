@@ -16,6 +16,7 @@ import com.codegym.aiplanning.service.user.UserService;
 import jakarta.persistence.criteria.Predicate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -46,14 +47,21 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public UserResponse createUser(CreateUserRequest request, Jwt actorJwt) {
-        if (userRepository.existsByUsernameIgnoreCase(request.username())) {
+        String username = request.username().trim();
+        String email = normalizeEmail(request.email());
+        if (userRepository.existsByUsernameIgnoreCase(username)) {
             throw new BusinessException(
-                    ErrorCode.CONFLICT, "Username already exists: " + request.username());
+                    ErrorCode.CONFLICT, "Username already exists: " + username);
+        }
+        if (userRepository.existsByEmailIgnoreCase(email)) {
+            throw new BusinessException(
+                    ErrorCode.CONFLICT, "Email already exists: " + email);
         }
 
         String passwordHash = passwordEncoder.encode(request.password());
         UserAccount account = UserAccount.create(
-                request.username().trim(),
+                username,
+                email,
                 passwordHash,
                 request.fullName().trim(),
                 request.role(),
@@ -84,8 +92,9 @@ public class UserServiceImpl implements UserService {
             if (param.search() != null && !param.search().isBlank()) {
                 String searchLike = "%" + param.search().trim().toLowerCase() + "%";
                 Predicate usernameMatch = cb.like(cb.lower(root.get("username")), searchLike);
+                Predicate emailMatch = cb.like(cb.lower(root.get("email")), searchLike);
                 Predicate fullNameMatch = cb.like(cb.lower(root.get("fullName")), searchLike);
-                predicates.add(cb.or(usernameMatch, fullNameMatch));
+                predicates.add(cb.or(usernameMatch, emailMatch, fullNameMatch));
             }
 
             if (param.role() != null) {
@@ -122,6 +131,15 @@ public class UserServiceImpl implements UserService {
                         new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "User not found with id: " + id));
 
         AccountStatus oldStatus = account.getStatus();
+        if (request.email() != null && !request.email().isBlank()) {
+            String normalizedEmail = normalizeEmail(request.email());
+            if (!account.getEmail().equals(normalizedEmail)
+                    && userRepository.existsByEmailIgnoreCase(normalizedEmail)) {
+                throw new BusinessException(
+                        ErrorCode.CONFLICT, "Email already exists: " + normalizedEmail);
+            }
+            account.changeEmail(normalizedEmail);
+        }
         account.updateProfile(request.fullName(), request.role(), request.status());
 
         if (request.password() != null && !request.password().isBlank()) {
@@ -184,5 +202,9 @@ public class UserServiceImpl implements UserService {
             return username;
         }
         return jwt.getSubject() != null ? jwt.getSubject() : "anonymous";
+    }
+
+    private String normalizeEmail(String email) {
+        return email.trim().toLowerCase(Locale.ROOT);
     }
 }

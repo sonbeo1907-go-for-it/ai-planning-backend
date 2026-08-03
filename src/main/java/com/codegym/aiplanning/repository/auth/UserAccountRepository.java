@@ -15,10 +15,19 @@ public interface UserAccountRepository
 
     Optional<UserAccount> findByUsernameIgnoreCase(String username);
 
+    Optional<UserAccount> findByEmailIgnoreCase(String email);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select account from UserAccount account "
             + "where lower(account.username) = lower(:username)")
     Optional<UserAccount> findByUsernameIgnoreCaseForUpdate(@Param("username") String username);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select account from UserAccount account "
+            + "where lower(account.email) = lower(:email)")
+    Optional<UserAccount> findByEmailIgnoreCaseForUpdate(@Param("email") String email);
+
     boolean existsByUsernameIgnoreCase(String username);
+
+    boolean existsByEmailIgnoreCase(String email);
 }

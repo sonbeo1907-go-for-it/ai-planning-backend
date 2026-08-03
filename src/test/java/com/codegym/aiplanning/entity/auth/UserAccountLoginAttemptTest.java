@@ -12,6 +12,7 @@ class UserAccountLoginAttemptTest {
     void expiredTemporaryBlockStartsANewFailureWindow() {
         UserAccount account = UserAccount.create(
                 "student",
+                "student@example.com",
                 "password-hash",
                 "Student",
                 UserRole.STUDENT,

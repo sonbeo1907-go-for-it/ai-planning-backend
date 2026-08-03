@@ -81,7 +81,7 @@ class AuthControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "username": "admin",
+                                  "email": "admin@aiplanning.local",
                                   "password": "Admin@123"
                                 }
                                 """))
@@ -105,12 +105,15 @@ class AuthControllerIntegrationTest {
         org.assertj.core.api.Assertions.assertThat(jwt.getClaimAsString("sid")).isNotBlank();
         org.assertj.core.api.Assertions.assertThat(jwt.getClaimAsString("typ"))
                 .isEqualTo("access");
+        org.assertj.core.api.Assertions.assertThat(jwt.getClaimAsString("email"))
+                .isEqualTo("admin@aiplanning.local");
         org.assertj.core.api.Assertions.assertThat(jwt.getExpiresAt())
                 .isEqualTo(jwt.getIssuedAt().plusSeconds(900));
 
         mockMvc.perform(get(ApiConstant.PROFILE).header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.username").value("admin"))
+                .andExpect(jsonPath("$.data.email").value("admin@aiplanning.local"))
                 .andExpect(jsonPath("$.data.role").value("ADMIN"))
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"))
                 .andExpect(jsonPath("$.status").doesNotExist())
@@ -231,6 +234,14 @@ class AuthControllerIntegrationTest {
                         .at("/paths/~1api~1v1~1auth~1logout/post/responses/204")
                         .isMissingNode())
                 .isFalse();
+        org.assertj.core.api.Assertions.assertThat(document
+                        .at("/components/schemas/LoginRequest/properties/email")
+                        .isMissingNode())
+                .isFalse();
+        org.assertj.core.api.Assertions.assertThat(document
+                        .at("/components/schemas/LoginRequest/properties/username")
+                        .isMissingNode())
+                .isTrue();
 
         JsonNode logoutSecurity =
                 document.at("/paths/~1api~1v1~1auth~1logout/post/security");
@@ -244,7 +255,29 @@ class AuthControllerIntegrationTest {
         login("admin", "wrong-password")
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
-                .andExpect(jsonPath("$.message").value("Invalid username or password."));
+                .andExpect(jsonPath("$.message").value("Invalid email or password."));
+    }
+
+    @Test
+    void loginEmailLookupIsCaseInsensitive() throws Exception {
+        mockMvc.perform(post(ApiConstant.AUTH_LOGIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(java.util.Map.of(
+                                "email", "ADMIN@AIPLANNING.LOCAL",
+                                "password", "Admin@123"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void legacyUsernameLoginPayloadIsRejected() throws Exception {
+        mockMvc.perform(post(ApiConstant.AUTH_LOGIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(java.util.Map.of(
+                                "username", "admin",
+                                "password", "Admin@123"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.violations[?(@.field == 'email')]").exists());
     }
 
     @Test
@@ -341,26 +374,26 @@ class AuthControllerIntegrationTest {
         login("locked-user", "Password@123")
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
-                .andExpect(jsonPath("$.message").value("Invalid username or password."));
+                .andExpect(jsonPath("$.message").value("Invalid email or password."));
         login("inactive-user", "Password@123")
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
-                .andExpect(jsonPath("$.message").value("Invalid username or password."));
+                .andExpect(jsonPath("$.message").value("Invalid email or password."));
     }
 
     @Test
-    void unknownUsernameReceivesGenericAuthenticationFailure() throws Exception {
+    void unknownEmailReceivesGenericAuthenticationFailure() throws Exception {
         login("missing-user", "Password@123")
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
-                .andExpect(jsonPath("$.message").value("Invalid username or password."));
+                .andExpect(jsonPath("$.message").value("Invalid email or password."));
     }
 
     private ResultActions login(String username, String password) throws Exception {
         return mockMvc.perform(post(ApiConstant.AUTH_LOGIN)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(
-                        java.util.Map.of("username", username, "password", password))));
+                        java.util.Map.of("email", loginEmail(username), "password", password))));
     }
 
     private LoginSession loginSuccessfully() throws Exception {
@@ -381,10 +414,17 @@ class AuthControllerIntegrationTest {
         userAccountRepository.findByUsernameIgnoreCase(username).ifPresent(userAccountRepository::delete);
         userAccountRepository.saveAndFlush(UserAccount.create(
                 username,
+                loginEmail(username),
                 passwordEncoder.encode("Password@123"),
                 username,
                 UserRole.STUDENT,
                 status));
+    }
+
+    private String loginEmail(String username) {
+        return "admin".equals(username)
+                ? "admin@aiplanning.local"
+                : username + "@example.com";
     }
     private void assertStandardApiError(MvcResult result, int status, String code) throws Exception {
         JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());

@@ -47,7 +47,7 @@ class UserControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "username": "admin",
+                                  "email": "admin@aiplanning.local",
                                   "password": "Admin@123"
                                 }
                                 """))
@@ -66,6 +66,7 @@ class UserControllerIntegrationTest {
                         .content("""
                                 {
                                   "username": "student_create_test",
+                                  "email": "student_create_test@example.com",
                                   "password": "Password@123",
                                   "fullName": "Student Create Test",
                                   "role": "STUDENT"
@@ -73,6 +74,7 @@ class UserControllerIntegrationTest {
                                 """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.username").value("student_create_test"))
+                .andExpect(jsonPath("$.data.email").value("student_create_test@example.com"))
                 .andExpect(jsonPath("$.data.fullName").value("Student Create Test"))
                 .andExpect(jsonPath("$.data.role").value("STUDENT"))
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"))
@@ -114,8 +116,27 @@ class UserControllerIntegrationTest {
                         .content("""
                                 {
                                   "username": "admin",
+                                  "email": "duplicate-admin@example.com",
                                   "password": "Password@123",
                                   "fullName": "Duplicate Admin",
+                                  "role": "ADMIN"
+                                }
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CONFLICT"));
+    }
+
+    @Test
+    void createUser_duplicateEmail_returnsConflict() throws Exception {
+        mockMvc.perform(post(ApiConstant.USERS)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username": "different_admin_code",
+                                  "email": "ADMIN@AIPLANNING.LOCAL",
+                                  "password": "Password@123",
+                                  "fullName": "Duplicate Admin Email",
                                   "role": "ADMIN"
                                 }
                                 """))
@@ -143,6 +164,7 @@ class UserControllerIntegrationTest {
                         .content("""
                                 {
                                   "username": "instructor_flow_test",
+                                  "email": "instructor_flow_test@example.com",
                                   "password": "Password@123",
                                   "fullName": "Instructor Original",
                                   "role": "INSTRUCTOR"
@@ -160,13 +182,15 @@ class UserControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
+                                  "email": "instructor_updated@example.com",
                                   "fullName": "Instructor Updated",
                                   "role": "INSTRUCTOR",
                                   "status": "ACTIVE"
                                 }
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.fullName").value("Instructor Updated"));
+                .andExpect(jsonPath("$.data.fullName").value("Instructor Updated"))
+                .andExpect(jsonPath("$.data.email").value("instructor_updated@example.com"));
 
         // Verify Audit log for UPDATE
         List<AuditLog> auditLogsAfterUpdate = auditLogRepository.findAll();
@@ -216,6 +240,7 @@ class UserControllerIntegrationTest {
                         .content("""
                                 {
                                   "username": "student_rbac_user",
+                                  "email": "student_rbac_user@example.com",
                                   "password": "Password@123",
                                   "fullName": "Student RBAC",
                                   "role": "STUDENT"
@@ -229,6 +254,7 @@ class UserControllerIntegrationTest {
                         .content("""
                                 {
                                   "username": "instructor_rbac_user",
+                                  "email": "instructor_rbac_user@example.com",
                                   "password": "Password@123",
                                   "fullName": "Instructor RBAC",
                                   "role": "INSTRUCTOR"
@@ -241,7 +267,7 @@ class UserControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "username": "student_rbac_user",
+                                  "email": "student_rbac_user@example.com",
                                   "password": "Password@123"
                                 }
                                 """))
@@ -255,7 +281,7 @@ class UserControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "username": "instructor_rbac_user",
+                                  "email": "instructor_rbac_user@example.com",
                                   "password": "Password@123"
                                 }
                                 """))
@@ -275,6 +301,7 @@ class UserControllerIntegrationTest {
                         .content("""
                                 {
                                   "username": "unauthorized_user",
+                                  "email": "unauthorized_user@example.com",
                                   "password": "Password@123",
                                   "fullName": "Unauthorized User",
                                   "role": "STUDENT"

@@ -59,12 +59,13 @@ The `local` profile creates one development-only administrator when the
 database is empty:
 
 ```text
-username: admin
+email: admin@aiplanning.local
+internal username: admin
 password: Admin@123
 ```
 
-Change these values with `BOOTSTRAP_ADMIN_USERNAME` and
-`BOOTSTRAP_ADMIN_PASSWORD`. Local bootstrap is disabled by default outside the
+Change these values with `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_USERNAME`
+and `BOOTSTRAP_ADMIN_PASSWORD`. Local bootstrap is disabled by default outside the
 `local` and `test` profiles.
 
 ## Login example
@@ -72,7 +73,7 @@ Change these values with `BOOTSTRAP_ADMIN_USERNAME` and
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"Admin@123"}'
+  -d '{"email":"admin@aiplanning.local","password":"Admin@123"}'
 ```
 
 Use the returned token:
@@ -114,6 +115,8 @@ Do not commit `.env`.
 | `REDIS_TIMEOUT` | Redis connection timeout |
 | `LOGIN_MAX_ATTEMPTS` | Consecutive failed logins before temporary blocking |
 | `LOGIN_BLOCK_DURATION` | Temporary login block as an ISO-8601 duration |
+| `BOOTSTRAP_ADMIN_EMAIL` | Local bootstrap Admin login email |
+| `BOOTSTRAP_ADMIN_USERNAME` | Local bootstrap Admin internal/display identifier |
 | `CORS_ALLOWED_ORIGINS` | Frontend origin list |
 | `SERVER_PORT` | HTTP port, default `8080` |
 

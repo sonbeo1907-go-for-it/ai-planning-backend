@@ -32,5 +32,6 @@ app:
     admin:
       enabled: true
       username: admin
+      email: admin@aiplanning.local
       password: Admin@123
       full-name: Test Administrator

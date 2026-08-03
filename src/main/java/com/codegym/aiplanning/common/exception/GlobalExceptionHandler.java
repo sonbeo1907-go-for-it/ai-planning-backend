@@ -71,7 +71,7 @@ public class GlobalExceptionHandler {
         return build(
                 HttpStatus.UNAUTHORIZED,
                 ErrorCode.INVALID_CREDENTIALS.name(),
-                "Invalid username or password.",
+                "Invalid email or password.",
                 request,
                 List.of());
     }

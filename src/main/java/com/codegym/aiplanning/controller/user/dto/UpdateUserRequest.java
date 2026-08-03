@@ -3,12 +3,18 @@ package com.codegym.aiplanning.controller.user.dto;
 import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserRole;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 @Schema(description = "Thông tin cập nhật tài khoản người dùng")
 public record UpdateUserRequest(
+        @Schema(description = "Email đăng nhập mới (duy nhất; bỏ qua nếu không thay đổi)", example = "student01@example.com")
+        @Email(message = "Email must be valid")
+        @Size(max = 254, message = "Email must not exceed 254 characters")
+        String email,
+
         @Schema(description = "Họ và tên mới", example = "Nguyen Van B", requiredMode = Schema.RequiredMode.REQUIRED)
         @NotBlank(message = "Full name is required")
         @Size(max = 150, message = "Full name must not exceed 150 characters")
@@ -25,4 +31,3 @@ public record UpdateUserRequest(
         @Schema(description = "Mật khẩu mới (Tùy chọn, để trống nếu không đổi mật khẩu)", example = "NewPassword@123")
         @Size(min = 6, max = 100, message = "Password must be between 6 and 100 characters if provided")
         String password) {}
-
