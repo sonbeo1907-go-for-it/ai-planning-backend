@@ -11,6 +11,7 @@ public final class ApiConstant {
     public static final String AUTH_LOGIN = AUTH + LOGIN;
     public static final String AUTH_REFRESH = AUTH + REFRESH;
     public static final String AUTH_LOGOUT = AUTH + LOGOUT;
+    public static final String AUTH_PASSWORD_RESET_REQUEST = AUTH + "/password-reset-request";
     public static final String PROFILE = API_V1 + "/profile";
 
     public static final String USERS = API_V1 + "/users";

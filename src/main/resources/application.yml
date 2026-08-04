@@ -52,6 +52,8 @@ springdoc:
     path: /v3/api-docs
 
 app:
+  frontend:
+    url: ${FRONTEND_URL:http://localhost:3000}
   security:
     jwt:
       issuer: ai-planning-backend

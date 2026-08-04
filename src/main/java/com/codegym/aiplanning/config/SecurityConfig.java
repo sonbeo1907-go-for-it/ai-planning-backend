@@ -64,6 +64,7 @@ public class SecurityConfig {
                                 ApiConstant.AUTH_LOGIN,
                                 ApiConstant.AUTH_REFRESH,
                                 ApiConstant.AUTH_LOGOUT,
+                                ApiConstant.AUTH_PASSWORD_RESET_REQUEST,
                                 "/actuator/health",
                                 "/v3/api-docs/**",
                                 "/swagger-ui.html",
