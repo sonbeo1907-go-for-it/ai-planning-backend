@@ -13,6 +13,10 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 public interface UserAccountRepository
         extends JpaRepository<UserAccount, UUID>, JpaSpecificationExecutor<UserAccount> {
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select account from UserAccount account where account.id = :id")
+    Optional<UserAccount> findByIdForUpdate(@Param("id") UUID id);
+
     Optional<UserAccount> findByUsernameIgnoreCase(String username);
 
     Optional<UserAccount> findByEmailIgnoreCase(String email);

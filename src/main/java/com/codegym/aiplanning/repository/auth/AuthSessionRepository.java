@@ -19,4 +19,10 @@ public interface AuthSessionRepository extends JpaRepository<AuthSession, UUID> 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select session from AuthSession session where session.id = :id")
     Optional<AuthSession> findByIdForUpdate(@Param("id") UUID id);
+
+    @Query("select session from AuthSession session where session.user.id = :userId and session.status = :status and session.id != :sessionId")
+    java.util.List<AuthSession> findActiveSessionsExcept(
+            @Param("userId") UUID userId,
+            @Param("status") AuthSessionStatus status,
+            @Param("sessionId") UUID sessionId);
 }
