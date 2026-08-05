@@ -26,6 +26,17 @@ import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import com.codegym.aiplanning.common.validation.password.PasswordPolicyValidator;
+import com.codegym.aiplanning.service.auth.AuthService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 class PasswordResetServiceImplTest {
@@ -48,6 +59,15 @@ class PasswordResetServiceImplTest {
     @Mock
     private AuditLogService auditLogService;
 
+    @Mock
+    private PasswordEncoder passwordEncoder;
+
+    @Mock
+    private PasswordPolicyValidator passwordPolicyValidator;
+
+    @Mock
+    private AuthService authService;
+
     @Captor
     private ArgumentCaptor<PasswordResetToken> tokenCaptor;
 
@@ -64,7 +84,10 @@ class PasswordResetServiceImplTest {
                 rateLimiter,
                 tokenCodec,
                 eventPublisher,
-                auditLogService);
+                auditLogService,
+                passwordEncoder,
+                passwordPolicyValidator,
+                authService);
     }
 
     @Test
@@ -132,6 +155,7 @@ class PasswordResetServiceImplTest {
         UUID userId = UUID.randomUUID();
         UserAccount user = mock(UserAccount.class);
         when(user.getId()).thenReturn(userId);
+        when(user.getEmail()).thenReturn(email);
 
         when(rateLimiter.isAllowedByIp(ipAddress)).thenReturn(true);
         when(rateLimiter.isAllowedByEmail(email)).thenReturn(true);
@@ -159,7 +183,7 @@ class PasswordResetServiceImplTest {
         // 3. Logs audit action
         verify(auditLogService).logAction(
                 eq(userId),
-                isNull(),
+                eq(email),
                 eq(AuditEventAction.PASSWORD_RESET_REQUESTED),
                 eq("PasswordResetToken"),
                 anyString(),

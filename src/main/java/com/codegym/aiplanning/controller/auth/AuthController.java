@@ -9,6 +9,7 @@ import com.codegym.aiplanning.service.auth.AuthService;
 import com.codegym.aiplanning.service.auth.PasswordResetService;
 import com.codegym.aiplanning.service.auth.model.AuthResult;
 import com.codegym.aiplanning.controller.auth.dto.PasswordResetRequest;
+import com.codegym.aiplanning.controller.auth.dto.PasswordResetConfirmRequest;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import io.swagger.v3.oas.annotations.Operation;
@@ -189,6 +190,29 @@ public class AuthController {
         passwordResetService.requestPasswordReset(request.email(), ipAddress, resetUrlPrefix);
         
         return ResponseEntity.ok(ApiResponse.of("If an account with that email exists, a password reset link has been sent."));
+    }
+
+    @PostMapping("/password-reset")
+    @SecurityRequirements // Make it public
+    @Operation(
+            summary = "Complete a password reset",
+            description = "Validates the reset token and updates the user's password. All other active sessions and refresh tokens will be revoked.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "Password reset successfully",
+                content = @Content(schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "400",
+                description = "Invalid or expired token, or invalid new password",
+                content = @Content(schema = @Schema(implementation = com.codegym.aiplanning.common.api.ApiError.class)))
+    })
+    public ResponseEntity<ApiResponse<Void>> resetPassword(
+            @Valid @RequestBody PasswordResetConfirmRequest request) {
+        
+        passwordResetService.resetPassword(request.token(), request.newPassword());
+        
+        return ResponseEntity.ok(ApiResponse.of(null));
     }
 
     private ResponseEntity<ApiResponse<TokenResponse>> tokenResponse(AuthResult result) {
