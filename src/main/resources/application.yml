@@ -68,6 +68,11 @@ app:
     login-attempts:
       max-attempts: ${LOGIN_MAX_ATTEMPTS:5}
       block-duration: ${LOGIN_BLOCK_DURATION:PT15M}
+    google:
+      enabled: ${GOOGLE_AUTH_ENABLED:false}
+      client-id: ${GOOGLE_CLIENT_ID:}
+      issuer: https://accounts.google.com
+      jwk-set-uri: https://www.googleapis.com/oauth2/v3/certs
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
   bootstrap:

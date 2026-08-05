@@ -20,7 +20,7 @@ public class UserAccount extends BaseEntity {
     @Column(nullable = false, unique = true, length = 254)
     private String email;
 
-    @Column(name = "password_hash", nullable = false, length = 100)
+    @Column(name = "password_hash", length = 100)
     private String passwordHash;
 
     @Column(name = "full_name", nullable = false, length = 150)

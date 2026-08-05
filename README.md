@@ -94,8 +94,8 @@ curl -X POST http://localhost:8080/api/v1/auth/logout \
 
 ## Environment variables
 
-Copy `.env.example` when Docker Compose environment customization is needed.
-Do not commit `.env`.
+Copy `.env.example` to `.env` for local Spring/Docker Compose configuration.
+The `local` profile loads this optional file. Do not commit `.env`.
 
 | Variable | Purpose |
 |---|---|
@@ -115,6 +115,8 @@ Do not commit `.env`.
 | `REDIS_TIMEOUT` | Redis connection timeout |
 | `LOGIN_MAX_ATTEMPTS` | Consecutive failed logins before temporary blocking |
 | `LOGIN_BLOCK_DURATION` | Temporary login block as an ISO-8601 duration |
+| `GOOGLE_AUTH_ENABLED` | Enable `POST /api/v1/auth/google`; default `false` |
+| `GOOGLE_CLIENT_ID` | Google OAuth Web Client ID used as the ID-token audience |
 | `BOOTSTRAP_ADMIN_EMAIL` | Local bootstrap Admin login email |
 | `BOOTSTRAP_ADMIN_USERNAME` | Local bootstrap Admin internal/display identifier |
 | `CORS_ALLOWED_ORIGINS` | Frontend origin list |
@@ -122,6 +124,10 @@ Do not commit `.env`.
 
 Production must provide database credentials and a strong random JWT secret.
 Do not rely on values in `application-local.yml`.
+
+Google login configuration and frontend request details are documented in
+[`specs/google-auth-setup.md`](specs/google-auth-setup.md). Google login does not
+require an API key or client secret when using the ID-token endpoint.
 
 ## Verify changes
 

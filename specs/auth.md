@@ -2,10 +2,10 @@
 
 ## Scope
 
-The MVP uses internal accounts identified for login by email. An administrator creates accounts and resets
-passwords. Authentication uses short-lived access JWTs and database-backed,
-rotated refresh tokens. SSO and self-service password recovery remain outside
-the current baseline.
+The MVP supports internal email/password accounts and Google identities.
+Authentication uses short-lived access JWTs and database-backed, rotated
+refresh tokens. Both login methods issue the same application session pair.
+Self-service password recovery remains outside the current baseline.
 
 ## API constants
 
@@ -14,9 +14,11 @@ the current baseline.
 | `ApiConstant.API_V1` | `/api/v1` |
 | `ApiConstant.AUTH` | `/api/v1/auth` |
 | `ApiConstant.LOGIN` | `/login` |
+| `ApiConstant.GOOGLE_LOGIN` | `/google` |
 | `ApiConstant.REFRESH` | `/refresh` |
 | `ApiConstant.LOGOUT` | `/logout` |
 | `ApiConstant.AUTH_LOGIN` | `/api/v1/auth/login` |
+| `ApiConstant.AUTH_GOOGLE_LOGIN` | `/api/v1/auth/google` |
 | `ApiConstant.AUTH_REFRESH` | `/api/v1/auth/refresh` |
 | `ApiConstant.AUTH_LOGOUT` | `/api/v1/auth/logout` |
 | `ApiConstant.PROFILE` | `/api/v1/profile` |
@@ -116,6 +118,49 @@ must not expose different messages to the client.
 ```
 
 Passwords and access tokens must never be written to logs.
+
+## Google login (AUTH-13)
+
+### Endpoint
+
+```http
+POST /api/v1/auth/google
+Content-Type: application/json
+```
+
+```json
+{
+  "idToken": "<Google Identity Services credential>"
+}
+```
+
+The frontend obtains the ID token from Google Identity Services. The backend
+validates its Google signature, expiry, issuer, audience, subject, email and
+`email_verified=true`. `GOOGLE_CLIENT_ID` is the required audience. Google
+`sub`, rather than email, is the stable external identity key.
+
+On first login, the backend creates:
+
+- an `ACTIVE` local `UserAccount` with role `STUDENT`, the verified Google email,
+  a generated internal username and a null password hash;
+- an `auth_identities` row with provider `GOOGLE`, Google `sub`, provider email
+  and the local user ID;
+- the same local access JWT, refresh cookie and 14-day session used by internal
+  login.
+
+A returning Google identity signs in to the previously linked local account.
+Inactive or locked accounts receive `401 INVALID_GOOGLE_CREDENTIAL`. A Google
+email matching an existing local account is never linked automatically; the
+endpoint returns `409 GOOGLE_ACCOUNT_LINK_REQUIRED`. Explicit account linking
+belongs to AUTH-14.
+
+Google-only accounts cannot use `/auth/login` until a local password is set by
+the future Change Password flow. Setting a password does not remove the Google
+identity, so both methods can subsequently authenticate the same account.
+
+Google authentication is disabled by default. Configure it through
+`GOOGLE_AUTH_ENABLED=true` and `GOOGLE_CLIENT_ID`; see
+`specs/google-auth-setup.md`.
 
 ## Refresh rotation
 
