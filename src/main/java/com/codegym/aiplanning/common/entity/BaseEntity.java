@@ -52,6 +52,10 @@ public abstract class BaseEntity {
         return version;
     }
 
+    public void setVersion(long version) {
+        this.version = version;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }

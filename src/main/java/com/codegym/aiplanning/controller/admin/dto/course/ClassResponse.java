@@ -17,7 +17,8 @@ public record ClassResponse(
         Instant createdAt,
         Instant updatedAt,
         UUID createdBy,
-        UUID updatedBy
+        UUID updatedBy,
+        long version
 ) {
     public static ClassResponse from(StudyClass studyClass) {
         return new ClassResponse(
@@ -32,7 +33,8 @@ public record ClassResponse(
                 studyClass.getCreatedAt(),
                 studyClass.getUpdatedAt(),
                 studyClass.getCreatedBy(),
-                studyClass.getUpdatedBy()
+                studyClass.getUpdatedBy(),
+                studyClass.getVersion()
         );
     }
 }

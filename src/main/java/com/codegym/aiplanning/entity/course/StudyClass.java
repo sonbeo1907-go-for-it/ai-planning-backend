@@ -81,13 +81,16 @@ public class StudyClass extends BaseEntity {
         return closedAt;
     }
 
-    public void update(String name, String description, ClassStatus status) {
+    public void updateInfo(String name, String description, Instant openedAt, Instant closedAt) {
         if (name != null && !name.isBlank()) {
             this.name = name.trim();
         }
-        if (description != null) {
-            this.description = description;
-        }
+        this.description = description;
+        this.openedAt = openedAt;
+        this.closedAt = closedAt;
+    }
+
+    public void changeStatus(ClassStatus status) {
         if (status != null && this.status != status) {
             this.status = status;
             if (status == ClassStatus.ACTIVE && this.openedAt == null) {

@@ -4,5 +4,7 @@ public enum AuditEventAction {
     USER_CREATED,
     USER_UPDATED,
     USER_STATUS_CHANGED,
-    USER_DISABLED
+    USER_DISABLED,
+    CREATE_CLASS,
+    UPDATE_CLASS
 }

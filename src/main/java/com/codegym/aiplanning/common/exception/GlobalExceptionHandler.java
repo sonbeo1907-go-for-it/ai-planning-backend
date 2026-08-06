@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -95,6 +96,18 @@ public class GlobalExceptionHandler {
                 HttpStatus.CONFLICT,
                 ErrorCode.CONFLICT.name(),
                 "The operation conflicts with existing data.",
+                request,
+                List.of());
+    }
+
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    ResponseEntity<ApiError> handleOptimisticLocking(
+            ObjectOptimisticLockingFailureException exception, HttpServletRequest request) {
+        log.warn("Optimistic locking failure", exception);
+        return build(
+                HttpStatus.CONFLICT,
+                ErrorCode.CONFLICT.name(),
+                "Dữ liệu đã bị thay đổi bởi người khác. Vui lòng tải lại trang và thử lại.",
                 request,
                 List.of());
     }
