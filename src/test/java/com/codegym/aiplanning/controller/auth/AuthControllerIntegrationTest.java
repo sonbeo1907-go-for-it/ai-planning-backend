@@ -122,6 +122,88 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    void registerCreatesAnActiveStudentThatCanLogIn() throws Exception {
+        String email = "register-" + UUID.randomUUID() + "@example.com";
+        String password = "Password@123";
+
+        MvcResult registration = mockMvc.perform(post(ApiConstant.AUTH_REGISTER)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(registrationPayload(email, password, "New Student")))
+                .andExpect(status().isAccepted())
+                .andReturn();
+
+        org.assertj.core.api.Assertions.assertThat(
+                        registration.getResponse().getContentAsString())
+                .isEmpty();
+
+        UserAccount account = userAccountRepository
+                .findByEmailIgnoreCase(email.toUpperCase())
+                .orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(account.getUsername())
+                .startsWith("student_");
+        org.assertj.core.api.Assertions.assertThat(account.getFullName())
+                .isEqualTo("New Student");
+        org.assertj.core.api.Assertions.assertThat(account.getRole())
+                .isEqualTo(UserRole.STUDENT);
+        org.assertj.core.api.Assertions.assertThat(account.getStatus())
+                .isEqualTo(AccountStatus.ACTIVE);
+        org.assertj.core.api.Assertions.assertThat(passwordEncoder.matches(password, account.getPasswordHash()))
+                .isTrue();
+
+        mockMvc.perform(post(ApiConstant.AUTH_LOGIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(java.util.Map.of(
+                                "email", email.toUpperCase(),
+                                "password", password))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void registerDoesNotDiscloseThatAnEmailAlreadyExists() throws Exception {
+        String email = "duplicate-register-" + UUID.randomUUID() + "@example.com";
+        String originalPassword = "Password@123";
+        String replacementPassword = "Replacement@456";
+
+        MvcResult firstRegistration = mockMvc.perform(post(ApiConstant.AUTH_REGISTER)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(registrationPayload(email, originalPassword, "First Student")))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        UserAccount originalAccount = userAccountRepository.findByEmailIgnoreCase(email).orElseThrow();
+
+        MvcResult duplicateRegistration = mockMvc.perform(post(ApiConstant.AUTH_REGISTER)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(registrationPayload(email.toUpperCase(), replacementPassword, "Other Student")))
+                .andExpect(status().isAccepted())
+                .andReturn();
+
+        org.assertj.core.api.Assertions.assertThat(
+                        duplicateRegistration.getResponse().getContentAsString())
+                .isEqualTo(firstRegistration.getResponse().getContentAsString());
+
+        UserAccount unchangedAccount = userAccountRepository.findByEmailIgnoreCase(email).orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(unchangedAccount.getId())
+                .isEqualTo(originalAccount.getId());
+        org.assertj.core.api.Assertions.assertThat(
+                        passwordEncoder.matches(originalPassword, unchangedAccount.getPasswordHash()))
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(
+                        passwordEncoder.matches(replacementPassword, unchangedAccount.getPasswordHash()))
+                .isFalse();
+    }
+
+    @Test
+    void registerValidatesThePasswordPolicy() throws Exception {
+        mockMvc.perform(post(ApiConstant.AUTH_REGISTER)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(registrationPayload(
+                                "weak-password@example.com", "password", "New Student")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.violations[?(@.field == 'password')]").exists());
+    }
+
+    @Test
     void logoutRevokesCurrentSessionAndClearsRefreshCookie() throws Exception {
         LoginSession login = loginSuccessfully();
 
@@ -234,6 +316,15 @@ class AuthControllerIntegrationTest {
                         .at("/paths/~1api~1v1~1auth~1logout/post/responses/204")
                         .isMissingNode())
                 .isFalse();
+        org.assertj.core.api.Assertions.assertThat(document
+                        .at("/paths/~1api~1v1~1auth~1register/post/responses/202")
+                        .isMissingNode())
+                .isFalse();
+        org.assertj.core.api.Assertions.assertThat(document
+                        .at("/paths/~1api~1v1~1auth~1register/post/requestBody/content/"
+                                + "application~1json/schema/$ref")
+                        .asText())
+                .isEqualTo("#/components/schemas/RegisterRequest");
         org.assertj.core.api.Assertions.assertThat(document
                         .at("/components/schemas/LoginRequest/properties/email")
                         .isMissingNode())
@@ -394,6 +485,13 @@ class AuthControllerIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(
                         java.util.Map.of("email", loginEmail(username), "password", password))));
+    }
+
+    private String registrationPayload(String email, String password, String fullName) throws Exception {
+        return objectMapper.writeValueAsString(java.util.Map.of(
+                "email", email,
+                "password", password,
+                "fullName", fullName));
     }
 
     private LoginSession loginSuccessfully() throws Exception {

@@ -2,10 +2,11 @@
 
 ## Scope
 
-The MVP uses internal accounts identified for login by email. An administrator creates accounts and resets
-passwords. Authentication uses short-lived access JWTs and database-backed,
-rotated refresh tokens. SSO and self-service password recovery remain outside
-the current baseline.
+The MVP uses internal accounts identified for login by email. A user can
+self-register a local Student account, while an administrator can create and
+manage other account types. Authentication uses short-lived access JWTs and
+database-backed, rotated refresh tokens. SSO and self-service password recovery
+remain outside the current baseline.
 
 ## API constants
 
@@ -14,12 +15,64 @@ the current baseline.
 | `ApiConstant.API_V1` | `/api/v1` |
 | `ApiConstant.AUTH` | `/api/v1/auth` |
 | `ApiConstant.LOGIN` | `/login` |
+| `ApiConstant.REGISTER` | `/register` |
 | `ApiConstant.REFRESH` | `/refresh` |
 | `ApiConstant.LOGOUT` | `/logout` |
 | `ApiConstant.AUTH_LOGIN` | `/api/v1/auth/login` |
+| `ApiConstant.AUTH_REGISTER` | `/api/v1/auth/register` |
 | `ApiConstant.AUTH_REFRESH` | `/api/v1/auth/refresh` |
 | `ApiConstant.AUTH_LOGOUT` | `/api/v1/auth/logout` |
 | `ApiConstant.PROFILE` | `/api/v1/profile` |
+
+## Local self-registration (AUTH-12)
+
+### Endpoint
+
+```http
+POST /api/v1/auth/register
+Content-Type: application/json
+```
+
+This is a public endpoint; it requires no access token.
+
+### Request
+
+```json
+{
+  "email": "student@example.com",
+  "password": "Password@123",
+  "fullName": "Nguyen Van A"
+}
+```
+
+Validation:
+
+- `email` is required, must be valid and is at most 254 characters.
+- `fullName` is required and is at most 150 characters.
+- `password` is required, is 8-100 characters, and contains at least one
+  uppercase letter, lowercase letter and digit.
+
+For a valid request, the backend normalizes the email, hashes the password
+with BCrypt, generates the retained internal `username`, and creates an
+`ACTIVE` account with the `STUDENT` role. Clients cannot supply a role, status
+or username.
+
+### Response and email-enumeration protection
+
+Every valid request returns the same response, including when the email is
+already registered:
+
+```http
+HTTP/1.1 202 Accepted
+```
+
+The response has no body and does not issue a login session. The client should
+show a generic acknowledgement and direct the user to the normal login flow.
+Returning the same status and empty body prevents the API from revealing
+whether an account is associated with an email. Invalid request fields still
+return the standard `400 VALIDATION_FAILED` envelope.
+
+Passwords must never be written to logs.
 
 ## Login
 
@@ -354,6 +407,11 @@ the fail-safe when the real-time connection is unavailable.
 ## Required tests
 
 - Active account can log in by email.
+- A public registration request creates an `ACTIVE` `STUDENT` account with a
+  hashed password, and that account can log in.
+- Duplicate local-registration requests receive the same acknowledgement and
+  do not modify the existing account.
+- Registration enforces the password policy.
 - Email login is case-insensitive and the legacy username login payload is rejected.
 - Duplicate account emails are rejected.
 - Admin accounts cannot be deactivated through DELETE or status update.

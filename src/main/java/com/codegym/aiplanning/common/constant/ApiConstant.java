@@ -6,9 +6,11 @@ public final class ApiConstant {
 
     public static final String AUTH = API_V1 + "/auth";
     public static final String LOGIN = "/login";
+    public static final String REGISTER = "/register";
     public static final String REFRESH = "/refresh";
     public static final String LOGOUT = "/logout";
     public static final String AUTH_LOGIN = AUTH + LOGIN;
+    public static final String AUTH_REGISTER = AUTH + REGISTER;
     public static final String AUTH_REFRESH = AUTH + REFRESH;
     public static final String AUTH_LOGOUT = AUTH + LOGOUT;
     public static final String PROFILE = API_V1 + "/profile";

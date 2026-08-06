@@ -6,7 +6,9 @@ import com.codegym.aiplanning.config.AuthSessionProperties;
 import com.codegym.aiplanning.config.JwtProperties;
 import com.codegym.aiplanning.entity.auth.AuthSession;
 import com.codegym.aiplanning.entity.auth.RefreshToken;
+import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserAccount;
+import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.repository.auth.AuthSessionRepository;
 import com.codegym.aiplanning.repository.auth.RefreshTokenRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
@@ -34,9 +36,11 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.dao.DataIntegrityViolationException;
 
 @Service
 public class AuthServiceImpl implements AuthService {
@@ -55,6 +59,7 @@ public class AuthServiceImpl implements AuthService {
     private final JwtProperties jwtProperties;
     private final AuthSessionProperties sessionProperties;
     private final TransactionTemplate transactionTemplate;
+    private final PasswordEncoder passwordEncoder;
 
     public AuthServiceImpl(
             AuthenticationManager authenticationManager,
@@ -68,7 +73,8 @@ public class AuthServiceImpl implements AuthService {
             JwtDecoder jwtDecoder,
             JwtProperties jwtProperties,
             AuthSessionProperties sessionProperties,
-            TransactionTemplate transactionTemplate) {
+            TransactionTemplate transactionTemplate,
+            PasswordEncoder passwordEncoder) {
         this.authenticationManager = authenticationManager;
         this.userAccountRepository = userAccountRepository;
         this.authSessionRepository = authSessionRepository;
@@ -81,6 +87,33 @@ public class AuthServiceImpl implements AuthService {
         this.jwtProperties = jwtProperties;
         this.sessionProperties = sessionProperties;
         this.transactionTemplate = transactionTemplate;
+        this.passwordEncoder = passwordEncoder;
+    }
+
+    @Override
+    public void register(String email, String password, String fullName) {
+        String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
+        String passwordHash = passwordEncoder.encode(password);
+
+        try {
+            transactionTemplate.executeWithoutResult(status -> {
+                if (userAccountRepository.existsByEmailIgnoreCase(normalizedEmail)) {
+                    return;
+                }
+
+                UserAccount account = UserAccount.create(
+                        generatedStudentUsername(),
+                        normalizedEmail,
+                        passwordHash,
+                        fullName.trim(),
+                        UserRole.STUDENT,
+                        AccountStatus.ACTIVE);
+                userAccountRepository.saveAndFlush(account);
+            });
+        } catch (DataIntegrityViolationException exception) {
+            // A concurrent registration can win the unique-email race. Return the same
+            // successful acknowledgement so that this endpoint cannot enumerate emails.
+        }
     }
 
     @Transactional
@@ -286,6 +319,10 @@ public class AuthServiceImpl implements AuthService {
     private BusinessException invalidSession() {
         return new BusinessException(
                 ErrorCode.INVALID_SESSION, "The login session is invalid or expired.");
+    }
+
+    private String generatedStudentUsername() {
+        return "student_" + UUID.randomUUID().toString().replace("-", "");
     }
 
     private record AccessCredential(UUID sessionId, String tokenId, Instant expiresAt) {}

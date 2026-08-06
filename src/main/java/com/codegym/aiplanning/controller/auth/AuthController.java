@@ -4,6 +4,7 @@ import com.codegym.aiplanning.common.api.ApiResponse;
 import com.codegym.aiplanning.common.constant.ApiConstant;
 import com.codegym.aiplanning.config.AuthSessionProperties;
 import com.codegym.aiplanning.controller.auth.dto.LoginRequest;
+import com.codegym.aiplanning.controller.auth.dto.RegisterRequest;
 import com.codegym.aiplanning.controller.auth.dto.TokenResponse;
 import com.codegym.aiplanning.service.auth.AuthService;
 import com.codegym.aiplanning.service.auth.model.AuthResult;
@@ -20,6 +21,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.time.Duration;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CookieValue;
@@ -27,11 +29,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping(ApiConstant.AUTH)
-@Tag(name = "Authentication", description = "Login, refresh-token rotation and logout")
+@Tag(name = "Authentication", description = "Registration, login, refresh-token rotation and logout")
 public class AuthController {
 
     private final AuthService authService;
@@ -40,6 +43,28 @@ public class AuthController {
     public AuthController(AuthService authService, AuthSessionProperties sessionProperties) {
         this.authService = authService;
         this.sessionProperties = sessionProperties;
+    }
+
+    @PostMapping(ApiConstant.REGISTER)
+    @SecurityRequirements
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @Operation(
+            summary = "Register a local Student account",
+            description = "Creates an ACTIVE account with the STUDENT role and a generated internal "
+                    + "username. To prevent email enumeration, every valid request receives the "
+                    + "same response whether or not the submitted email is already registered.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "202",
+                description = "Registration request accepted without disclosing email availability"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "400",
+                description = "Request validation failed",
+                content = @Content(schema = @Schema(implementation =
+                        com.codegym.aiplanning.common.api.ApiError.class)))
+    })
+    public void register(@Valid @RequestBody RegisterRequest request) {
+        authService.register(request.email(), request.password(), request.fullName());
     }
 
     @PostMapping(ApiConstant.LOGIN)

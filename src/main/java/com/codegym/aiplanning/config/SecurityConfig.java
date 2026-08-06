@@ -62,6 +62,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 ApiConstant.AUTH_LOGIN,
+                                ApiConstant.AUTH_REGISTER,
                                 ApiConstant.AUTH_REFRESH,
                                 ApiConstant.AUTH_LOGOUT,
                                 ApiConstant.ACCOUNT_EVENTS,
