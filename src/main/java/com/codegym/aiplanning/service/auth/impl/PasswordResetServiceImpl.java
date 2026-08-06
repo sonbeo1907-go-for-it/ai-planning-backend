@@ -8,6 +8,9 @@ import com.codegym.aiplanning.entity.auth.PasswordResetToken;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.repository.auth.PasswordResetTokenRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import com.codegym.aiplanning.common.validation.password.PasswordPolicyValidator;
+import com.codegym.aiplanning.service.auth.AuthService;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.auth.PasswordResetRateLimiter;
 import com.codegym.aiplanning.service.auth.PasswordResetService;
@@ -30,6 +33,9 @@ public class PasswordResetServiceImpl implements PasswordResetService {
     private final RefreshTokenCodec tokenCodec; // reused for generating/hashing 32 bytes SecureRandom
     private final ApplicationEventPublisher eventPublisher;
     private final AuditLogService auditLogService;
+    private final PasswordEncoder passwordEncoder;
+    private final PasswordPolicyValidator passwordPolicyValidator;
+    private final AuthService authService;
 
     public PasswordResetServiceImpl(
             UserAccountRepository userAccountRepository,
@@ -37,13 +43,19 @@ public class PasswordResetServiceImpl implements PasswordResetService {
             PasswordResetRateLimiter rateLimiter,
             RefreshTokenCodec tokenCodec,
             ApplicationEventPublisher eventPublisher,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            PasswordEncoder passwordEncoder,
+            PasswordPolicyValidator passwordPolicyValidator,
+            AuthService authService) {
         this.userAccountRepository = userAccountRepository;
         this.tokenRepository = tokenRepository;
         this.rateLimiter = rateLimiter;
         this.tokenCodec = tokenCodec;
         this.eventPublisher = eventPublisher;
         this.auditLogService = auditLogService;
+        this.passwordEncoder = passwordEncoder;
+        this.passwordPolicyValidator = passwordPolicyValidator;
+        this.authService = authService;
     }
 
     @Transactional
@@ -104,5 +116,42 @@ public class PasswordResetServiceImpl implements PasswordResetService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    @Transactional
+    @Override
+    public void resetPassword(String rawToken, String newPassword) {
+        // 1. Validate password policy
+        passwordPolicyValidator.validate(newPassword);
+
+        // 2. Hash token and find it
+        String tokenHash = tokenCodec.hash(rawToken);
+        PasswordResetToken token = tokenRepository.findByTokenHashForUpdate(tokenHash)
+                .orElseThrow(() -> new BusinessException(ErrorCode.VALIDATION_FAILED, "Liên kết không hợp lệ hoặc không tồn tại."));
+
+        Instant now = Instant.now();
+        if (!token.isUsable(now)) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "Liên kết đã hết hạn hoặc đã được sử dụng.");
+        }
+
+        // 3. Update User Password
+        UserAccount user = token.getUser();
+        user.changePassword(passwordEncoder.encode(newPassword));
+
+        // 4. Mark Token as Used
+        token.markAsUsed(now);
+
+        // 5. Revoke all sessions & refresh tokens
+        authService.revokeOtherSessions(user.getId(), null);
+
+        // 6. Audit Log
+        auditLogService.logAction(
+                user.getId(),
+                user.getEmail(),
+                AuditEventAction.PASSWORD_CHANGED,
+                "UserAccount",
+                user.getId().toString(),
+                "Password reset via email token."
+        );
     }
 }

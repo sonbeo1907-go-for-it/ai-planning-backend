@@ -6,6 +6,18 @@ spring:
     username: ${DB_USERNAME:ai_planning}
     password: ${DB_PASSWORD:ai_planning_local}
 
+  mail:
+    host: smtp.resend.com
+    port: 587
+    username: resend
+    password: ${RESEND_API_KEY:re_RESEND_API_KEY}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
 app:
   security:
     jwt:
