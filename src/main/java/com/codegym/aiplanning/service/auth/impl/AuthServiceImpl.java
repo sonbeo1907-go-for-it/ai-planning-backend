@@ -100,9 +100,13 @@ public class AuthServiceImpl implements AuthService {
                 .findByEmailIgnoreCaseForUpdate(normalizedEmail)
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.INVALID_CREDENTIALS, "Invalid email or password."));
+        Instant now = Instant.now();
+        if (!account.isActive() || account.isLocked() || account.isLoginBlocked(now)) {
+            throw new BusinessException(
+                    ErrorCode.INVALID_CREDENTIALS, "Invalid email or password.");
+        }
         account.clearLoginFailures();
 
-        Instant now = Instant.now();
         AuthSession session = authSessionRepository.saveAndFlush(
                 AuthSession.create(account, now.plus(sessionProperties.absoluteExpiration())));
         String rawRefreshToken = refreshTokenCodec.generate();

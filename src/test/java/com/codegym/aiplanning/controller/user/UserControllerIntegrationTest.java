@@ -17,6 +17,7 @@ import com.codegym.aiplanning.repository.audit.AuditLogRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.Cookie;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -80,30 +81,46 @@ class UserControllerIntegrationTest {
     }
 
     @Test
-    void deactivateUser_asAdmin_success_andAuditLogPersisted() throws Exception {
-        // 1. Prepare target user directly in repository
+    void deactivateUser_revokesAccessAndRefreshSessionsImmediately() throws Exception {
         UserAccount targetUser = UserAccount.create(
-                "deactivate_target",
-                "deactivate_target@example.com",
+                "deactivation_session_user",
+                "deactivation_session_user@example.com",
                 passwordEncoder.encode("Password@123"),
-                "Deactivate Target",
+                "Deactivation Session User",
                 UserRole.STUDENT,
-                AccountStatus.ACTIVE
-        );
-        UserAccount savedUser = userRepository.save(targetUser);
+                AccountStatus.ACTIVE);
+        UserAccount savedUser = userRepository.saveAndFlush(targetUser);
         String userId = savedUser.getId().toString();
 
-        // 2. Deactivate user / Soft disable (USER_DISABLED audit log)
+        MvcResult loginResult = mockMvc.perform(post(ApiConstant.AUTH_LOGIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "deactivation_session_user@example.com",
+                                  "password": "Password@123"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        String accessToken = objectMapper.readTree(loginResult.getResponse().getContentAsString())
+                .path("data").path("accessToken").asText();
+        Cookie refreshCookie = loginResult.getResponse().getCookie("refresh_token");
+        assertThat(refreshCookie).isNotNull();
+
         mockMvc.perform(delete(ApiConstant.USERS + "/" + userId)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("INACTIVE"));
 
-        // 3. Verify Audit log for DISABLE
-        List<AuditLog> auditLogsAfterDisable = auditLogRepository.findAll();
-        assertThat(auditLogsAfterDisable).anyMatch(log ->
-                log.getAction() == AuditEventAction.USER_DISABLED &&
-                log.getTargetId().equals(userId));
+        assertThat(auditLogRepository.findAll()).anyMatch(log ->
+                log.getAction() == AuditEventAction.USER_DISABLED
+                        && log.getTargetId().equals(userId));
+        mockMvc.perform(get(ApiConstant.PROFILE)
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post(ApiConstant.AUTH_REFRESH).cookie(refreshCookie))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_SESSION"));
     }
 
     @Test
@@ -114,8 +131,7 @@ class UserControllerIntegrationTest {
                 passwordEncoder.encode("Password@123"),
                 "Activate Target",
                 UserRole.STUDENT,
-                AccountStatus.INACTIVE
-        );
+                AccountStatus.INACTIVE);
         UserAccount savedUser = userRepository.save(targetUser);
         String userId = savedUser.getId().toString();
 
@@ -126,24 +142,40 @@ class UserControllerIntegrationTest {
 
         List<AuditLog> auditLogs = auditLogRepository.findAll();
         assertThat(auditLogs).anyMatch(log ->
-                log.getAction() == AuditEventAction.USER_STATUS_CHANGED &&
-                log.getTargetId().equals(userId));
+                log.getAction() == AuditEventAction.USER_STATUS_CHANGED
+                        && log.getTargetId().equals(userId));
+    }
+
+    @Test
+    void deactivateAdminAccount_isRejectedAndKeepsCurrentSessionActive() throws Exception {
+        String adminId = userRepository
+                .findByEmailIgnoreCase("admin@aiplanning.local")
+                .orElseThrow()
+                .getId()
+                .toString();
+
+        mockMvc.perform(delete(ApiConstant.USERS + "/" + adminId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ADMIN_ACCOUNT_PROTECTED"));
+
+        mockMvc.perform(get(ApiConstant.PROFILE)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"));
     }
 
     @Test
     void rbac_nonAdminRoles_cannotAccessUserManagementEndpoints() throws Exception {
-        // 1. Save Student account directly in DB
         UserAccount student = UserAccount.create(
                 "student_rbac_user",
                 "student_rbac_user@example.com",
                 passwordEncoder.encode("Password@123"),
                 "Student RBAC",
                 UserRole.STUDENT,
-                AccountStatus.ACTIVE
-        );
+                AccountStatus.ACTIVE);
         userRepository.save(student);
 
-        // 2. Login as Student
         MvcResult studentLogin = mockMvc.perform(post(ApiConstant.AUTH_LOGIN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -157,11 +189,9 @@ class UserControllerIntegrationTest {
         String studentToken = objectMapper.readTree(studentLogin.getResponse().getContentAsString())
                 .path("data").path("accessToken").asText();
 
-        // 3. Verify Student Token fails with 403 Forbidden on User Management APIs
         mockMvc.perform(get(ApiConstant.USERS)
                         .header("Authorization", "Bearer " + studentToken))
                 .andExpect(status().isForbidden());
-
         mockMvc.perform(delete(ApiConstant.USERS + "/" + student.getId())
                         .header("Authorization", "Bearer " + studentToken))
                 .andExpect(status().isForbidden());

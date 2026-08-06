@@ -293,11 +293,74 @@ the bootstrap Admin's placeholder address to the configured email.
 New accounts require both a unique email and the temporarily retained unique
 username. User-management responses and the current-profile response expose both.
 
+## Account deactivation protection (AUTH-07)
+
+Admin accounts cannot be deactivated through either `DELETE /api/v1/users/{id}`
+or a `PUT /api/v1/users/{id}` status transition. Attempts return `409` with
+`ADMIN_ACCOUNT_PROTECTED`; the account and its sessions remain unchanged.
+
+When a non-Admin account becomes `INACTIVE`, the backend locks the account row
+and then, in the same PostgreSQL transaction:
+
+- marks every unexpired `ACTIVE` `auth_session` as `REVOKED` with reason
+  `ACCOUNT_DEACTIVATED`;
+- revokes every refresh token belonging to those sessions;
+- commits the account status and audit log atomically.
+
+After commit, each revoked session `sid` is added to Redis until that session's
+original expiry. A session marker invalidates every access JWT issued for that
+session, so individual access-token `jti` values do not need to be enumerated.
+Protected requests still verify PostgreSQL, which remains authoritative if Redis
+is unavailable. Login re-checks account status while holding the account lock so
+a concurrent login cannot create a surviving session after deactivation.
+
+### Real-time account deactivation event
+
+Authenticated browser clients connect to:
+
+```text
+ws://localhost:8080/ws/account-events
+```
+
+For TLS deployments, use `wss://`. Immediately after the connection opens, the
+client sends its access token in the first WebSocket message (never in the URL):
+
+```json
+{
+  "type": "AUTHENTICATE",
+  "accessToken": "<access-token>"
+}
+```
+
+The token is validated with the same JWT, session, and revocation rules as a
+protected API request. A successful channel authentication returns an
+`AUTHENTICATED` event. After a non-Admin account is deactivated and the database
+transaction commits, every connected browser for that user receives:
+
+```json
+{
+  "type": "ACCOUNT_DEACTIVATED",
+  "code": "ADMIN_DEACTIVATED_ACCOUNT",
+  "message": "Your account has been deactivated.",
+  "timestamp": "2026-08-03T00:00:00Z"
+}
+```
+
+The server then closes the connection with code `4001`. The frontend clears its
+in-memory access token and profile, shows a deactivation notice, and replaces the
+current route with `/login?reason=account-deactivated`. API `401` handling remains
+the fail-safe when the real-time connection is unavailable.
+
 ## Required tests
 
 - Active account can log in by email.
 - Email login is case-insensitive and the legacy username login payload is rejected.
 - Duplicate account emails are rejected.
+- Admin accounts cannot be deactivated through DELETE or status update.
+- Deactivating a non-Admin account invalidates all access and refresh sessions.
+- Revoked session IDs are cached in Redis after the database transaction commits.
+- A connected user receives `ACCOUNT_DEACTIVATED` after commit and the event
+  connection is closed.
 - Wrong password returns the generic authentication error.
 - Unknown email returns the same generic error.
 - Locked and inactive accounts cannot log in.
