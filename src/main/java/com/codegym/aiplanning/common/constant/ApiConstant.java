@@ -24,6 +24,10 @@ public final class ApiConstant {
     public static final String ADMIN_USERS = API_V1 + "/admin/users";
     public static final String CLASSES = API_V1 + "/classes";
     public static final String COURSES = API_V1 + "/courses";
+    public static final String COURSE_COLLECTION = "";
+    public static final String COURSE_BY_ID = "/{courseId}";
+    public static final String COURSE_ACTIVATE = COURSE_BY_ID + "/activate";
+    public static final String COURSE_DEACTIVATE = COURSE_BY_ID + "/deactivate";
     public static final String ENROLLMENTS = API_V1 + "/enrollments";
     public static final String INSTRUCTOR_ASSIGNMENTS = API_V1 + "/instructor-assignments";
 

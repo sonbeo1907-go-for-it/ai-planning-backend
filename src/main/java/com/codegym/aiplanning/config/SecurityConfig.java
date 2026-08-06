@@ -76,6 +76,8 @@ public class SecurityConfig {
                         .permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**")
                         .permitAll()
+                        .requestMatchers(ApiConstant.COURSES, ApiConstant.COURSES + "/**")
+                        .hasRole("ADMIN")
                         .anyRequest()
                         .authenticated())
                 .exceptionHandling(exceptionHandling -> exceptionHandling

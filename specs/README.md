@@ -18,6 +18,7 @@ Recommended files:
 
 ```text
 auth.md
+course.md
 organization.md
 curriculum.md
 weekly-plan.md
