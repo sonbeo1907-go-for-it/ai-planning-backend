@@ -26,8 +26,22 @@ public class AuditLogServiceImpl implements AuditLogService {
             String targetResource,
             String targetId,
             String details) {
+        logAction(actorId, actorUsername, action, targetResource, targetId, details, null, null);
+    }
+
+    @Override
+    @Transactional
+    public void logAction(
+            UUID actorId,
+            String actorUsername,
+            AuditEventAction action,
+            String targetResource,
+            String targetId,
+            String details,
+            String metadata,
+            String requestId) {
         AuditLog auditLog = AuditLog.create(
-                actorId, actorUsername, action, targetResource, targetId, details);
+                actorId, actorUsername, action, targetResource, targetId, details, metadata, requestId);
         auditLogRepository.save(auditLog);
     }
 }

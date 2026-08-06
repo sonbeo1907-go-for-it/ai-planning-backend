@@ -12,4 +12,14 @@ public interface AuditLogService {
             String targetResource,
             String targetId,
             String details);
+
+    void logAction(
+            UUID actorId,
+            String actorUsername,
+            AuditEventAction action,
+            String targetResource,
+            String targetId,
+            String details,
+            String metadata,
+            String requestId);
 }
