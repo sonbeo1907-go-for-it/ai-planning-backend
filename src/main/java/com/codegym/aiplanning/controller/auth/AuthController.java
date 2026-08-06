@@ -8,7 +8,11 @@ import com.codegym.aiplanning.controller.auth.dto.RegisterRequest;
 import com.codegym.aiplanning.controller.auth.dto.GoogleLoginRequest;
 import com.codegym.aiplanning.controller.auth.dto.TokenResponse;
 import com.codegym.aiplanning.service.auth.AuthService;
+import com.codegym.aiplanning.service.auth.PasswordResetService;
 import com.codegym.aiplanning.service.auth.model.AuthResult;
+import com.codegym.aiplanning.controller.auth.dto.PasswordResetRequest;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Value;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
@@ -39,10 +43,15 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final PasswordResetService passwordResetService;
     private final AuthSessionProperties sessionProperties;
 
-    public AuthController(AuthService authService, AuthSessionProperties sessionProperties) {
+    @Value("${app.frontend.url:http://localhost:3000}")
+    private String frontendUrl;
+
+    public AuthController(AuthService authService, PasswordResetService passwordResetService, AuthSessionProperties sessionProperties) {
         this.authService = authService;
+        this.passwordResetService = passwordResetService;
         this.sessionProperties = sessionProperties;
     }
 
@@ -225,6 +234,30 @@ public class AuthController {
         return ResponseEntity.noContent()
                 .header(HttpHeaders.SET_COOKIE, clearRefreshCookie().toString())
                 .build();
+    }
+
+    @PostMapping("/password-reset-request")
+    @SecurityRequirements // Make it public
+    @Operation(
+            summary = "Request a password reset",
+            description = "Accepts an email and always returns a generic response to prevent email enumeration. "
+                    + "If the email exists and passes rate limits, a reset link will be sent.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "Password reset request processed",
+                content = @Content(schema = @Schema(implementation = ApiResponse.class)))
+    })
+    public ResponseEntity<ApiResponse<String>> requestPasswordReset(
+            @Valid @RequestBody PasswordResetRequest request,
+            HttpServletRequest servletRequest) {
+        
+        String ipAddress = servletRequest.getRemoteAddr();
+        String resetUrlPrefix = frontendUrl + "/forgot-password/reset";
+        
+        passwordResetService.requestPasswordReset(request.email(), ipAddress, resetUrlPrefix);
+        
+        return ResponseEntity.ok(ApiResponse.of("If an account with that email exists, a password reset link has been sent."));
     }
 
     private ResponseEntity<ApiResponse<TokenResponse>> tokenResponse(AuthResult result) {

@@ -20,6 +20,7 @@ public enum ErrorCode {
     PASSWORD_POLICY_VIOLATION(HttpStatus.BAD_REQUEST),
     NEW_PASSWORD_MUST_BE_DIFFERENT(HttpStatus.BAD_REQUEST),
     CONFLICT(HttpStatus.CONFLICT),
+    TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR);
 
     private final HttpStatus status;
