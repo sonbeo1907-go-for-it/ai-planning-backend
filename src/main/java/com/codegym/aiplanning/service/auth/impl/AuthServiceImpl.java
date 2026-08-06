@@ -5,14 +5,18 @@ import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.config.AuthSessionProperties;
 import com.codegym.aiplanning.config.JwtProperties;
 import com.codegym.aiplanning.entity.auth.AuthSession;
+import com.codegym.aiplanning.entity.auth.AuthIdentity;
+import com.codegym.aiplanning.entity.auth.AuthProvider;
 import com.codegym.aiplanning.entity.auth.RefreshToken;
 import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
+import com.codegym.aiplanning.repository.auth.AuthIdentityRepository;
 import com.codegym.aiplanning.repository.auth.AuthSessionRepository;
 import com.codegym.aiplanning.repository.auth.RefreshTokenRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.service.auth.AuthService;
+import com.codegym.aiplanning.service.auth.GoogleIdTokenVerifier;
 import com.codegym.aiplanning.service.auth.LoginAttemptService;
 import com.codegym.aiplanning.service.auth.RefreshTokenCodec;
 import com.codegym.aiplanning.service.auth.SessionRevocationStore;
@@ -20,6 +24,10 @@ import com.codegym.aiplanning.service.auth.model.AuthResult;
 import com.codegym.aiplanning.service.auth.model.AuthToken;
 import java.time.Duration;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -49,9 +57,11 @@ public class AuthServiceImpl implements AuthService {
 
     private final AuthenticationManager authenticationManager;
     private final UserAccountRepository userAccountRepository;
+    private final AuthIdentityRepository authIdentityRepository;
     private final AuthSessionRepository authSessionRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final LoginAttemptService loginAttemptService;
+    private final GoogleIdTokenVerifier googleIdTokenVerifier;
     private final RefreshTokenCodec refreshTokenCodec;
     private final SessionRevocationStore revocationStore;
     private final JwtEncoder jwtEncoder;
@@ -64,9 +74,11 @@ public class AuthServiceImpl implements AuthService {
     public AuthServiceImpl(
             AuthenticationManager authenticationManager,
             UserAccountRepository userAccountRepository,
+            AuthIdentityRepository authIdentityRepository,
             AuthSessionRepository authSessionRepository,
             RefreshTokenRepository refreshTokenRepository,
             LoginAttemptService loginAttemptService,
+            GoogleIdTokenVerifier googleIdTokenVerifier,
             RefreshTokenCodec refreshTokenCodec,
             SessionRevocationStore revocationStore,
             JwtEncoder jwtEncoder,
@@ -77,9 +89,11 @@ public class AuthServiceImpl implements AuthService {
             PasswordEncoder passwordEncoder) {
         this.authenticationManager = authenticationManager;
         this.userAccountRepository = userAccountRepository;
+        this.authIdentityRepository = authIdentityRepository;
         this.authSessionRepository = authSessionRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.loginAttemptService = loginAttemptService;
+        this.googleIdTokenVerifier = googleIdTokenVerifier;
         this.refreshTokenCodec = refreshTokenCodec;
         this.revocationStore = revocationStore;
         this.jwtEncoder = jwtEncoder;
@@ -140,16 +154,26 @@ public class AuthServiceImpl implements AuthService {
         }
         account.clearLoginFailures();
 
-        AuthSession session = authSessionRepository.saveAndFlush(
-                AuthSession.create(account, now.plus(sessionProperties.absoluteExpiration())));
-        String rawRefreshToken = refreshTokenCodec.generate();
-        refreshTokenRepository.save(RefreshToken.create(
-                session, refreshTokenCodec.hash(rawRefreshToken), session.getExpiresAt()));
+        return createSession(account, now);
+    }
 
-        return new AuthResult(
-                issueAccessToken(account, session.getId(), now),
-                rawRefreshToken,
-                sessionProperties.absoluteExpiration().toSeconds());
+    @Transactional
+    @Override
+    public AuthResult loginWithGoogle(String idToken) {
+        GoogleIdTokenVerifier.GoogleIdentityClaims claims =
+                googleIdTokenVerifier.verify(idToken);
+
+        UserAccount account = authIdentityRepository
+                .findByProviderAndProviderSubject(AuthProvider.GOOGLE, claims.subject())
+                .map(identity -> userAccountRepository
+                        .findByIdForUpdate(identity.getUser().getId())
+                        .orElseThrow(this::invalidGoogleCredential))
+                .orElseGet(() -> createGoogleAccount(claims));
+
+        if (!account.isActive() || account.isLocked()) {
+            throw invalidGoogleCredential();
+        }
+        return createSession(account, Instant.now());
     }
 
     @Override
@@ -254,6 +278,53 @@ public class AuthServiceImpl implements AuthService {
                 session.getId(), session.getExpiresAt(), session.getUser(), now, nextRawToken);
     }
 
+    private UserAccount createGoogleAccount(
+            GoogleIdTokenVerifier.GoogleIdentityClaims claims) {
+        if (userAccountRepository.existsByEmailIgnoreCase(claims.email())) {
+            throw new BusinessException(
+                    ErrorCode.GOOGLE_ACCOUNT_LINK_REQUIRED,
+                    "An account with this email already exists. Sign in locally to link Google.");
+        }
+
+        UserAccount account = userAccountRepository.saveAndFlush(UserAccount.create(
+                googleUsername(claims.subject()),
+                claims.email(),
+                null,
+                limitLength(claims.fullName(), 150),
+                UserRole.STUDENT,
+                AccountStatus.ACTIVE));
+        authIdentityRepository.save(AuthIdentity.google(
+                account, claims.subject(), claims.email()));
+        return account;
+    }
+
+    private AuthResult createSession(UserAccount account, Instant now) {
+        AuthSession session = authSessionRepository.saveAndFlush(
+                AuthSession.create(account, now.plus(sessionProperties.absoluteExpiration())));
+        String rawRefreshToken = refreshTokenCodec.generate();
+        refreshTokenRepository.save(RefreshToken.create(
+                session, refreshTokenCodec.hash(rawRefreshToken), session.getExpiresAt()));
+
+        return new AuthResult(
+                issueAccessToken(account, session.getId(), now),
+                rawRefreshToken,
+                sessionProperties.absoluteExpiration().toSeconds());
+    }
+
+    private String googleUsername(String subject) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(subject.getBytes(StandardCharsets.UTF_8));
+            return "google_" + HexFormat.of().formatHex(digest, 0, 12);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private String limitLength(String value, int maxLength) {
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
+    }
+
     private AuthToken issueAccessToken(UserAccount account, UUID sessionId, Instant issuedAt) {
         Instant expiresAt = issuedAt.plus(jwtProperties.expiration());
         String role = "ROLE_" + account.getRole().name();
@@ -323,6 +394,12 @@ public class AuthServiceImpl implements AuthService {
 
     private String generatedStudentUsername() {
         return "student_" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private BusinessException invalidGoogleCredential() {
+        return new BusinessException(
+                ErrorCode.INVALID_GOOGLE_CREDENTIAL,
+                "The Google sign-in credential is invalid.");
     }
 
     private record AccessCredential(UUID sessionId, String tokenId, Instant expiresAt) {}

@@ -5,6 +5,7 @@ import com.codegym.aiplanning.common.constant.ApiConstant;
 import com.codegym.aiplanning.config.AuthSessionProperties;
 import com.codegym.aiplanning.controller.auth.dto.LoginRequest;
 import com.codegym.aiplanning.controller.auth.dto.RegisterRequest;
+import com.codegym.aiplanning.controller.auth.dto.GoogleLoginRequest;
 import com.codegym.aiplanning.controller.auth.dto.TokenResponse;
 import com.codegym.aiplanning.service.auth.AuthService;
 import com.codegym.aiplanning.service.auth.model.AuthResult;
@@ -98,6 +99,49 @@ public class AuthController {
             @Valid @RequestBody LoginRequest request) {
         AuthResult result = authService.login(request.email(), request.password());
         return tokenResponse(result);
+    }
+
+    @PostMapping(ApiConstant.GOOGLE_LOGIN)
+    @SecurityRequirements
+    @Operation(
+            summary = "Sign in or register with Google",
+            description = "Validates a Google Identity Services ID token. A previously linked "
+                    + "Google identity signs in to its existing account; a first-time identity "
+                    + "creates an active Student account without a local password. The response "
+                    + "uses the same local access JWT and HttpOnly refresh cookie as email login.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "Google sign-in succeeded",
+                headers = @Header(
+                        name = HttpHeaders.SET_COOKIE,
+                        description = "HttpOnly refresh_token cookie",
+                        schema = @Schema(type = "string"))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "400",
+                description = "Request validation failed",
+                content = @Content(schema = @Schema(implementation =
+                        com.codegym.aiplanning.common.api.ApiError.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "401",
+                description = "Google credential is invalid or its account is inactive/locked",
+                content = @Content(schema = @Schema(implementation =
+                        com.codegym.aiplanning.common.api.ApiError.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "409",
+                description = "A local account already uses the verified Google email and must "
+                        + "be linked explicitly",
+                content = @Content(schema = @Schema(implementation =
+                        com.codegym.aiplanning.common.api.ApiError.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "503",
+                description = "Google authentication has not been configured",
+                content = @Content(schema = @Schema(implementation =
+                        com.codegym.aiplanning.common.api.ApiError.class)))
+    })
+    public ResponseEntity<ApiResponse<TokenResponse>> googleLogin(
+            @Valid @RequestBody GoogleLoginRequest request) {
+        return tokenResponse(authService.loginWithGoogle(request.idToken()));
     }
 
     @PostMapping(ApiConstant.REFRESH)

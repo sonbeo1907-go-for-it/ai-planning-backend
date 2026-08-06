@@ -63,6 +63,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 ApiConstant.AUTH_LOGIN,
                                 ApiConstant.AUTH_REGISTER,
+                                ApiConstant.AUTH_GOOGLE_LOGIN,
                                 ApiConstant.AUTH_REFRESH,
                                 ApiConstant.AUTH_LOGOUT,
                                 ApiConstant.ACCOUNT_EVENTS,
