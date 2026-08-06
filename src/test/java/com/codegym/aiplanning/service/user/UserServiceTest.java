@@ -10,8 +10,7 @@ import static org.mockito.Mockito.when;
 import com.codegym.aiplanning.common.api.PageResponse;
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
-import com.codegym.aiplanning.controller.user.dto.CreateUserRequest;
-import com.codegym.aiplanning.controller.user.dto.UpdateUserRequest;
+import com.codegym.aiplanning.controller.user.dto.UpdateUserRoleRequest;
 import com.codegym.aiplanning.controller.user.dto.UserResponse;
 import com.codegym.aiplanning.controller.user.dto.UserSearchParam;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
@@ -33,7 +32,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -44,9 +42,6 @@ class UserServiceTest {
     private UserAccountRepository userRepository;
 
     @Mock
-    private PasswordEncoder passwordEncoder;
-
-    @Mock
     private AuditLogService auditLogService;
 
     private UserServiceImpl userService;
@@ -55,7 +50,7 @@ class UserServiceTest {
 
     @BeforeEach
     void setUp() {
-        userService = new UserServiceImpl(userRepository, passwordEncoder, auditLogService);
+        userService = new UserServiceImpl(userRepository, auditLogService);
         actorId = UUID.randomUUID();
         actorJwt = Jwt.withTokenValue("token_val")
                 .header("alg", "none")
@@ -71,75 +66,6 @@ class UserServiceTest {
         ReflectionTestUtils.setField(account, "createdAt", Instant.now());
         ReflectionTestUtils.setField(account, "updatedAt", Instant.now());
         return account;
-    }
-
-    @Test
-    void createUser_success_savesAccountAndLogsAudit() {
-        CreateUserRequest request = new CreateUserRequest(
-                "student_test",
-                "Student_Test@Example.com",
-                "Password@123",
-                "Student Test",
-                UserRole.STUDENT,
-                AccountStatus.ACTIVE);
-
-        when(userRepository.existsByUsernameIgnoreCase("student_test")).thenReturn(false);
-        when(passwordEncoder.encode("Password@123")).thenReturn("encodedPassword");
-
-        UserAccount savedAccount = createTestAccount("student_test", "Student Test", UserRole.STUDENT, AccountStatus.ACTIVE);
-        when(userRepository.save(any(UserAccount.class))).thenReturn(savedAccount);
-
-        UserResponse response = userService.createUser(request, actorJwt);
-
-        assertThat(response).isNotNull();
-        assertThat(response.username()).isEqualTo("student_test");
-        assertThat(response.email()).isEqualTo("student_test@example.com");
-        assertThat(response.role()).isEqualTo(UserRole.STUDENT);
-
-        verify(auditLogService).logAction(
-                eq(actorId),
-                eq("admin_user"),
-                eq(AuditEventAction.USER_CREATED),
-                eq("USER"),
-                eq(savedAccount.getId().toString()),
-                any());
-    }
-
-    @Test
-    void createUser_duplicateUsername_throwsConflictException() {
-        CreateUserRequest request = new CreateUserRequest(
-                "existing_user",
-                "existing@example.com",
-                "Password@123",
-                "Existing User",
-                UserRole.STUDENT,
-                AccountStatus.ACTIVE);
-
-        when(userRepository.existsByUsernameIgnoreCase("existing_user")).thenReturn(true);
-
-        assertThatThrownBy(() -> userService.createUser(request, actorJwt))
-                .isInstanceOf(BusinessException.class)
-                .extracting(e -> ((BusinessException) e).errorCode())
-                .isEqualTo(ErrorCode.CONFLICT);
-    }
-
-    @Test
-    void createUser_duplicateEmail_throwsConflictException() {
-        CreateUserRequest request = new CreateUserRequest(
-                "new_user",
-                "existing@example.com",
-                "Password@123",
-                "New User",
-                UserRole.STUDENT,
-                AccountStatus.ACTIVE);
-
-        when(userRepository.existsByUsernameIgnoreCase("new_user")).thenReturn(false);
-        when(userRepository.existsByEmailIgnoreCase("existing@example.com")).thenReturn(true);
-
-        assertThatThrownBy(() -> userService.createUser(request, actorJwt))
-                .isInstanceOf(BusinessException.class)
-                .extracting(e -> ((BusinessException) e).errorCode())
-                .isEqualTo(ErrorCode.CONFLICT);
     }
 
     @Test
@@ -170,20 +96,16 @@ class UserServiceTest {
     }
 
     @Test
-    void updateUser_profileUpdated_logsUserUpdatedAudit() {
+    void updateUserRole_success_updatesRoleAndLogsAudit() {
         UUID userId = UUID.randomUUID();
-        UserAccount existing = createTestAccount("user_update", "Old Name", UserRole.STUDENT, AccountStatus.ACTIVE);
+        UserAccount existing = createTestAccount("user_student", "Student Name", UserRole.STUDENT, AccountStatus.ACTIVE);
         ReflectionTestUtils.setField(existing, "id", userId);
-
-        UpdateUserRequest updateRequest = new UpdateUserRequest(
-                null, "New Name", UserRole.INSTRUCTOR, AccountStatus.ACTIVE, null);
 
         when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
         when(userRepository.save(any(UserAccount.class))).thenAnswer(i -> i.getArgument(0));
 
-        UserResponse response = userService.updateUser(userId, updateRequest, actorJwt);
+        UserResponse response = userService.updateUserRole(userId, new UpdateUserRoleRequest(UserRole.INSTRUCTOR), actorJwt);
 
-        assertThat(response.fullName()).isEqualTo("New Name");
         assertThat(response.role()).isEqualTo(UserRole.INSTRUCTOR);
 
         verify(auditLogService).logAction(
@@ -196,28 +118,17 @@ class UserServiceTest {
     }
 
     @Test
-    void updateUser_statusChanged_logsUserStatusChangedAudit() {
+    void updateUserRole_adminTarget_throwsBadRequest() {
         UUID userId = UUID.randomUUID();
-        UserAccount existing = createTestAccount("user_status", "User Name", UserRole.STUDENT, AccountStatus.ACTIVE);
-        ReflectionTestUtils.setField(existing, "id", userId);
+        UserAccount adminAccount = createTestAccount("admin_target", "Admin Target", UserRole.ADMIN, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(adminAccount, "id", userId);
 
-        UpdateUserRequest updateRequest = new UpdateUserRequest(
-                null, "User Name", UserRole.STUDENT, AccountStatus.LOCKED, null);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(adminAccount));
 
-        when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
-        when(userRepository.save(any(UserAccount.class))).thenAnswer(i -> i.getArgument(0));
-
-        UserResponse response = userService.updateUser(userId, updateRequest, actorJwt);
-
-        assertThat(response.status()).isEqualTo(AccountStatus.LOCKED);
-
-        verify(auditLogService).logAction(
-                eq(actorId),
-                eq("admin_user"),
-                eq(AuditEventAction.USER_STATUS_CHANGED),
-                eq("USER"),
-                eq(userId.toString()),
-                any());
+        assertThatThrownBy(() -> userService.updateUserRole(userId, new UpdateUserRoleRequest(UserRole.INSTRUCTOR), actorJwt))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).errorCode())
+                .isEqualTo(ErrorCode.VALIDATION_FAILED);
     }
 
     @Test
@@ -240,6 +151,42 @@ class UserServiceTest {
                 eq("USER"),
                 eq(userId.toString()),
                 any());
+    }
+
+    @Test
+    void activateUser_success_setsActiveAndClearsFailures() {
+        UUID userId = UUID.randomUUID();
+        UserAccount existing = createTestAccount("user_activate", "Activate Name", UserRole.STUDENT, AccountStatus.INACTIVE);
+        ReflectionTestUtils.setField(existing, "id", userId);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(UserAccount.class))).thenAnswer(i -> i.getArgument(0));
+
+        UserResponse response = userService.activateUser(userId, actorJwt);
+
+        assertThat(response.status()).isEqualTo(AccountStatus.ACTIVE);
+
+        verify(auditLogService).logAction(
+                eq(actorId),
+                eq("admin_user"),
+                eq(AuditEventAction.USER_STATUS_CHANGED),
+                eq("USER"),
+                eq(userId.toString()),
+                any());
+    }
+
+    @Test
+    void deactivateUser_adminTarget_throwsBadRequest() {
+        UUID userId = UUID.randomUUID();
+        UserAccount adminAccount = createTestAccount("admin_target", "Admin Target", UserRole.ADMIN, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(adminAccount, "id", userId);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(adminAccount));
+
+        assertThatThrownBy(() -> userService.deactivateUser(userId, actorJwt))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).errorCode())
+                .isEqualTo(ErrorCode.VALIDATION_FAILED);
     }
 
     @Test
