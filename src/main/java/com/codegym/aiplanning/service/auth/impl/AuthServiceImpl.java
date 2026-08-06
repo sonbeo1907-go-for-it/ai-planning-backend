@@ -257,6 +257,30 @@ public class AuthServiceImpl implements AuthService {
         }
     }
 
+    @Override
+    public void revokeOtherSessions(UUID userId, UUID retainedSessionId) {
+        LogoutResult result = transactionTemplate.execute(status -> {
+            Instant now = Instant.now();
+            Set<RevokedSession> revokedSessions = new LinkedHashSet<>();
+            List<AuthSession> otherSessions = authSessionRepository.findActiveSessionsExcept(
+                    userId, com.codegym.aiplanning.entity.auth.AuthSessionStatus.ACTIVE, retainedSessionId);
+
+            for (AuthSession session : otherSessions) {
+                authSessionRepository.findByIdForUpdate(session.getId()).ifPresent(lockedSession -> {
+                    lockedSession.revoke(now, "PASSWORD_CHANGED");
+                    refreshTokenRepository.revokeAllBySessionId(lockedSession.getId(), now);
+                    revokedSessions.add(new RevokedSession(lockedSession.getId(), lockedSession.getExpiresAt()));
+                });
+            }
+            return new LogoutResult(revokedSessions, now);
+        });
+
+        if (result != null) {
+            result.sessions().forEach(session ->
+                    markSessionRevoked(session.id(), session.expiresAt(), result.revokedAt()));
+        }
+    }
+
     private RotationResult rotate(String tokenHash) {
         RefreshToken current = refreshTokenRepository
                 .findByTokenHashForUpdate(tokenHash)

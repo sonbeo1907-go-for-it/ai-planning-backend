@@ -20,9 +20,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProfileController {
 
     private final ProfileService profileService;
+    private final com.codegym.aiplanning.service.auth.PasswordService passwordService;
 
-    public ProfileController(ProfileService profileService) {
+    public ProfileController(ProfileService profileService, com.codegym.aiplanning.service.auth.PasswordService passwordService) {
         this.profileService = profileService;
+        this.passwordService = passwordService;
     }
 
     @GetMapping
@@ -39,5 +41,18 @@ public class ProfileController {
             })
     public ApiResponse<ProfileResponse> getProfile(@AuthenticationPrincipal Jwt jwt) {
         return ApiResponse.of(profileService.getCurrentProfile(UUID.fromString(jwt.getSubject())));
+    }
+
+    @org.springframework.web.bind.annotation.PutMapping("/password")
+    @Operation(
+            summary = "Đổi mật khẩu của chính mình (AUTH-08)",
+            description = "Người dùng xác nhận mật khẩu hiện tại và đổi sang mật khẩu mới. Thu hồi tất cả các phiên đăng nhập khác.")
+    public ApiResponse<Void> changePassword(
+            @jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody com.codegym.aiplanning.controller.profile.dto.ChangePasswordRequest request,
+            @AuthenticationPrincipal Jwt jwt) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        UUID currentSessionId = UUID.fromString(jwt.getClaimAsString("sid"));
+        passwordService.changePassword(userId, currentSessionId, request);
+        return ApiResponse.of(null);
     }
 }

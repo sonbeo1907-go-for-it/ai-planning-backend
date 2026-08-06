@@ -30,4 +30,10 @@ public interface AuthSessionRepository extends JpaRepository<AuthSession, UUID> 
             @Param("userId") UUID userId,
             @Param("status") AuthSessionStatus status,
             @Param("now") Instant now);
+
+    @Query("select session from AuthSession session where session.user.id = :userId and session.status = :status and session.id != :sessionId")
+    java.util.List<AuthSession> findActiveSessionsExcept(
+            @Param("userId") UUID userId,
+            @Param("status") AuthSessionStatus status,
+            @Param("sessionId") UUID sessionId);
 }

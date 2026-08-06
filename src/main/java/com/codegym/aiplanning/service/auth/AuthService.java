@@ -13,4 +13,6 @@ public interface AuthService {
     AuthResult refresh(String refreshToken);
 
     void logout(String authorizationHeader, String refreshToken);
+
+    void revokeOtherSessions(java.util.UUID userId, java.util.UUID retainedSessionId);
 }
