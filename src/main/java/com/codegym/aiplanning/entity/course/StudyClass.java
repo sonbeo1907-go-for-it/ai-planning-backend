@@ -60,6 +60,26 @@ public class StudyClass extends BaseEntity {
         return studyClass;
     }
 
+    public void updateDetails(
+            String name, String description, Instant openedAt, Instant closedAt, UUID actorId) {
+        validateDates(openedAt, closedAt);
+        this.name = name.trim();
+        this.description = (description == null || description.isBlank()) ? null : description.trim();
+        this.openedAt = openedAt;
+        this.closedAt = closedAt;
+        this.updatedBy = actorId;
+    }
+
+    private void validateDates(Instant openedAt, Instant closedAt) {
+        if (openedAt != null && closedAt != null) {
+            if (openedAt.isAfter(closedAt)) {
+                throw new com.codegym.aiplanning.common.exception.BusinessException(
+                        com.codegym.aiplanning.common.exception.ErrorCode.INVALID_CLASS_DATES,
+                        "Opened date must not be after closed date.");
+            }
+        }
+    }
+
     public UUID getCourseId() {
         return courseId;
     }
