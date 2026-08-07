@@ -22,6 +22,7 @@ public final class ApiConstant {
 
     public static final String USERS = API_V1 + "/users";
     public static final String ADMIN_USERS = API_V1 + "/admin/users";
+    public static final String ADMIN_CLASSES = API_V1 + "/admin/classes";
     public static final String CLASSES = API_V1 + "/classes";
     public static final String COURSES = API_V1 + "/courses";
     public static final String COURSE_COLLECTION = "";
