@@ -68,6 +68,17 @@ public class GlobalExceptionHandler {
                 violations);
     }
 
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    ResponseEntity<ApiError> handleMethodNotSupported(
+            org.springframework.web.HttpRequestMethodNotSupportedException exception, HttpServletRequest request) {
+        return build(
+                HttpStatus.METHOD_NOT_ALLOWED,
+                "METHOD_NOT_ALLOWED",
+                "HTTP method '" + exception.getMethod() + "' is not supported for this endpoint.",
+                request,
+                List.of());
+    }
+
     @ExceptionHandler({
         MethodArgumentTypeMismatchException.class,
         HttpMessageNotReadableException.class

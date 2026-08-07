@@ -28,6 +28,11 @@ public final class ApiConstant {
     public static final String COURSE_BY_ID = "/{courseId}";
     public static final String COURSE_ACTIVATE = COURSE_BY_ID + "/activate";
     public static final String COURSE_DEACTIVATE = COURSE_BY_ID + "/deactivate";
+    public static final String COURSE_MODULES = COURSE_BY_ID + "/modules";
+    public static final String COURSE_MODULES_REORDER = COURSE_MODULES + "/reorder";
+    public static final String MODULE_BY_ID = COURSE_MODULES + "/{moduleId}";
+    public static final String MODULE_ACTIVATE = MODULE_BY_ID + "/activate";
+    public static final String MODULE_DEACTIVATE = MODULE_BY_ID + "/deactivate";
     public static final String ENROLLMENTS = API_V1 + "/enrollments";
     public static final String INSTRUCTOR_ASSIGNMENTS = API_V1 + "/instructor-assignments";
 
