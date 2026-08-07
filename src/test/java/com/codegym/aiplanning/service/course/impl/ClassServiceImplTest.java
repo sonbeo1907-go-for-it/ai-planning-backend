@@ -14,6 +14,7 @@ import com.codegym.aiplanning.repository.course.CourseRepository;
 import com.codegym.aiplanning.repository.course.StudyClassRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.controller.admin.dto.course.UpdateClassRequest;
+import com.codegym.aiplanning.controller.admin.dto.course.ChangeClassStatusRequest;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
@@ -136,5 +137,36 @@ class ClassServiceImplTest {
         assertThrows(
                 org.springframework.orm.ObjectOptimisticLockingFailureException.class,
                 () -> classService.updateClass(classId, updateRequest));
+    }
+
+    @Test
+    void changeStatus_WhenValid_ShouldChangeStatusAndAudit() throws Exception {
+        when(studyClassRepository.findById(classId)).thenReturn(Optional.of(studyClass));
+        when(studyClassRepository.saveAndFlush(any(StudyClass.class))).thenReturn(studyClass);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{}");
+
+        ChangeClassStatusRequest statusRequest = new ChangeClassStatusRequest(ClassStatus.ACTIVE, 1L);
+        ClassResponse response = classService.changeStatus(classId, statusRequest);
+
+        assertNotNull(response);
+        assertEquals(ClassStatus.ACTIVE, studyClass.getStatus());
+        verify(studyClassRepository).saveAndFlush(any(StudyClass.class));
+        verify(auditLogService).logAction(eq(null), eq("system"), eq(AuditEventAction.CHANGE_CLASS_STATUS), eq("classes"), eq(classId.toString()), anyString());
+    }
+
+    @Test
+    void changeStatus_WhenIllegalState_ShouldThrowBusinessException() throws Exception {
+        StudyClass activeClass = StudyClass.create(courseId, "C102", "Class 102", "Desc", ClassStatus.ACTIVE);
+        when(studyClassRepository.findById(classId)).thenReturn(Optional.of(activeClass));
+        when(objectMapper.writeValueAsString(any())).thenReturn("{}");
+
+        ChangeClassStatusRequest statusRequest = new ChangeClassStatusRequest(ClassStatus.ACTIVE, 1L);
+        
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> classService.changeStatus(classId, statusRequest));
+
+        assertEquals(ErrorCode.VALIDATION_FAILED, exception.errorCode());
+        verify(studyClassRepository, never()).saveAndFlush(any(StudyClass.class));
     }
 }

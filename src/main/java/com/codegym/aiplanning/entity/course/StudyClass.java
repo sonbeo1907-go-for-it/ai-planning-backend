@@ -90,14 +90,32 @@ public class StudyClass extends BaseEntity {
         this.closedAt = closedAt;
     }
 
-    public void changeStatus(ClassStatus status) {
-        if (status != null && this.status != status) {
-            this.status = status;
-            if (status == ClassStatus.ACTIVE && this.openedAt == null) {
-                this.openedAt = Instant.now();
-            } else if (status == ClassStatus.CLOSED && this.closedAt == null) {
-                this.closedAt = Instant.now();
-            }
+    public void changeStatus(ClassStatus newStatus) {
+        if (newStatus == null) {
+            throw new IllegalArgumentException("Trạng thái mới không được để trống.");
+        }
+
+        if (this.status == newStatus) {
+            throw new IllegalStateException("Lớp học đã ở trạng thái " + newStatus + ".");
+        }
+
+        if (this.status == ClassStatus.PLANNED && newStatus != ClassStatus.ACTIVE) {
+            throw new IllegalStateException("Lớp học đang dự kiến chỉ có thể chuyển sang trạng thái Đang hoạt động.");
+        }
+
+        if (this.status == ClassStatus.ACTIVE && newStatus != ClassStatus.CLOSED) {
+            throw new IllegalStateException("Lớp học đang hoạt động chỉ có thể chuyển sang trạng thái Đã đóng.");
+        }
+
+        if (this.status == ClassStatus.CLOSED) {
+            throw new IllegalStateException("Lớp học đã đóng không thể thay đổi trạng thái.");
+        }
+
+        this.status = newStatus;
+        if (newStatus == ClassStatus.ACTIVE && this.openedAt == null) {
+            this.openedAt = Instant.now();
+        } else if (newStatus == ClassStatus.CLOSED && this.closedAt == null) {
+            this.closedAt = Instant.now();
         }
     }
 }

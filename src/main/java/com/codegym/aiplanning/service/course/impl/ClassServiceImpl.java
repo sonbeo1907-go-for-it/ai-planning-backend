@@ -11,6 +11,7 @@ import com.codegym.aiplanning.service.course.ClassService;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.controller.admin.dto.course.UpdateClassRequest;
+import com.codegym.aiplanning.controller.admin.dto.course.ChangeClassStatusRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import java.util.UUID;
@@ -93,6 +94,36 @@ public class ClassServiceImpl implements ClassService {
             throw ex;
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "Failed to update class: " + e.getMessage());
+        }
+    }
+
+    @Override
+    @Transactional
+    public ClassResponse changeStatus(UUID id, ChangeClassStatusRequest request) {
+        StudyClass studyClass = studyClassRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Class not found"));
+
+        try {
+            String beforeState = objectMapper.writeValueAsString(ClassResponse.from(studyClass));
+            
+            // Domain logic controls the state machine, throws IllegalStateException on failure
+            studyClass.changeStatus(request.status());
+            studyClass.setVersion(request.version());
+
+            StudyClass updatedClass = studyClassRepository.saveAndFlush(studyClass);
+            
+            String afterState = objectMapper.writeValueAsString(ClassResponse.from(updatedClass));
+            String details = String.format("{\"before\": %s, \"after\": %s}", beforeState, afterState);
+            auditLogService.logAction(null, "system", AuditEventAction.CHANGE_CLASS_STATUS, "classes", id.toString(), details);
+            
+            return ClassResponse.from(updatedClass);
+        } catch (IllegalStateException e) {
+            // Map Domain exception to Application exception
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, e.getMessage());
+        } catch (org.springframework.orm.ObjectOptimisticLockingFailureException | BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "Failed to change class status: " + e.getMessage());
         }
     }
 }

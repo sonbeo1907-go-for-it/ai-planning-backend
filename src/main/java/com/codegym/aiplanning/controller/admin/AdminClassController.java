@@ -22,6 +22,7 @@ import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import com.codegym.aiplanning.controller.admin.dto.course.UpdateClassRequest;
+import com.codegym.aiplanning.controller.admin.dto.course.ChangeClassStatusRequest;
 import java.util.UUID;
 
 @RestController
@@ -53,5 +54,11 @@ public class AdminClassController {
     @Operation(summary = "Update an existing class")
     public ApiResponse<ClassResponse> updateClass(@PathVariable UUID id, @Valid @RequestBody UpdateClassRequest request) {
         return ApiResponse.of(classService.updateClass(id, request));
+    }
+
+    @PutMapping("/{id}/status")
+    @Operation(summary = "Change the status of a class according to its lifecycle")
+    public ApiResponse<ClassResponse> changeClassStatus(@PathVariable UUID id, @Valid @RequestBody ChangeClassStatusRequest request) {
+        return ApiResponse.of(classService.changeStatus(id, request));
     }
 }
