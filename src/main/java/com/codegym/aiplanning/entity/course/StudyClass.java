@@ -70,6 +70,39 @@ public class StudyClass extends BaseEntity {
         this.updatedBy = actorId;
     }
 
+    public void changeStatus(ClassStatus newStatus, UUID actorId) {
+        if (this.status == newStatus) {
+            return;
+        }
+
+        // Validate state transitions
+        if (this.status == ClassStatus.PLANNED && newStatus != ClassStatus.ACTIVE) {
+            throw new com.codegym.aiplanning.common.exception.BusinessException(
+                    com.codegym.aiplanning.common.exception.ErrorCode.INVALID_STATUS_TRANSITION,
+                    "From PLANNED, class can only transition to ACTIVE.");
+        }
+        if (this.status == ClassStatus.ACTIVE && newStatus != ClassStatus.CLOSED) {
+            throw new com.codegym.aiplanning.common.exception.BusinessException(
+                    com.codegym.aiplanning.common.exception.ErrorCode.INVALID_STATUS_TRANSITION,
+                    "From ACTIVE, class can only transition to CLOSED.");
+        }
+        if (this.status == ClassStatus.CLOSED) {
+            throw new com.codegym.aiplanning.common.exception.BusinessException(
+                    com.codegym.aiplanning.common.exception.ErrorCode.INVALID_STATUS_TRANSITION,
+                    "CLOSED class cannot change status.");
+        }
+
+        // Assign dates if transitioning to active/closed and current date is null
+        if (newStatus == ClassStatus.ACTIVE && this.openedAt == null) {
+            this.openedAt = Instant.now();
+        } else if (newStatus == ClassStatus.CLOSED && this.closedAt == null) {
+            this.closedAt = Instant.now();
+        }
+
+        this.status = newStatus;
+        this.updatedBy = actorId;
+    }
+
     private void validateDates(Instant openedAt, Instant closedAt) {
         if (openedAt != null && closedAt != null) {
             if (openedAt.isAfter(closedAt)) {

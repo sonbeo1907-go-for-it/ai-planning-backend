@@ -1,0 +1,726 @@
+Với các use case mới, nên tách rõ:
+
+* `Enrollment`: học viên tham gia một khóa học.
+* `ClassMembership`: học viên được xếp vào một lớp.
+* `InstructorClassAssignment`: giảng viên được phân công vào lớp.
+* `EnrollmentModuleProgress`: tiến độ cá nhân của học viên.
+
+Không nên dùng một entity `Enrollment` để gánh cả khóa học, lớp học và tiến độ. Khi học viên chuyển lớp, dữ liệu tiến độ sẽ rất khó giữ đúng.
+
+## 1. BaseEntity
+
+Các entity nghiệp vụ nên có trường chung:
+
+```text
+id              UUID
+created_at      TIMESTAMPTZ
+updated_at      TIMESTAMPTZ
+created_by      UUID nullable
+updated_by      UUID nullable
+version         BIGINT
+```
+
+* `created_at`, `updated_at`: theo dõi thời gian.
+* `created_by`, `updated_by`: phục vụ audit.
+* `version`: optimistic locking, tránh hai người cập nhật đè nhau.
+* `created_by`, `updated_by` có thể tham chiếu `users.id`.
+
+Không nên thêm `deleted` cho tất cả bảng. Các dữ liệu có lịch sử nên dùng trạng thái nghiệp vụ.
+
+---
+
+# Nhóm tài khoản
+
+## 2. User
+
+```text
+users
+- id
+- email
+- password_hash
+- full_name
+- role
+- status
+- last_login_at
+- created_at
+- updated_at
+- created_by
+- updated_by
+- version
+```
+
+### Giải thích
+
+| Trường          | Ý nghĩa                             |
+| --------------- | ----------------------------------- |
+| `email`         | Định danh đăng nhập chính, duy nhất |
+| `password_hash` | Mật khẩu đã hash                    |
+| `full_name`     | Tên hiển thị                        |
+| `role`          | `ADMIN`, `INSTRUCTOR`, `STUDENT`    |
+| `status`        | `ACTIVE`, `INACTIVE`, `LOCKED`      |
+| `last_login_at` | Thời điểm đăng nhập gần nhất        |
+
+Ràng buộc:
+
+```text
+UNIQUE(lower(email))
+```
+
+Nếu một người chỉ có một vai trò thì dùng `role` trực tiếp. Nếu một người có thể vừa là Admin vừa là giảng viên, nên tách:
+
+```text
+roles
+user_roles
+```
+
+---
+
+# Nhóm khóa học
+
+## 3. Course
+
+```text
+courses
+- id
+- code
+- name
+- description
+- status
+- created_at
+- updated_at
+- created_by
+- updated_by
+- version
+```
+
+Ví dụ:
+
+```text
+code: FULLSTACK_JAVA
+name: Fullstack Java
+```
+
+### Giải thích
+
+| Trường        | Ý nghĩa                                     |
+| ------------- | ------------------------------------------- |
+| `code`        | Mã nghiệp vụ duy nhất của khóa học          |
+| `name`        | Tên khóa học                                |
+| `description` | Mô tả tổng quan, có thể dùng làm AI context |
+| `status`      | `ACTIVE` hoặc `INACTIVE`                    |
+
+Admin có thể:
+
+* Tạo khóa học.
+* Cập nhật tên, mô tả.
+* Vô hiệu hóa khóa học.
+* Không xóa cứng khóa học đã có enrollment.
+
+Khi khóa học `INACTIVE`:
+
+* Không tạo enrollment mới.
+* Không tạo lớp mới.
+* Dữ liệu lịch sử vẫn xem được.
+* Enrollment đang hoạt động phải được xử lý theo quy tắc riêng, không tự động xóa.
+
+---
+
+## 4. Module
+
+```text
+modules
+- id
+- course_id
+- code
+- name
+- description
+- sequence_number
+- status
+- created_at
+- updated_at
+- created_by
+- updated_by
+- version
+```
+
+Ví dụ:
+
+```text
+1 — Nhập môn
+2 — Java Core
+3 — MySQL, JDBC
+4 — Spring Boot
+5 — React
+6 — Project
+```
+
+### Giải thích
+
+| Trường            | Ý nghĩa                           |
+| ----------------- | --------------------------------- |
+| `course_id`       | Module thuộc khóa học nào         |
+| `code`            | Mã module trong khóa học          |
+| `name`            | Tên module                        |
+| `description`     | Phạm vi tổng quan của module      |
+| `sequence_number` | Thứ tự trong lộ trình             |
+| `status`          | Module còn được sử dụng hay không |
+
+Ràng buộc:
+
+```text
+UNIQUE(course_id, code)
+UNIQUE(course_id, sequence_number)
+CHECK(sequence_number > 0)
+```
+
+Không lưu nội dung LMS trong `Module`. Module chỉ là cấu trúc lộ trình cấp cao.
+
+---
+
+# Nhóm lớp học
+
+## 5. Class
+
+Nên tránh đặt tên bảng là `class` vì dễ xung đột với từ khóa. Có thể dùng `classes` hoặc `learning_classes`.
+
+```text
+classes
+- id
+- course_id
+- code
+- name
+- description
+- status
+- opened_at
+- closed_at
+- created_at
+- updated_at
+- created_by
+- updated_by
+- version
+```
+
+### Giải thích
+
+| Trường        | Ý nghĩa                       |
+| ------------- | ----------------------------- |
+| `course_id`   | Lớp thuộc khóa học nào        |
+| `code`        | Mã lớp duy nhất               |
+| `name`        | Tên hiển thị                  |
+| `description` | Mô tả hoặc ghi chú            |
+| `status`      | `PLANNED`, `ACTIVE`, `CLOSED` |
+| `opened_at`   | Ngày bắt đầu hoạt động        |
+| `closed_at`   | Ngày kết thúc                 |
+
+Không thêm:
+
+```text
+current_module_id
+```
+
+vào `Class`, bởi vì mỗi học viên trong lớp có tốc độ khác nhau.
+
+`Class` chỉ dùng cho:
+
+* Phạm vi giảng viên phụ trách.
+* Danh sách học viên.
+* Phân quyền review.
+* Dashboard và thông báo.
+
+---
+
+## 6. InstructorClassAssignment
+
+Đây là quan hệ nhiều–nhiều:
+
+```text
+Instructor N ── N Class
+```
+
+Một giảng viên có thể phụ trách nhiều lớp; một lớp cũng có thể có giảng viên chính và trợ giảng.
+
+```text
+instructor_class_assignments
+- id
+- instructor_id
+- class_id
+- assignment_role
+- status
+- assigned_at
+- ended_at
+- assigned_by
+- end_reason
+- created_at
+- updated_at
+- version
+```
+
+### Giải thích
+
+| Trường            | Ý nghĩa                    |
+| ----------------- | -------------------------- |
+| `instructor_id`   | User có role `INSTRUCTOR`  |
+| `class_id`        | Lớp được phân công         |
+| `assignment_role` | `PRIMARY` hoặc `ASSISTANT` |
+| `status`          | `ACTIVE` hoặc `ENDED`      |
+| `assigned_at`     | Ngày bắt đầu phụ trách     |
+| `ended_at`        | Ngày kết thúc              |
+| `assigned_by`     | Admin thực hiện phân công  |
+| `end_reason`      | Lý do kết thúc phân công   |
+
+Không xóa assignment cũ. Khi bỏ phân công:
+
+```text
+status = ENDED
+ended_at = thời điểm hiện tại
+```
+
+Ràng buộc nghiệp vụ:
+
+* Chỉ Admin được phân công.
+* User phải có role `INSTRUCTOR`.
+* Không tạo hai assignment `ACTIVE` giống nhau cho cùng giảng viên và lớp.
+
+PostgreSQL có thể dùng partial unique index:
+
+```sql
+CREATE UNIQUE INDEX uq_active_instructor_class
+ON instructor_class_assignments(instructor_id, class_id)
+WHERE status = 'ACTIVE';
+```
+
+---
+
+# Nhóm hành trình học
+
+## 7. Enrollment
+
+`Enrollment` biểu diễn:
+
+> Học viên A tham gia khóa học Fullstack Java.
+
+```text
+enrollments
+- id
+- student_id
+- course_id
+- status
+- enrolled_at
+- paused_at
+- resumed_at
+- completed_at
+- withdrawn_at
+- note
+- created_at
+- updated_at
+- created_by
+- updated_by
+- version
+```
+
+### Giải thích
+
+| Trường         | Ý nghĩa                   |
+| -------------- | ------------------------- |
+| `student_id`   | User có role `STUDENT`    |
+| `course_id`    | Khóa học được tham gia    |
+| `status`       | Trạng thái hành trình học |
+| `enrolled_at`  | Ngày bắt đầu              |
+| `paused_at`    | Ngày tạm dừng             |
+| `resumed_at`   | Lần tiếp tục gần nhất     |
+| `completed_at` | Ngày hoàn thành           |
+| `withdrawn_at` | Ngày rút khỏi khóa        |
+| `note`         | Ghi chú hành chính        |
+
+Enum:
+
+```java
+public enum EnrollmentStatus {
+    ACTIVE,
+    PAUSED,
+    COMPLETED,
+    WITHDRAWN
+}
+```
+
+Không đặt `classId` trực tiếp trong enrollment nếu cần lưu lịch sử chuyển lớp.
+
+Không đặt `currentModuleId` trực tiếp trong enrollment vì tiến độ module được quản lý riêng.
+
+Ràng buộc:
+
+* `student_id` phải là học viên.
+* `course_id` phải đang tồn tại.
+* Một học viên có tối đa một enrollment `ACTIVE` cho cùng khóa học.
+* Enrollment cũ không bị xóa khi học viên học lại.
+
+Ví dụ:
+
+```text
+Enrollment #101
+Student: Nguyễn Văn A
+Course: Fullstack Java
+Status: ACTIVE
+```
+
+---
+
+## 8. ClassMembership
+
+Entity này phục vụ use case:
+
+* Giảng viên thêm học viên vào lớp.
+* Giảng viên xóa học viên khỏi lớp.
+* Học viên chuyển lớp.
+* Lưu lịch sử lớp đã tham gia.
+
+```text
+class_memberships
+- id
+- enrollment_id
+- class_id
+- status
+- joined_at
+- left_at
+- added_by
+- removed_by
+- end_reason
+- created_at
+- updated_at
+- version
+```
+
+### Giải thích
+
+| Trường          | Ý nghĩa                              |
+| --------------- | ------------------------------------ |
+| `enrollment_id` | Hành trình học cần xếp lớp           |
+| `class_id`      | Lớp được xếp vào                     |
+| `status`        | `ACTIVE` hoặc `ENDED`                |
+| `joined_at`     | Ngày vào lớp                         |
+| `left_at`       | Ngày rời lớp                         |
+| `added_by`      | Giảng viên/Admin thêm học viên       |
+| `removed_by`    | Người thực hiện loại khỏi lớp        |
+| `end_reason`    | Chuyển lớp, nghỉ học hoặc lý do khác |
+
+Khi “xóa học viên khỏi lớp”, không chạy:
+
+```sql
+DELETE FROM class_memberships
+```
+
+Mà cập nhật:
+
+```text
+status = ENDED
+left_at = now()
+removed_by = currentUser
+end_reason = ...
+```
+
+Điều này giữ được lịch sử.
+
+Ràng buộc:
+
+* Enrollment và Class phải thuộc cùng một Course.
+* Một enrollment chỉ có tối đa một membership `ACTIVE`.
+* Giảng viên chỉ được thao tác với lớp đang được phân công.
+* Bỏ học viên khỏi lớp không tự động kết thúc enrollment.
+* Học viên có thể tạm thời có enrollment `ACTIVE` nhưng không thuộc lớp nào trong quá trình chuyển lớp.
+
+Partial unique index:
+
+```sql
+CREATE UNIQUE INDEX uq_active_class_membership
+ON class_memberships(enrollment_id)
+WHERE status = 'ACTIVE';
+```
+
+---
+
+# Nhóm tiến độ cá nhân
+
+## 9. EnrollmentModuleProgress
+
+Entity này phục vụ use case:
+
+> Giảng viên quản lý tiến độ của từng học viên.
+
+```text
+enrollment_module_progress
+- id
+- enrollment_id
+- module_id
+- status
+- completion_percentage
+- started_at
+- completed_at
+- last_activity_at
+- instructor_note
+- updated_by
+- created_at
+- updated_at
+- version
+```
+
+### Giải thích
+
+| Trường                  | Ý nghĩa                                         |
+| ----------------------- | ----------------------------------------------- |
+| `enrollment_id`         | Tiến độ thuộc hành trình học nào                |
+| `module_id`             | Module đang theo dõi                            |
+| `status`                | Trạng thái module                               |
+| `completion_percentage` | Tỷ lệ tiến độ do người dùng/giảng viên cập nhật |
+| `started_at`            | Ngày bắt đầu thực tế                            |
+| `completed_at`          | Ngày hoàn thành thực tế                         |
+| `last_activity_at`      | Hoạt động gần nhất                              |
+| `instructor_note`       | Nhận xét về tiến độ                             |
+| `updated_by`            | Người cập nhật gần nhất                         |
+
+Enum:
+
+```java
+public enum ModuleProgressStatus {
+    NOT_STARTED,
+    IN_PROGRESS,
+    PAUSED,
+    COMPLETED
+}
+```
+
+Ràng buộc:
+
+```text
+UNIQUE(enrollment_id, module_id)
+CHECK(completion_percentage BETWEEN 0 AND 100)
+```
+
+Ngoài ra:
+
+* `Module.courseId` phải bằng `Enrollment.courseId`.
+* Không đánh giá học viên chậm chỉ vì học lâu hơn học viên khác.
+* Không tự động hoàn thành module dựa trên thời gian.
+* Khi status là `COMPLETED`, `completedAt` phải có giá trị.
+* Khi bắt đầu module, `startedAt` phải có giá trị.
+* Chỉ giảng viên đang phụ trách lớp hiện tại hoặc Admin được cập nhật.
+
+Vì không có dữ liệu LMS để tính tự động, `completionPercentage` là số thủ công. Có thể đổi tên rõ hơn:
+
+```text
+reported_completion_percentage
+```
+
+Nếu trung tâm không thật sự cần phần trăm tiến độ module, nên bỏ trường này và chỉ dùng trạng thái cùng ghi chú.
+
+## Có cần tạo trước tất cả ModuleProgress không?
+
+Không cần.
+
+Khi tạo enrollment, không nhất thiết insert sáu dòng:
+
+```text
+Nhập môn — NOT_STARTED
+Java Core — NOT_STARTED
+MySQL — NOT_STARTED
+...
+```
+
+Chỉ tạo bản ghi khi học viên bắt đầu một module. Những module chưa có bản ghi được hiểu là `NOT_STARTED`.
+
+Cách này giảm dữ liệu thừa và giúp Admin thêm module mới vào khóa học mà không phải cập nhật toàn bộ enrollment cũ.
+
+---
+
+# Nhóm audit
+
+## 10. AuditLog
+
+Các thao tác quan trọng cần lưu riêng:
+
+```text
+audit_logs
+- id
+- actor_id
+- action
+- entity_type
+- entity_id
+- old_value
+- new_value
+- request_id
+- ip_address
+- occurred_at
+```
+
+Các hành động cần audit:
+
+```text
+STUDENT_ADDED_TO_CLASS
+STUDENT_REMOVED_FROM_CLASS
+STUDENT_TRANSFERRED_CLASS
+INSTRUCTOR_ASSIGNED_TO_CLASS
+INSTRUCTOR_REMOVED_FROM_CLASS
+MODULE_PROGRESS_UPDATED
+COURSE_CREATED
+COURSE_UPDATED
+COURSE_DEACTIVATED
+```
+
+`old_value` và `new_value` có thể dùng `JSONB`, nhưng tuyệt đối không ghi:
+
+* Mật khẩu.
+* Access token.
+* Refresh token.
+* Reset token.
+
+---
+
+# Luồng của từng use case
+
+## Giảng viên thêm học viên vào lớp
+
+1. Kiểm tra giảng viên có assignment `ACTIVE` với lớp.
+
+2. Kiểm tra user là `STUDENT`.
+
+3. Tìm enrollment `ACTIVE` của học viên với `class.courseId`.
+
+4. Nếu chưa có enrollment, tùy quyền có thể:
+
+   * Yêu cầu Admin tạo enrollment; hoặc
+   * Cho phép giảng viên tạo nếu SRS quy định.
+
+5. Kiểm tra enrollment chưa có membership đang hoạt động.
+
+6. Tạo `ClassMembership`.
+
+7. Ghi audit log.
+
+Khuyến nghị: giảng viên chỉ quản lý membership; Admin quản lý enrollment.
+
+## Giảng viên xóa học viên khỏi lớp
+
+1. Kiểm tra quyền trên lớp.
+2. Tìm membership `ACTIVE`.
+3. Chuyển thành `ENDED`.
+4. Gán `leftAt`, `removedBy`, `endReason`.
+5. Không xóa enrollment và tiến độ.
+6. Ghi audit log.
+
+## Giảng viên quản lý tiến độ
+
+1. Kiểm tra giảng viên phụ trách lớp hiện tại của học viên.
+2. Kiểm tra module thuộc đúng course của enrollment.
+3. Tạo hoặc cập nhật `EnrollmentModuleProgress`.
+4. Kiểm tra chuyển trạng thái hợp lệ.
+5. Ghi audit log.
+
+Luồng trạng thái tham khảo:
+
+```text
+NOT_STARTED → IN_PROGRESS
+IN_PROGRESS → PAUSED
+PAUSED → IN_PROGRESS
+IN_PROGRESS → COMPLETED
+```
+
+Không nên cho:
+
+```text
+NOT_STARTED → COMPLETED
+```
+
+trừ khi Admin hoặc giảng viên có nghiệp vụ ghi nhận dữ liệu cũ.
+
+## Admin quản lý khóa học
+
+Admin quản lý:
+
+```text
+Course
+└── Module
+```
+
+Course hoặc Module đã được sử dụng thì chỉ được `INACTIVE`, không xóa cứng.
+
+Thay đổi `sequenceNumber` của module phải kiểm tra ảnh hưởng đến enrollment đang hoạt động. Nó chỉ thay đổi cấu trúc lộ trình, không thay đổi tiến độ hiện tại của học viên.
+
+## Admin phân công giảng viên
+
+1. Kiểm tra user là `INSTRUCTOR`.
+2. Kiểm tra class tồn tại và chưa đóng.
+3. Tạo `InstructorClassAssignment`.
+4. Một giảng viên có thể có nhiều assignment.
+5. Khi ngừng phân công, chuyển assignment thành `ENDED`.
+6. Ghi audit log.
+
+---
+
+# Thứ tự database migration
+
+Nếu dùng Flyway, có thể chia:
+
+```text
+V1__create_users.sql
+
+V2__create_courses_and_modules.sql
+
+V3__create_classes.sql
+
+V4__create_enrollments.sql
+
+V5__create_class_memberships.sql
+
+V6__create_instructor_class_assignments.sql
+
+V7__create_enrollment_module_progress.sql
+
+V8__create_audit_logs.sql
+
+V9__add_business_indexes_and_constraints.sql
+```
+
+Nguyên tắc:
+
+* Không sửa migration đã chạy ở môi trường chung.
+* Mọi thay đổi schema tạo migration mới.
+* Migration chỉ thay đổi database; không phụ thuộc vào Hibernate tự tạo bảng.
+* Production nên dùng:
+
+```properties
+spring.jpa.hibernate.ddl-auto=validate
+```
+
+* Flyway tạo schema, Hibernate chỉ kiểm tra mapping.
+* Status nên lưu bằng `VARCHAR`, không lưu ordinal enum.
+
+Ví dụ:
+
+```java
+@Enumerated(EnumType.STRING)
+@Column(nullable = false, length = 30)
+private EnrollmentStatus status;
+```
+ 
+Nếu lưu ordinal:
+
+```text
+0, 1, 2, 3
+```
+
+thì chỉ cần đổi thứ tự enum trong Java là dữ liệu có thể bị hiểu sai.
+
+## Quan hệ cuối cùng
+
+```text
+Course
+├── Module
+├── Class
+└── Enrollment
+    ├── EnrollmentModuleProgress
+    └── ClassMembership ── Class
+
+Class
+└── InstructorClassAssignment ── Instructor
+```
+
+Thiết kế này đáp ứng bốn use case đã nêu, đồng thời giữ đúng nguyên tắc: **lớp dùng để quản lý con người, khóa học định nghĩa lộ trình, enrollment giữ hành trình học và module progress giữ tốc độ cá nhân**.
