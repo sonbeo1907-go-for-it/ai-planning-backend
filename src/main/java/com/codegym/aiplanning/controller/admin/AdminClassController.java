@@ -24,6 +24,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -83,8 +84,8 @@ public class AdminClassController {
 
     @GetMapping
     @Operation(summary = "Get list of classes with pagination")
-    public ApiResponse<PageResponse<ClassResponse>> getClasses(Pageable pageable) {
-        return ApiResponse.of(classQueryService.getClasses(pageable));
+    public ApiResponse<PageResponse<ClassResponse>> getClasses(@Valid @ModelAttribute com.codegym.aiplanning.controller.course.dto.ClassSearchParam param) {
+        return ApiResponse.of(classQueryService.getClasses(param));
     }
 
     @PatchMapping("/{id}")
