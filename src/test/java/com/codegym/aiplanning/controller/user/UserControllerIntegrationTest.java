@@ -107,7 +107,13 @@ class UserControllerIntegrationTest {
         Cookie refreshCookie = loginResult.getResponse().getCookie("refresh_token");
         assertThat(refreshCookie).isNotNull();
 
-        mockMvc.perform(delete(ApiConstant.USERS + "/" + userId)
+        mockMvc.perform(post(ApiConstant.USERS + "/" + userId + "/deactivate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reasonCode": "POLICY_VIOLATION"
+                                }
+                                """)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("INACTIVE"));
@@ -154,7 +160,13 @@ class UserControllerIntegrationTest {
                 .getId()
                 .toString();
 
-        mockMvc.perform(delete(ApiConstant.USERS + "/" + adminId)
+        mockMvc.perform(post(ApiConstant.USERS + "/" + adminId + "/deactivate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reasonCode": "POLICY_VIOLATION"
+                                }
+                                """)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("ADMIN_ACCOUNT_PROTECTED"));
@@ -192,7 +204,13 @@ class UserControllerIntegrationTest {
         mockMvc.perform(get(ApiConstant.USERS)
                         .header("Authorization", "Bearer " + studentToken))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(delete(ApiConstant.USERS + "/" + student.getId())
+        mockMvc.perform(post(ApiConstant.USERS + "/" + student.getId() + "/deactivate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reasonCode": "POLICY_VIOLATION"
+                                }
+                                """)
                         .header("Authorization", "Bearer " + studentToken))
                 .andExpect(status().isForbidden());
     }

@@ -458,7 +458,7 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
-    void lockedAndInactiveAccountsReceiveGenericAuthenticationFailure() throws Exception {
+    void lockedAccountsReceiveGenericAuthenticationFailureAndInactiveReceiveDisabled() throws Exception {
         createAccount("locked-user", AccountStatus.LOCKED);
         createAccount("inactive-user", AccountStatus.INACTIVE);
 
@@ -467,9 +467,9 @@ class AuthControllerIntegrationTest {
                 .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
                 .andExpect(jsonPath("$.message").value("Invalid email or password."));
         login("inactive-user", "Password@123")
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
-                .andExpect(jsonPath("$.message").value("Invalid email or password."));
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_DISABLED"))
+                .andExpect(jsonPath("$.message").value("Tài khoản của bạn đã bị vô hiệu hóa. Lý do: Không xác định"));
     }
 
     @Test

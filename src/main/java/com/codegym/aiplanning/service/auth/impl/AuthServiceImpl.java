@@ -1,5 +1,6 @@
 package com.codegym.aiplanning.service.auth.impl;
 
+import com.codegym.aiplanning.common.exception.AccountDisabledException;
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.config.AuthSessionProperties;
@@ -138,6 +139,13 @@ public class AuthServiceImpl implements AuthService {
             authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(
                     normalizedEmail, password));
         } catch (AuthenticationException exception) {
+            if (exception instanceof org.springframework.security.authentication.DisabledException) {
+                UserAccount account = userAccountRepository.findByEmailIgnoreCase(normalizedEmail)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_CREDENTIALS, "Invalid email or password."));
+                
+                String reasonStr = buildDeactivationMessage(account);
+                throw new AccountDisabledException(reasonStr, account.getDeactivationReasonCode());
+            }
             loginAttemptService.recordFailedLogin(normalizedEmail);
             throw new BusinessException(
                     ErrorCode.INVALID_CREDENTIALS, "Invalid email or password.");
@@ -148,6 +156,10 @@ public class AuthServiceImpl implements AuthService {
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.INVALID_CREDENTIALS, "Invalid email or password."));
         Instant now = Instant.now();
+        if (account.getStatus() == AccountStatus.INACTIVE) {
+            String reasonStr = buildDeactivationMessage(account);
+            throw new AccountDisabledException(reasonStr, account.getDeactivationReasonCode());
+        }
         if (!account.isActive() || account.isLocked() || account.isLoginBlocked(now)) {
             throw new BusinessException(
                     ErrorCode.INVALID_CREDENTIALS, "Invalid email or password.");
@@ -424,6 +436,18 @@ public class AuthServiceImpl implements AuthService {
         return new BusinessException(
                 ErrorCode.INVALID_GOOGLE_CREDENTIAL,
                 "The Google sign-in credential is invalid.");
+    }
+
+    private String buildDeactivationMessage(UserAccount account) {
+        com.codegym.aiplanning.entity.auth.DeactivationReasonCode code = account.getDeactivationReasonCode();
+        String publicReason = account.getDeactivationPublicReason();
+        
+        if (code == com.codegym.aiplanning.entity.auth.DeactivationReasonCode.OTHER && publicReason != null && !publicReason.isBlank()) {
+            return "Tài khoản của bạn đã bị vô hiệu hóa. Lý do: " + publicReason;
+        }
+        
+        String translated = code != null ? code.getDisplayName() : "Không xác định";
+        return "Tài khoản của bạn đã bị vô hiệu hóa. Lý do: " + translated;
     }
 
     private record AccessCredential(UUID sessionId, String tokenId, Instant expiresAt) {}

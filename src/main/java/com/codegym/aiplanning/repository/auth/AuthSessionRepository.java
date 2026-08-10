@@ -14,12 +14,15 @@ import org.springframework.data.repository.query.Param;
 
 public interface AuthSessionRepository extends JpaRepository<AuthSession, UUID> {
 
-    boolean existsByIdAndStatusAndExpiresAtAfter(
-            UUID id, AuthSessionStatus status, Instant now);
+    boolean existsByIdAndStatusAndUser_StatusAndExpiresAtAfter(
+            UUID id, AuthSessionStatus status, com.codegym.aiplanning.entity.auth.AccountStatus userStatus, Instant now);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select session from AuthSession session where session.id = :id")
     Optional<AuthSession> findByIdForUpdate(@Param("id") UUID id);
+
+    @Query("select session from AuthSession session join fetch session.user where session.id = :id")
+    Optional<AuthSession> findByIdWithUser(@Param("id") UUID id);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select session from AuthSession session "

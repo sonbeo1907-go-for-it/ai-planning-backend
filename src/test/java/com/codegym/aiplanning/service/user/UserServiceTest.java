@@ -20,8 +20,9 @@ import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
-import com.codegym.aiplanning.service.auth.AccountSecurityNotifier;
-import com.codegym.aiplanning.service.auth.UserSessionRevocationService;
+import com.codegym.aiplanning.controller.user.dto.DeactivateUserRequest;
+import com.codegym.aiplanning.entity.auth.DeactivationReasonCode;
+import com.codegym.aiplanning.event.UserDeactivatedEvent;
 import com.codegym.aiplanning.service.user.impl.UserServiceImpl;
 import java.time.Instant;
 import java.util.List;
@@ -48,10 +49,7 @@ class UserServiceTest {
     private AuditLogService auditLogService;
 
     @Mock
-    private UserSessionRevocationService userSessionRevocationService;
-
-    @Mock
-    private AccountSecurityNotifier accountSecurityNotifier;
+    private org.springframework.context.ApplicationEventPublisher applicationEventPublisher;
 
     private UserServiceImpl userService;
     private Jwt actorJwt;
@@ -62,8 +60,7 @@ class UserServiceTest {
         userService = new UserServiceImpl(
                 userRepository,
                 auditLogService,
-                userSessionRevocationService,
-                accountSecurityNotifier);
+                applicationEventPublisher);
         actorId = UUID.randomUUID();
         actorJwt = Jwt.withTokenValue("token_val")
                 .header("alg", "none")
@@ -142,15 +139,11 @@ class UserServiceTest {
         ReflectionTestUtils.setField(account, "id", userId);
         when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(account));
         when(userRepository.save(any(UserAccount.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userSessionRevocationService.revokeAllActiveSessions(
-                userId, "ACCOUNT_DEACTIVATED")).thenReturn(2);
-
-        UserResponse response = userService.deactivateUser(userId, actorJwt);
+        DeactivateUserRequest request = new DeactivateUserRequest(DeactivationReasonCode.POLICY_VIOLATION, "Public Reason", "Note");
+        UserResponse response = userService.deactivateUser(userId, request, actorJwt);
 
         assertThat(response.status()).isEqualTo(AccountStatus.INACTIVE);
-        verify(userSessionRevocationService).revokeAllActiveSessions(
-                userId, "ACCOUNT_DEACTIVATED");
-        verify(accountSecurityNotifier).accountDeactivated(userId);
+        verify(applicationEventPublisher).publishEvent(any(UserDeactivatedEvent.class));
         verify(auditLogService).logAction(
                 eq(actorId),
                 eq("admin_user"),
@@ -167,13 +160,14 @@ class UserServiceTest {
                 "protected_admin", "Protected Admin", UserRole.ADMIN, AccountStatus.ACTIVE);
         when(userRepository.findByIdForUpdate(userId)).thenReturn(Optional.of(admin));
 
-        assertThatThrownBy(() -> userService.deactivateUser(userId, actorJwt))
+        DeactivateUserRequest request = new DeactivateUserRequest(DeactivationReasonCode.POLICY_VIOLATION, null, null);
+        assertThatThrownBy(() -> userService.deactivateUser(userId, request, actorJwt))
                 .isInstanceOf(BusinessException.class)
                 .extracting(error -> ((BusinessException) error).errorCode())
                 .isEqualTo(ErrorCode.ADMIN_ACCOUNT_PROTECTED);
 
         assertThat(admin.getStatus()).isEqualTo(AccountStatus.ACTIVE);
-        verifyNoInteractions(userSessionRevocationService, accountSecurityNotifier, auditLogService);
+        verifyNoInteractions(applicationEventPublisher, auditLogService);
     }
 
     @Test

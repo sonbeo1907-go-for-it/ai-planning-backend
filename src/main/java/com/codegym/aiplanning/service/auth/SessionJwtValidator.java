@@ -16,6 +16,9 @@ public class SessionJwtValidator implements OAuth2TokenValidator<Jwt> {
     private static final OAuth2Error INVALID_SESSION =
             new OAuth2Error("invalid_token", "The login session is invalid or expired.", null);
 
+    private static final OAuth2Error ACCOUNT_DISABLED =
+            new OAuth2Error("account_disabled", "Your account has been disabled.", null);
+
     private final AuthSessionRepository authSessionRepository;
     private final SessionRevocationStore revocationStore;
 
@@ -40,11 +43,14 @@ public class SessionJwtValidator implements OAuth2TokenValidator<Jwt> {
                 return OAuth2TokenValidatorResult.failure(INVALID_SESSION);
             }
 
-            boolean active = authSessionRepository.existsByIdAndStatusAndExpiresAtAfter(
-                    sessionId, AuthSessionStatus.ACTIVE, Instant.now());
-            return active
-                    ? OAuth2TokenValidatorResult.success()
-                    : OAuth2TokenValidatorResult.failure(INVALID_SESSION);
+            java.util.Optional<com.codegym.aiplanning.entity.auth.AuthSession> sessionOpt = authSessionRepository.findByIdWithUser(sessionId);
+            if (sessionOpt.isEmpty() || !sessionOpt.get().isActive(Instant.now())) {
+                return OAuth2TokenValidatorResult.failure(INVALID_SESSION);
+            }
+            if (sessionOpt.get().getUser().getStatus() == com.codegym.aiplanning.entity.auth.AccountStatus.INACTIVE) {
+                return OAuth2TokenValidatorResult.failure(ACCOUNT_DISABLED);
+            }
+            return OAuth2TokenValidatorResult.success();
         } catch (RuntimeException exception) {
             return OAuth2TokenValidatorResult.failure(INVALID_SESSION);
         }

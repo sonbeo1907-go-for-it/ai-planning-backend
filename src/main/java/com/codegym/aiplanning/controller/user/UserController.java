@@ -3,6 +3,7 @@ package com.codegym.aiplanning.controller.user;
 import com.codegym.aiplanning.common.api.ApiResponse;
 import com.codegym.aiplanning.common.api.PageResponse;
 import com.codegym.aiplanning.common.constant.ApiConstant;
+import com.codegym.aiplanning.controller.user.dto.DeactivateUserRequest;
 import com.codegym.aiplanning.controller.user.dto.UpdateUserRoleRequest;
 import com.codegym.aiplanning.controller.user.dto.UserResponse;
 import com.codegym.aiplanning.controller.user.dto.UserSearchParam;
@@ -88,20 +89,21 @@ public class UserController {
         return ApiResponse.of(userService.activateUser(id, actorJwt));
     }
 
-    @DeleteMapping("/{id}")
+    @PostMapping("/{id}/deactivate")
     @Operation(
-            summary = "V\u00f4 hi\u1ec7u h\u00f3a t\u00e0i kho\u1ea3n ng\u01b0\u1eddi d\u00f9ng (Soft disable)",
-            description = "Chuy\u1ec3n t\u00e0i kho\u1ea3n kh\u00f4ng ph\u1ea3i Admin th\u00e0nh INACTIVE, thu h\u1ed3i to\u00e0n b\u1ed9 "
-                    + "phi\u00ean \u0111\u0103ng nh\u1eadp v\u00e0 refresh token thay v\u00ec x\u00f3a c\u1ee9ng kh\u1ecfi CSDL.")
+            summary = "Vô hiệu hóa tài khoản người dùng (Soft disable)",
+            description = "Chuyển tài khoản không phải Admin thành INACTIVE, thu hồi toàn bộ "
+                    + "phiên đăng nhập và refresh token thay vì xóa cứng khỏi CSDL.")
     @ApiResponses({
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "V\u00f4 hi\u1ec7u h\u00f3a t\u00e0i kho\u1ea3n th\u00e0nh c\u00f4ng"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Kh\u00f4ng th\u1ec3 v\u00f4 hi\u1ec7u h\u00f3a t\u00e0i kho\u1ea3n Admin"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Kh\u00f4ng t\u00ecm th\u1ea5y ng\u01b0\u1eddi d\u00f9ng")
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Vô hiệu hóa tài khoản thành công"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Không thể vô hiệu hóa tài khoản Admin"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Không tìm thấy người dùng")
     })
     public ApiResponse<UserResponse> deactivateUser(
-            @Parameter(description = "ID \u0111\u1ecbnh danh UUID c\u1ee7a ng\u01b0\u1eddi d\u00f9ng", example = "a8c6cae3-cd19-425c-a4c1-a2ed63290854")
+            @Parameter(description = "ID định danh UUID của người dùng", example = "a8c6cae3-cd19-425c-a4c1-a2ed63290854")
             @PathVariable UUID id,
+            @Valid @RequestBody DeactivateUserRequest request,
             @AuthenticationPrincipal Jwt actorJwt) {
-        return ApiResponse.of(userService.deactivateUser(id, actorJwt));
+        return ApiResponse.of(userService.deactivateUser(id, request, actorJwt));
     }
 }

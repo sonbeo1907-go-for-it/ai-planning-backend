@@ -104,6 +104,22 @@ public class GlobalExceptionHandler {
                 List.of());
     }
 
+    @ExceptionHandler(AccountDisabledException.class)
+    ResponseEntity<ApiError> handleAccountDisabled(
+            AccountDisabledException exception, HttpServletRequest request) {
+        String requestId = MDC.get(RequestIdFilter.REQUEST_ID_MDC_KEY);
+        ApiError error = new ApiError(
+                Instant.now(),
+                ErrorCode.ACCOUNT_DISABLED.status().value(),
+                ErrorCode.ACCOUNT_DISABLED.name(),
+                exception.getMessage(),
+                request.getRequestURI(),
+                requestId,
+                exception.getReasonCode() != null ? exception.getReasonCode().name() : null,
+                List.of());
+        return ResponseEntity.status(ErrorCode.ACCOUNT_DISABLED.status()).body(error);
+    }
+
     @ExceptionHandler(AccessDeniedException.class)
     ResponseEntity<ApiError> handleAccessDenied(
             AccessDeniedException exception, HttpServletRequest request) {
@@ -168,6 +184,7 @@ public class GlobalExceptionHandler {
                 message,
                 request.getRequestURI(),
                 requestId,
+                null,
                 violations);
         return ResponseEntity.status(status).body(error);
     }

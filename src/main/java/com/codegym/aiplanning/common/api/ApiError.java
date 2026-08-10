@@ -12,4 +12,5 @@ public record ApiError(
         String message,
         String path,
         String requestId,
+        String reasonCode,
         List<FieldViolation> violations) {}

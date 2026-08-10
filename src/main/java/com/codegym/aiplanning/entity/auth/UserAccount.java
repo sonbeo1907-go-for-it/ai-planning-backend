@@ -40,6 +40,16 @@ public class UserAccount extends BaseEntity {
     @Column(name = "login_blocked_until")
     private Instant loginBlockedUntil;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "deactivation_reason_code", length = 50)
+    private DeactivationReasonCode deactivationReasonCode;
+
+    @Column(name = "deactivation_reason_note", length = 500)
+    private String deactivationReasonNote;
+
+    @Column(name = "deactivation_public_reason", length = 500)
+    private String deactivationPublicReason;
+
     protected UserAccount() {}
 
     public static UserAccount create(
@@ -156,8 +166,23 @@ public class UserAccount extends BaseEntity {
         }
     }
 
-    public void deactivate() {
+    public void deactivate(DeactivationReasonCode reasonCode, String publicReason, String reasonNote) {
         this.status = AccountStatus.INACTIVE;
+        this.deactivationReasonCode = reasonCode;
+        this.deactivationPublicReason = publicReason;
+        this.deactivationReasonNote = reasonNote;
+    }
+
+    public DeactivationReasonCode getDeactivationReasonCode() {
+        return deactivationReasonCode;
+    }
+
+    public String getDeactivationReasonNote() {
+        return deactivationReasonNote;
+    }
+
+    public String getDeactivationPublicReason() {
+        return deactivationPublicReason;
     }
 
     private static String normalizeEmail(String email) {

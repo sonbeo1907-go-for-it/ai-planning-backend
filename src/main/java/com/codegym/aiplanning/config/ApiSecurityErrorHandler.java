@@ -24,6 +24,7 @@ import org.springframework.util.StringUtils;
 public class ApiSecurityErrorHandler implements AuthenticationEntryPoint, AccessDeniedHandler {
 
     private static final String EXPIRED_TOKEN_VALIDATION_CODE = "token_expired";
+    private static final String ACCOUNT_DISABLED_VALIDATION_CODE = "account_disabled";
 
     private final ObjectMapper objectMapper;
 
@@ -37,12 +38,20 @@ public class ApiSecurityErrorHandler implements AuthenticationEntryPoint, Access
             HttpServletResponse response,
             AuthenticationException authenticationException)
             throws IOException {
-        if (hasExpiredToken(authenticationException)) {
+        if (hasJwtErrorCode(authenticationException, EXPIRED_TOKEN_VALIDATION_CODE)) {
             write(
                     request,
                     response,
                     ErrorCode.SESSION_EXPIRED,
                     "Your session has expired. Please sign in again.");
+            return;
+        }
+        if (hasJwtErrorCode(authenticationException, ACCOUNT_DISABLED_VALIDATION_CODE)) {
+            write(
+                    request,
+                    response,
+                    ErrorCode.ACCOUNT_DISABLED,
+                    "Your account has been disabled.");
             return;
         }
         write(request, response, ErrorCode.AUTHENTICATION_REQUIRED, "Authentication is required.");
@@ -79,6 +88,7 @@ public class ApiSecurityErrorHandler implements AuthenticationEntryPoint, Access
                         message,
                         request.getRequestURI(),
                         requestId,
+                        null,
                         List.of()));
     }
 
@@ -94,12 +104,12 @@ public class ApiSecurityErrorHandler implements AuthenticationEntryPoint, Access
         return requestId;
     }
 
-    private boolean hasExpiredToken(Throwable exception) {
+    private boolean hasJwtErrorCode(Throwable exception, String targetErrorCode) {
         Throwable current = exception;
         while (current != null) {
             if (current instanceof JwtValidationException jwtValidationException
                     && jwtValidationException.getErrors().stream()
-                            .anyMatch(error -> EXPIRED_TOKEN_VALIDATION_CODE.equals(error.getErrorCode()))) {
+                            .anyMatch(error -> targetErrorCode.equals(error.getErrorCode()))) {
                 return true;
             }
             current = current.getCause();

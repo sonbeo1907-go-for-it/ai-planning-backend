@@ -52,4 +52,30 @@ public class SmtpEmailService implements EmailService {
             throw new RuntimeException("Email construction failed", e);
         }
     }
+
+    @Override
+    public void sendAccountDeactivatedEmail(String toEmail, String fullName, String reason) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setFrom(fromEmail);
+            helper.setTo(toEmail);
+            helper.setSubject("Tài khoản của bạn đã bị vô hiệu hóa - AI Planning");
+
+            String content = "<p>Chào " + fullName + ",</p>"
+                    + "<p>Tài khoản của bạn trên hệ thống AI Planning đã bị quản trị viên vô hiệu hóa.</p>"
+                    + "<p><b>Lý do:</b> " + reason + "</p>"
+                    + "<p>Nếu bạn cho rằng đây là một nhầm lẫn, vui lòng liên hệ quản trị viên để được hỗ trợ.</p>";
+
+            helper.setText(content, true);
+
+            mailSender.send(message);
+        } catch (MessagingException e) {
+            log.error("Failed to construct/send HTML email for account deactivation to: {}", toEmail, e);
+            // Non-blocking in async context, just log error
+        } catch (Exception e) {
+            log.error("Unexpected error sending account deactivation email to: {}", toEmail, e);
+        }
+    }
 }

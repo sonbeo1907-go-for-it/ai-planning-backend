@@ -3,9 +3,11 @@ package com.codegym.aiplanning.service.user.impl;
 import com.codegym.aiplanning.common.api.PageResponse;
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
+import com.codegym.aiplanning.controller.user.dto.DeactivateUserRequest;
 import com.codegym.aiplanning.controller.user.dto.UpdateUserRoleRequest;
 import com.codegym.aiplanning.controller.user.dto.UserResponse;
 import com.codegym.aiplanning.controller.user.dto.UserSearchParam;
+import com.codegym.aiplanning.event.UserDeactivatedEvent;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserAccount;
@@ -19,6 +21,7 @@ import jakarta.persistence.criteria.Predicate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -37,18 +40,15 @@ public class UserServiceImpl implements UserService {
 
     private final UserAccountRepository userRepository;
     private final AuditLogService auditLogService;
-    private final UserSessionRevocationService userSessionRevocationService;
-    private final AccountSecurityNotifier accountSecurityNotifier;
+    private final ApplicationEventPublisher eventPublisher;
 
     public UserServiceImpl(
             UserAccountRepository userRepository,
             AuditLogService auditLogService,
-            UserSessionRevocationService userSessionRevocationService,
-            AccountSecurityNotifier accountSecurityNotifier) {
+            ApplicationEventPublisher eventPublisher) {
         this.userRepository = userRepository;
         this.auditLogService = auditLogService;
-        this.userSessionRevocationService = userSessionRevocationService;
-        this.accountSecurityNotifier = accountSecurityNotifier;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -145,18 +145,19 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    public UserResponse deactivateUser(UUID id, Jwt actorJwt) {
+    public UserResponse deactivateUser(UUID id, DeactivateUserRequest request, Jwt actorJwt) {
         UserAccount account = userRepository
                 .findByIdForUpdate(id)
                 .orElseThrow(() ->
                         new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "User not found with id: " + id));
 
         ensureAdminAccountIsNotDeactivated(account);
-        account.deactivate();
+        account.deactivate(request.reasonCode(), request.publicReason(), request.reasonNote());
         UserAccount updated = userRepository.save(account);
-        int revokedSessionCount = userSessionRevocationService.revokeAllActiveSessions(
-                updated.getId(), ACCOUNT_DEACTIVATED_REASON);
 
+        String pubReasonStr = request.publicReason() != null ? request.publicReason() : "N/A";
+        String noteStr = request.reasonNote() != null ? request.reasonNote() : "N/A";
+        
         auditLogService.logAction(
                 extractActorId(actorJwt),
                 extractActorUsername(actorJwt),
@@ -164,10 +165,10 @@ public class UserServiceImpl implements UserService {
                 "USER",
                 updated.getId().toString(),
                 String.format(
-                        "Disabled user account '%s' and revoked %d active session(s)",
-                        updated.getUsername(), revokedSessionCount));
+                        "Disabled user account '%s'. Reason code: %s. Public reason: %s. Internal note: %s",
+                        updated.getUsername(), request.reasonCode(), pubReasonStr, noteStr));
 
-        notifyAccountDeactivatedAfterCommit(updated.getId());
+        eventPublisher.publishEvent(new UserDeactivatedEvent(updated.getId(), request.reasonCode(), request.publicReason()));
 
         return UserResponse.from(updated);
     }
@@ -197,20 +198,5 @@ public class UserServiceImpl implements UserService {
                     ErrorCode.ADMIN_ACCOUNT_PROTECTED,
                     "Admin accounts cannot be deactivated.");
         }
-    }
-
-    private void notifyAccountDeactivatedAfterCommit(UUID userId) {
-        Runnable notification = () -> accountSecurityNotifier.accountDeactivated(userId);
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(
-                    new TransactionSynchronization() {
-                        @Override
-                        public void afterCommit() {
-                            notification.run();
-                        }
-                    });
-            return;
-        }
-        notification.run();
     }
 }

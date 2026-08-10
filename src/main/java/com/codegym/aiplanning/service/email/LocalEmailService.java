@@ -20,4 +20,15 @@ public class LocalEmailService implements EmailService {
         log.debug("Link: {}", resetLink);
         log.debug("==========================================================================");
     }
+
+    @Override
+    public void sendAccountDeactivatedEmail(String toEmail, String fullName, String reason) {
+        log.debug("==========================================================================");
+        log.debug("LOCAL EMAIL SIMULATION");
+        log.debug("To: {}", toEmail);
+        log.debug("Subject: Your account has been disabled");
+        log.debug("Body: Your account has been disabled by an administrator.");
+        log.debug("Reason: {}", reason);
+        log.debug("==========================================================================");
+    }
 }

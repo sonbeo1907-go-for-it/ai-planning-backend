@@ -1,6 +1,7 @@
 package com.codegym.aiplanning.controller.user.dto;
 
 import com.codegym.aiplanning.entity.auth.AccountStatus;
+import com.codegym.aiplanning.entity.auth.DeactivationReasonCode;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -31,7 +32,10 @@ public record UserResponse(
         Instant createdAt,
 
         @Schema(description = "Thời gian cập nhật gần nhất")
-        Instant updatedAt) {
+        Instant updatedAt,
+
+        @Schema(description = "Lý do vô hiệu hóa (hiển thị khi tài khoản INACTIVE)")
+        DeactivationReasonCode deactivationReasonCode) {
 
     public static UserResponse from(UserAccount account) {
         return new UserResponse(
@@ -42,6 +46,7 @@ public record UserResponse(
                 account.getRole(),
                 account.getStatus(),
                 account.getCreatedAt(),
-                account.getUpdatedAt());
+                account.getUpdatedAt(),
+                account.getStatus() == AccountStatus.INACTIVE ? account.getDeactivationReasonCode() : null);
     }
 }
