@@ -1,8 +1,18 @@
 package com.codegym.aiplanning.service.auth;
 
-import com.codegym.aiplanning.service.auth.model.AuthToken;
+import com.codegym.aiplanning.service.auth.model.AuthResult;
 
 public interface AuthService {
 
-    AuthToken login(String username, String password);
+    void register(String email, String password, String fullName);
+
+    AuthResult login(String email, String password);
+
+    AuthResult loginWithGoogle(String idToken);
+
+    AuthResult refresh(String refreshToken);
+
+    void logout(String authorizationHeader, String refreshToken);
+
+    void revokeOtherSessions(java.util.UUID userId, java.util.UUID retainedSessionId);
 }

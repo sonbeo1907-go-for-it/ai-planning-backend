@@ -21,11 +21,14 @@ public class UserAccountDetailsServiceImpl implements UserDetailsService {
 
     @Override
     @Transactional(readOnly = true)
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        UserAccount account = repository.findByUsernameIgnoreCase(username)
+    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+        UserAccount account = repository.findByEmailIgnoreCase(email)
                 .orElseThrow(() -> new UsernameNotFoundException("Invalid credentials"));
+        if (account.getPasswordHash() == null) {
+            throw new UsernameNotFoundException("Invalid credentials");
+        }
 
-        return User.withUsername(account.getUsername())
+        return User.withUsername(account.getEmail())
                 .password(account.getPasswordHash())
                 .roles(account.getRole().name())
                 .disabled(!account.isActive() && !account.isLocked())

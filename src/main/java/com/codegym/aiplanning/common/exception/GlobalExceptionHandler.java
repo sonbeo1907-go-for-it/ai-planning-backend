@@ -11,14 +11,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -65,13 +68,38 @@ public class GlobalExceptionHandler {
                 violations);
     }
 
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    ResponseEntity<ApiError> handleMethodNotSupported(
+            org.springframework.web.HttpRequestMethodNotSupportedException exception, HttpServletRequest request) {
+        return build(
+                HttpStatus.METHOD_NOT_ALLOWED,
+                "METHOD_NOT_ALLOWED",
+                "HTTP method '" + exception.getMethod() + "' is not supported for this endpoint.",
+                request,
+                List.of());
+    }
+
+    @ExceptionHandler({
+        MethodArgumentTypeMismatchException.class,
+        HttpMessageNotReadableException.class
+    })
+    ResponseEntity<ApiError> handleMalformedRequest(
+            Exception exception, HttpServletRequest request) {
+        return build(
+                HttpStatus.BAD_REQUEST,
+                ErrorCode.VALIDATION_FAILED.name(),
+                "Request validation failed.",
+                request,
+                List.of());
+    }
+
     @ExceptionHandler(AuthenticationException.class)
     ResponseEntity<ApiError> handleAuthentication(
             AuthenticationException exception, HttpServletRequest request) {
         return build(
                 HttpStatus.UNAUTHORIZED,
                 ErrorCode.INVALID_CREDENTIALS.name(),
-                "Invalid username or password.",
+                "Invalid email or password.",
                 request,
                 List.of());
     }
@@ -95,6 +123,17 @@ public class GlobalExceptionHandler {
                 HttpStatus.CONFLICT,
                 ErrorCode.CONFLICT.name(),
                 "The operation conflicts with existing data.",
+                request,
+                List.of());
+    }
+
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    ResponseEntity<ApiError> handleOptimisticLocking(
+            OptimisticLockingFailureException exception, HttpServletRequest request) {
+        return build(
+                HttpStatus.CONFLICT,
+                ErrorCode.CONCURRENT_MODIFICATION.name(),
+                "The resource was modified by another request. Reload it and try again.",
                 request,
                 List.of());
     }

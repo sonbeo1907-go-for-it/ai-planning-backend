@@ -1,16 +1,33 @@
 spring:
+  config:
+    import: "optional:file:.env[.properties]"
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/ai_planning}
     username: ${DB_USERNAME:ai_planning}
     password: ${DB_PASSWORD:ai_planning_local}
 
+  mail:
+    host: smtp.resend.com
+    port: 587
+    username: resend
+    password: ${RESEND_API_KEY:re_RESEND_API_KEY}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
 app:
   security:
     jwt:
       secret: ${JWT_SECRET:local-development-secret-change-before-deploying}
+    session:
+      refresh-cookie-secure: ${REFRESH_COOKIE_SECURE:false}
   bootstrap:
     admin:
       enabled: ${BOOTSTRAP_ADMIN_ENABLED:true}
       username: ${BOOTSTRAP_ADMIN_USERNAME:admin}
+      email: ${BOOTSTRAP_ADMIN_EMAIL:admin@aiplanning.local}
       password: ${BOOTSTRAP_ADMIN_PASSWORD:Admin@123}
       full-name: ${BOOTSTRAP_ADMIN_FULL_NAME:System Administrator}

@@ -1,149 +1,110 @@
-# Authentication specification
+# Authentication and profile specification
 
 ## Scope
 
-The MVP uses internal accounts. An administrator creates accounts and resets
-passwords. SSO, refresh tokens and self-service password recovery are outside
-the current baseline.
+The V2 foundation supports email/password registration, Google sign-in,
+short-lived access JWTs, rotating refresh tokens, session revocation, login
+attempt limiting, password reset, self-service password changes, request IDs,
+and the authenticated user's profile.
 
-## API constants
+Only `USER` and `ADMIN` roles exist:
 
-| Constant | Value |
-|---|---|
-| `ApiConstant.API_V1` | `/api/v1` |
-| `ApiConstant.AUTH` | `/api/v1/auth` |
-| `ApiConstant.LOGIN` | `/login` |
-| `ApiConstant.AUTH_LOGIN` | `/api/v1/auth/login` |
-| `ApiConstant.PROFILE` | `/api/v1/profile` |
+- `USER` owns personal learning resources and a `UserProfile`.
+- `ADMIN` is reserved for AI provider/model administration and has no implicit
+  access to another user's account, profile, or learning resources.
 
-## Login
+The retired `STUDENT` and `INSTRUCTOR` roles are not accepted by the V2 schema.
 
-### Endpoint
+## API constants and authorization
 
-```http
-POST /api/v1/auth/login
-Content-Type: application/json
-```
+| Method | Path | Authorization |
+|---|---|---|
+| POST | `/api/v1/auth/register` | Public |
+| POST | `/api/v1/auth/login` | Public |
+| POST | `/api/v1/auth/google` | Public |
+| POST | `/api/v1/auth/refresh` | Refresh cookie |
+| POST | `/api/v1/auth/logout` | Access token and/or refresh cookie |
+| POST | `/api/v1/auth/password-reset-request` | Public |
+| POST | `/api/v1/auth/password-reset` | Public reset token |
+| GET | `/api/v1/profile` | Current `USER` or `ADMIN` |
+| PATCH | `/api/v1/profile` | Current `USER` only |
+| PUT | `/api/v1/profile/password` | Current account |
 
-### Request
+Every future path under `/api/v1/admin/**` requires `ROLE_ADMIN`. This route
+boundary is exclusively for AI provider/model administration. There are no V2
+administrator user-management APIs.
 
-```json
-{
-  "username": "admin",
-  "password": "Admin@123"
-}
-```
+## Registration and Google sign-in
 
-Validation:
+A valid local registration creates an `ACTIVE` `USER`, a generated
+`user_<uuid>` internal username, a BCrypt password hash, and a default
+`UserProfile`. Clients cannot choose a role or account status. Registration
+returns `202 Accepted` without revealing whether the email already exists.
 
-- `username` is required and at most 100 characters.
-- `password` is required and at most 200 characters.
-- The username lookup is case-insensitive.
+The Google flow verifies an ID token. A first-time identity creates the same
+`USER` and profile with a null `password_hash`. An existing local account with
+the same email must be linked explicitly rather than silently merged.
 
-### Successful response
+Email is normalized to lowercase and is the login identifier. The generated
+username remains an internal stable identifier.
 
-```json
-{
-  "data": {
-    "accessToken": "<jwt>",
-    "tokenType": "Bearer",
-    "expiresIn": 28800
-  }
-}
-```
+## Sessions and credentials
 
-The JWT contains:
+Login creates a PostgreSQL session and a hashed rotating refresh token. The
+access JWT contains account ID, session ID, email, username, and one authority:
+`ROLE_USER` or `ROLE_ADMIN`. Refresh-token reuse revokes the entire session.
+Redis accelerates revocation and refresh locking; PostgreSQL remains
+authoritative when Redis is unavailable.
 
-- user ID in `sub` and `uid`;
-- username in `preferred_username`;
-- display name in `full_name`;
-- authorities in `roles`;
-- issuer, issued time and expiration time.
-
-### Failure response
-
-Invalid credentials, inactive accounts, locked accounts and unknown usernames
-must not expose different messages to the client.
-
-```json
-{
-  "status": 401,
-  "code": "INVALID_CREDENTIALS",
-  "message": "Invalid username or password.",
-  "path": "/api/v1/auth/login",
-  "requestId": "<request-id>"
-}
-```
-
-Passwords and access tokens must never be written to logs.
-
-### Failed login limiting
-
-Failed password attempts are counted per existing active account. After
-`LOGIN_MAX_ATTEMPTS` consecutive failures, login for that account is
-temporarily blocked for `LOGIN_BLOCK_DURATION`.
-
-Defaults:
-
-- maximum consecutive failures: `5`;
-- temporary block duration: `PT15M` (15 minutes).
-
-A successful login resets the failure count. Once the temporary block expires,
-the next failed attempt starts a new counting window. Attempts against unknown,
-inactive or administratively locked accounts are not persisted. All failures,
-including a temporary block, return the same generic authentication response
-and do not reveal whether an account exists or why authentication was denied.
-
-Temporary login blocking is separate from the persistent `LOCKED` account
-status. It is stored in `failed_login_attempts` and `login_blocked_until`.
+Refresh tokens are returned only as HttpOnly cookies. Raw refresh tokens and
+password-reset tokens are never persisted or logged. Failed local logins use
+generic responses and a temporary `login_blocked_until` threshold to prevent
+account enumeration.
 
 ## Current profile
 
-### Endpoint
-
-```http
-GET /api/v1/profile
-Authorization: Bearer <access-token>
-```
-
-### Response
+`GET /api/v1/profile` derives the account from the authenticated JWT subject and
+never accepts a target account ID. A USER response includes:
 
 ```json
 {
   "data": {
     "id": "<uuid>",
-    "username": "admin",
-    "fullName": "System Administrator",
-    "roles": ["ROLE_ADMIN"]
+    "username": "user_<uuid>",
+    "email": "user@example.com",
+    "fullName": "Example User",
+    "role": "USER",
+    "status": "ACTIVE",
+    "preferences": {
+      "timeZone": "Asia/Ho_Chi_Minh",
+      "locale": "vi-VN",
+      "defaultDailyMinutes": 60,
+      "learningPreferences": "Prefer concise examples"
+    }
   }
 }
 ```
 
-## Account statuses
+`PATCH /api/v1/profile` updates only the authenticated USER. Supported fields
+are `fullName`, IANA `timeZone`, BCP 47 `locale`, `defaultDailyMinutes` from 1 to
+1440, and optional `learningPreferences`. ADMIN may read its own account profile
+but cannot create personal learning preferences.
 
-| Status | Login |
-|---|---|
-| `ACTIVE` | Allowed |
-| `INACTIVE` | Denied |
-| `LOCKED` | Denied |
+## Audit boundary
 
-## Roles
+Authentication and profile operations write event type, actor identifier,
+target type, target identifier, and request ID. The audit write API deliberately
+does not accept free-form details or metadata. Passwords, tokens, provider
+secrets, AI prompts, uploaded document contents, and learning preference text
+must never enter application logs or audit records.
 
-- `ROLE_STUDENT`
-- `ROLE_INSTRUCTOR`
-- `ROLE_ADMIN`
+## Required regression tests
 
-Role and data-scope authorization must be enforced by the backend.
-
-## Required tests
-
-- Active account can log in.
-- Wrong password returns the generic authentication error.
-- Unknown username returns the same generic error.
-- Locked and inactive accounts cannot log in.
-- An active account is temporarily blocked after the configured number of
-  consecutive failures.
-- A successful login resets the consecutive-failure count.
-- Temporary blocking returns the same generic authentication error.
-- Valid JWT can access the profile endpoint.
-- Missing, expired, incorrectly signed or wrong-issuer JWT is rejected.
+- Local and Google registration create an `ACTIVE` `USER` and `UserProfile`.
+- Only `USER` and `ADMIN` satisfy the database role constraint.
+- Email login is case-insensitive and cannot enumerate accounts.
+- Refresh rotation and reuse detection revoke sessions correctly.
+- Redis failure does not bypass PostgreSQL session validation.
+- Profile reads and updates are derived from the authenticated subject.
+- ADMIN cannot update a personal learning profile.
+- Audit records contain identifiers and request correlation only.
