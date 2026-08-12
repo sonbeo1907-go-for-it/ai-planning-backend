@@ -22,6 +22,7 @@ public final class ApiConstant {
     public static final String AUTH_PASSWORD_RESET = AUTH + PASSWORD_RESET;
     public static final String PROFILE = API_V1 + "/profile";
     public static final String ADMIN = API_V1 + "/admin";
+    public static final String DAILY_PLANS = API_V1 + "/daily-plans";
 
     private ApiConstant() {}
 }
