@@ -180,20 +180,35 @@ class DailyPlanControllerIntegrationTest {
                 .andExpect(status().isNotFound());
     }
 
-    private UserAccount createUser(String username, String fullName) {
+    @Test
+    void adminCannotAccessPersonalDailyPlans() throws Exception {
+        createAccount("daily-admin", "Daily Admin", UserRole.ADMIN);
+        String adminToken = login("daily-admin");
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+    }
+
+    private UserAccount createUser(String emailPrefix, String displayName) {
+        return createAccount(emailPrefix, displayName, UserRole.USER);
+    }
+
+    private UserAccount createAccount(
+            String emailPrefix, String displayName, UserRole role) {
+        String email = emailPrefix + "@example.com";
         UserAccount account = userAccountRepository.saveAndFlush(UserAccount.create(
-                username,
-                username + "@example.com",
+                email,
                 passwordEncoder.encode("Password@123"),
-                fullName,
-                UserRole.USER,
+                role,
                 AccountStatus.ACTIVE));
-        userProfileRepository.saveAndFlush(UserProfile.create(account));
+        userProfileRepository.saveAndFlush(UserProfile.create(account, displayName));
         return account;
     }
 
-    private String login(String username) throws Exception {
-        String email = username + "@example.com";
+    private String login(String emailPrefix) throws Exception {
+        String email = emailPrefix + "@example.com";
         MvcResult result = mockMvc.perform(post(ApiConstant.AUTH_LOGIN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(

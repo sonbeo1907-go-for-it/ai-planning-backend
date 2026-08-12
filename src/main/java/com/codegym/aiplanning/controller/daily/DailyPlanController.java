@@ -32,7 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping(ApiConstant.DAILY_PLANS)
 @Tag(name = "Daily Plans", description = "Daily Learning Plan & Interactive Task Checklist API (US-TSK-01-MANUAL)")
-@PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+@PreAuthorize("hasRole('USER')")
 public class DailyPlanController {
 
     private final DailyPlanService dailyPlanService;
