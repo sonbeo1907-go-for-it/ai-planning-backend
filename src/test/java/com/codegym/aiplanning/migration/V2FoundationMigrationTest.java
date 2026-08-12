@@ -39,7 +39,9 @@ class V2FoundationMigrationTest {
                     "audit_logs",
                     "learning_sources",
                     "roadmaps",
-                    "roadmap_sources");
+                    "roadmap_sources",
+                    "roadmap_versions",
+                    "roadmap_items");
             assertThat(tables).doesNotContain("courses", "modules", "classes");
 
             UUID userId = UUID.randomUUID();
@@ -100,6 +102,57 @@ class V2FoundationMigrationTest {
                             RANDOM_UUID(), '%s', '%s', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                         )
                         """.formatted(roadmapId, sourceId));
+
+                UUID roadmapVersionId = UUID.randomUUID();
+                UUID milestoneId = UUID.randomUUID();
+                statement.executeUpdate("""
+                        INSERT INTO roadmap_versions (
+                            id, roadmap_id, version_number, status, origin,
+                            draft_slot_roadmap_id, created_at, updated_at
+                        ) VALUES (
+                            '%s', '%s', 1, 'DRAFT', 'MANUAL', '%s',
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(roadmapVersionId, roadmapId, roadmapId));
+                statement.executeUpdate("""
+                        INSERT INTO roadmap_items (
+                            id, roadmap_version_id, item_type, title, order_index,
+                            created_at, updated_at
+                        ) VALUES (
+                            '%s', '%s', 'MILESTONE', 'Week 1', 0,
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(milestoneId, roadmapVersionId));
+                statement.executeUpdate("""
+                        INSERT INTO roadmap_items (
+                            id, roadmap_version_id, parent_item_id, item_type, title,
+                            order_index, estimated_minutes, created_at, updated_at
+                        ) VALUES (
+                            RANDOM_UUID(), '%s', '%s', 'TOPIC', 'Java basics',
+                            0, 60, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(roadmapVersionId, milestoneId));
+
+                assertThatThrownBy(() -> statement.executeUpdate("""
+                                INSERT INTO roadmap_versions (
+                                    id, roadmap_id, version_number, status, origin,
+                                    draft_slot_roadmap_id, created_at, updated_at
+                                ) VALUES (
+                                    RANDOM_UUID(), '%s', 2, 'DRAFT', 'USER_EDITED', '%s',
+                                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                                )
+                                """.formatted(roadmapId, roadmapId)))
+                        .isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.executeUpdate("""
+                                INSERT INTO roadmap_items (
+                                    id, roadmap_version_id, item_type, title, order_index,
+                                    estimated_minutes, created_at, updated_at
+                                ) VALUES (
+                                    RANDOM_UUID(), '%s', 'TOPIC', 'Invalid topic', 0,
+                                    30, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                                )
+                                """.formatted(roadmapVersionId)))
+                        .isInstanceOf(java.sql.SQLException.class);
 
                 UUID onboardingRoadmapId = UUID.randomUUID();
                 statement.executeUpdate("""

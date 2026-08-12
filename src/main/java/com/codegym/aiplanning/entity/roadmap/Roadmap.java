@@ -25,6 +25,15 @@ public class Roadmap extends BaseEntity {
     @Column(nullable = false, length = 30)
     private RoadmapStatus status;
 
+    @Column(length = 200)
+    private String title;
+
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
+    @Column(name = "active_version_id")
+    private UUID activeVersionId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "proficiency_level", length = 30)
     private ProficiencyLevel proficiencyLevel;
@@ -51,12 +60,34 @@ public class Roadmap extends BaseEntity {
         return roadmap;
     }
 
+    public static Roadmap manualDraft(
+            UserAccount owner, String title, String description) {
+        Roadmap roadmap = new Roadmap();
+        roadmap.owner = owner;
+        roadmap.status = RoadmapStatus.DRAFT;
+        roadmap.title = title;
+        roadmap.description = description;
+        return roadmap;
+    }
+
     public UserAccount getOwner() {
         return owner;
     }
 
     public RoadmapStatus getStatus() {
         return status;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public UUID getActiveVersionId() {
+        return activeVersionId;
     }
 
     public ProficiencyLevel getProficiencyLevel() {
@@ -107,5 +138,13 @@ public class Roadmap extends BaseEntity {
         status = RoadmapStatus.DRAFT;
         onboardingCompletedAt = completedAt;
         onboardingSlotOwnerId = null;
+    }
+
+    public void activateVersion(UUID versionId) {
+        if (status == RoadmapStatus.ONBOARDING || status == RoadmapStatus.ARCHIVED) {
+            throw new IllegalStateException("Roadmap cannot activate a version in its current state.");
+        }
+        activeVersionId = versionId;
+        status = RoadmapStatus.ACTIVE;
     }
 }
