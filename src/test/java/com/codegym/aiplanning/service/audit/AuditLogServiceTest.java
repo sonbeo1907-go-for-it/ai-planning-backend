@@ -47,7 +47,7 @@ class AuditLogServiceTest {
 
         auditLogService.logAction(
                 actorId,
-                "user-123",
+                "user@example.com",
                 AuditEventAction.PROFILE_UPDATED,
                 "UserProfile",
                 "profile-123");
@@ -57,7 +57,7 @@ class AuditLogServiceTest {
 
         AuditLog saved = captor.getValue();
         assertThat(saved.getActorId()).isEqualTo(actorId);
-        assertThat(saved.getActorUsername()).isEqualTo("user-123");
+        assertThat(saved.getActorEmail()).isEqualTo("user@example.com");
         assertThat(saved.getAction()).isEqualTo(AuditEventAction.PROFILE_UPDATED);
         assertThat(saved.getTargetResource()).isEqualTo("UserProfile");
         assertThat(saved.getTargetId()).isEqualTo("profile-123");

@@ -61,7 +61,8 @@ class PasswordServiceImplTest {
     void setUp() {
         userId = UUID.randomUUID();
         currentSessionId = UUID.randomUUID();
-        userAccount = UserAccount.create("testuser", "test@example.com", "oldHash", "Test User", UserRole.USER, AccountStatus.ACTIVE);
+        userAccount = UserAccount.create(
+                "test@example.com", "oldHash", UserRole.USER, AccountStatus.ACTIVE);
     }
 
     @Test
@@ -96,7 +97,7 @@ class PasswordServiceImplTest {
                 BusinessException.class, () -> passwordService.changePassword(userId, currentSessionId, request));
 
         assertEquals(ErrorCode.CURRENT_PASSWORD_INCORRECT, exception.errorCode());
-        verify(auditLogService).logAction(eq(userId), eq("testuser"), eq(AuditEventAction.PASSWORD_CHANGE_FAILED), eq("UserAccount"), eq(userId.toString()));
+        verify(auditLogService).logAction(eq(userId), eq("test@example.com"), eq(AuditEventAction.PASSWORD_CHANGE_FAILED), eq("UserAccount"), eq(userId.toString()));
     }
 
     @Test
@@ -112,7 +113,7 @@ class PasswordServiceImplTest {
                 BusinessException.class, () -> passwordService.changePassword(userId, currentSessionId, request));
 
         assertEquals(ErrorCode.NEW_PASSWORD_MUST_BE_DIFFERENT, exception.errorCode());
-        verify(auditLogService).logAction(eq(userId), eq("testuser"), eq(AuditEventAction.PASSWORD_CHANGE_FAILED), eq("UserAccount"), eq(userId.toString()));
+        verify(auditLogService).logAction(eq(userId), eq("test@example.com"), eq(AuditEventAction.PASSWORD_CHANGE_FAILED), eq("UserAccount"), eq(userId.toString()));
     }
 
     @Test
@@ -128,6 +129,6 @@ class PasswordServiceImplTest {
 
         assertEquals("newHash", userAccount.getPasswordHash());
         verify(authService).revokeOtherSessions(userId, currentSessionId);
-        verify(auditLogService).logAction(eq(userId), eq("testuser"), eq(AuditEventAction.PASSWORD_CHANGED), eq("UserAccount"), eq(userId.toString()));
+        verify(auditLogService).logAction(eq(userId), eq("test@example.com"), eq(AuditEventAction.PASSWORD_CHANGED), eq("UserAccount"), eq(userId.toString()));
     }
 }

@@ -10,7 +10,5 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "app.bootstrap.admin")
 public record BootstrapAdminProperties(
         boolean enabled,
-        @NotBlank String username,
         @NotBlank @Email String email,
-        @NotBlank @Size(min = 8) String password,
-        @NotBlank String fullName) {}
+        @NotBlank @Size(min = 8) String password) {}

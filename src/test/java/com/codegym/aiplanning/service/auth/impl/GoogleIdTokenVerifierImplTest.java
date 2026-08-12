@@ -34,7 +34,7 @@ class GoogleIdTokenVerifierImplTest {
 
         assertThat(claims.subject()).isEqualTo("google-subject-123");
         assertThat(claims.email()).isEqualTo("user@example.com");
-        assertThat(claims.fullName()).isEqualTo("Google User");
+        assertThat(claims.displayName()).isEqualTo("Google User");
     }
 
     @Test

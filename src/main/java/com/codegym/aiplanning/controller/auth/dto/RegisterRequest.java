@@ -33,10 +33,10 @@ public record RegisterRequest(
                         regexp = ".*\\d.*",
                         message = "Password must contain a digit")
                 String password,
-        @Schema(
+                @Schema(
                         description = "User display name",
                         example = "Nguyen Van A",
                         requiredMode = Schema.RequiredMode.REQUIRED)
-                @NotBlank(message = "Full name is required")
-                @Size(max = 150, message = "Full name must not exceed 150 characters")
-                String fullName) {}
+                @NotBlank(message = "Display name is required")
+                @Size(max = 150, message = "Display name must not exceed 150 characters")
+                String displayName) {}

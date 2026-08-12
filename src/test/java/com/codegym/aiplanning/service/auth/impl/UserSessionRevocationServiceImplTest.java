@@ -96,12 +96,10 @@ class UserSessionRevocationServiceImplTest {
                 .markSessionRevoked(any(UUID.class), any(Duration.class));
     }
 
-    private AuthSession activeSession(String username, Duration lifetime) {
+    private AuthSession activeSession(String emailAlias, Duration lifetime) {
         UserAccount account = UserAccount.create(
-                username,
-                username + "@example.com",
+                emailAlias + "@example.com",
                 "password-hash",
-                username,
                 UserRole.USER,
                 AccountStatus.ACTIVE);
         AuthSession session = AuthSession.create(account, Instant.now().plus(lifetime));

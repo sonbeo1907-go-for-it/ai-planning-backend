@@ -14,17 +14,11 @@ import java.util.Locale;
 @Table(name = "user_accounts")
 public class UserAccount extends BaseEntity {
 
-    @Column(nullable = false, unique = true, length = 100)
-    private String username;
-
     @Column(nullable = false, unique = true, length = 254)
     private String email;
 
     @Column(name = "password_hash", length = 100)
     private String passwordHash;
-
-    @Column(name = "full_name", nullable = false, length = 150)
-    private String fullName;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
@@ -43,25 +37,17 @@ public class UserAccount extends BaseEntity {
     protected UserAccount() {}
 
     public static UserAccount create(
-            String username,
             String email,
             String passwordHash,
-            String fullName,
             UserRole role,
             AccountStatus status) {
         UserAccount account = new UserAccount();
-        account.username = username.trim();
         account.email = normalizeEmail(email);
         account.passwordHash = passwordHash;
-        account.fullName = fullName;
         account.role = role;
         account.status = status;
         account.failedLoginAttempts = 0;
         return account;
-    }
-
-    public String getUsername() {
-        return username;
     }
 
     public String getEmail() {
@@ -70,10 +56,6 @@ public class UserAccount extends BaseEntity {
 
     public String getPasswordHash() {
         return passwordHash;
-    }
-
-    public String getFullName() {
-        return fullName;
     }
 
     public UserRole getRole() {
@@ -123,12 +105,6 @@ public class UserAccount extends BaseEntity {
 
     public Instant getLoginBlockedUntil() {
         return loginBlockedUntil;
-    }
-
-    public void changeFullName(String fullName) {
-        if (fullName != null && !fullName.isBlank()) {
-            this.fullName = fullName.trim();
-        }
     }
 
     public void changeEmail(String newEmail) {

@@ -1,17 +1,14 @@
 CREATE TABLE user_accounts (
     id UUID PRIMARY KEY,
     version BIGINT NOT NULL DEFAULT 0,
-    username VARCHAR(100) NOT NULL,
     email VARCHAR(254) NOT NULL,
     password_hash VARCHAR(100),
-    full_name VARCHAR(150) NOT NULL,
     role VARCHAR(30) NOT NULL,
     status VARCHAR(30) NOT NULL,
     failed_login_attempts INTEGER NOT NULL DEFAULT 0,
     login_blocked_until TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    CONSTRAINT uk_user_accounts_username UNIQUE (username),
     CONSTRAINT uk_user_accounts_email UNIQUE (email),
     CONSTRAINT ck_user_accounts_email_lowercase CHECK (email = LOWER(email)),
     CONSTRAINT ck_user_accounts_role CHECK (role IN ('USER', 'ADMIN')),
@@ -25,10 +22,11 @@ CREATE TABLE user_profiles (
     id UUID PRIMARY KEY,
     version BIGINT NOT NULL DEFAULT 0,
     user_id UUID NOT NULL,
+    display_name VARCHAR(150) NOT NULL,
     time_zone VARCHAR(50) NOT NULL DEFAULT 'UTC',
     locale VARCHAR(35) NOT NULL DEFAULT 'en',
     default_daily_minutes INTEGER NOT NULL DEFAULT 60,
-    learning_preferences TEXT,
+    setup_completed_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
     CONSTRAINT uk_user_profiles_user UNIQUE (user_id),
@@ -116,7 +114,7 @@ CREATE TABLE audit_logs (
     id UUID PRIMARY KEY,
     version BIGINT NOT NULL DEFAULT 0,
     actor_id UUID,
-    actor_username VARCHAR(100) NOT NULL,
+    actor_email VARCHAR(254) NOT NULL,
     action VARCHAR(50) NOT NULL,
     target_resource VARCHAR(50) NOT NULL,
     target_id VARCHAR(100),
@@ -127,7 +125,7 @@ CREATE TABLE audit_logs (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_audit_logs_actor ON audit_logs (actor_username);
+CREATE INDEX idx_audit_logs_actor_email ON audit_logs (actor_email);
 CREATE INDEX idx_audit_logs_actor_id ON audit_logs (actor_id);
 CREATE INDEX idx_audit_logs_target ON audit_logs (target_resource, target_id);
 CREATE INDEX idx_audit_logs_request_id ON audit_logs (request_id);

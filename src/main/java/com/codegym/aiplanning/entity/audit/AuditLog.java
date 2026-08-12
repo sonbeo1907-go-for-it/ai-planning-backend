@@ -18,8 +18,8 @@ public class AuditLog extends BaseEntity {
     @Column(name = "actor_id")
     private UUID actorId;
 
-    @Column(name = "actor_username", nullable = false, length = 100)
-    private String actorUsername;
+    @Column(name = "actor_email", nullable = false, length = 254)
+    private String actorEmail;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
@@ -45,14 +45,14 @@ public class AuditLog extends BaseEntity {
 
     public static AuditLog create(
             UUID actorId,
-            String actorUsername,
+            String actorEmail,
             AuditEventAction action,
             String targetResource,
             String targetId,
             String requestId) {
         AuditLog log = new AuditLog();
         log.actorId = actorId;
-        log.actorUsername = actorUsername;
+        log.actorEmail = actorEmail;
         log.action = action;
         log.targetResource = targetResource;
         log.targetId = targetId;
@@ -64,8 +64,8 @@ public class AuditLog extends BaseEntity {
         return actorId;
     }
 
-    public String getActorUsername() {
-        return actorUsername;
+    public String getActorEmail() {
+        return actorEmail;
     }
 
     public AuditEventAction getAction() {

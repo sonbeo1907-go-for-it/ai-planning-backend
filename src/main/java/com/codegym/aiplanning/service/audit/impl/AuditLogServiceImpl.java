@@ -23,13 +23,13 @@ public class AuditLogServiceImpl implements AuditLogService {
     @Transactional
     public void logAction(
             UUID actorId,
-            String actorUsername,
+            String actorEmail,
             AuditEventAction action,
             String targetResource,
             String targetId) {
         AuditLog auditLog = AuditLog.create(
                 actorId,
-                actorUsername,
+                actorEmail,
                 action,
                 targetResource,
                 targetId,

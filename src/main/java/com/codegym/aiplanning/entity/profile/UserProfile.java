@@ -8,6 +8,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
+import java.time.Instant;
 
 @Entity
 @Table(name = "user_profiles")
@@ -21,6 +22,9 @@ public class UserProfile extends BaseEntity {
     @JoinColumn(name = "user_id", nullable = false, unique = true)
     private UserAccount user;
 
+    @Column(name = "display_name", nullable = false, length = 150)
+    private String displayName;
+
     @Column(name = "time_zone", nullable = false, length = 50)
     private String timeZone;
 
@@ -30,14 +34,15 @@ public class UserProfile extends BaseEntity {
     @Column(name = "default_daily_minutes", nullable = false)
     private int defaultDailyMinutes;
 
-    @Column(name = "learning_preferences", columnDefinition = "TEXT")
-    private String learningPreferences;
+    @Column(name = "setup_completed_at")
+    private Instant setupCompletedAt;
 
     protected UserProfile() {}
 
-    public static UserProfile create(UserAccount user) {
+    public static UserProfile create(UserAccount user, String displayName) {
         UserProfile profile = new UserProfile();
         profile.user = user;
+        profile.displayName = displayName.trim();
         profile.timeZone = DEFAULT_TIME_ZONE;
         profile.locale = DEFAULT_LOCALE;
         profile.defaultDailyMinutes = DEFAULT_DAILY_MINUTES;
@@ -46,6 +51,10 @@ public class UserProfile extends BaseEntity {
 
     public UserAccount getUser() {
         return user;
+    }
+
+    public String getDisplayName() {
+        return displayName;
     }
 
     public String getTimeZone() {
@@ -60,15 +69,22 @@ public class UserProfile extends BaseEntity {
         return defaultDailyMinutes;
     }
 
-    public String getLearningPreferences() {
-        return learningPreferences;
+    public Instant getSetupCompletedAt() {
+        return setupCompletedAt;
+    }
+
+    public boolean isSetupCompleted() {
+        return setupCompletedAt != null;
     }
 
     public void update(
+            String displayName,
             String timeZone,
             String locale,
-            Integer defaultDailyMinutes,
-            String learningPreferences) {
+            Integer defaultDailyMinutes) {
+        if (displayName != null) {
+            this.displayName = displayName;
+        }
         if (timeZone != null) {
             this.timeZone = timeZone;
         }
@@ -78,10 +94,17 @@ public class UserProfile extends BaseEntity {
         if (defaultDailyMinutes != null) {
             this.defaultDailyMinutes = defaultDailyMinutes;
         }
-        if (learningPreferences != null) {
-            this.learningPreferences = learningPreferences.isBlank()
-                    ? null
-                    : learningPreferences.trim();
+    }
+
+    public void completeSetup(
+            String displayName,
+            String timeZone,
+            String locale,
+            Integer defaultDailyMinutes,
+            Instant completedAt) {
+        update(displayName, timeZone, locale, defaultDailyMinutes);
+        if (setupCompletedAt == null) {
+            setupCompletedAt = completedAt;
         }
     }
 }

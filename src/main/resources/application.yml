@@ -80,10 +80,8 @@ app:
   bootstrap:
     admin:
       enabled: false
-      username: admin
       email: admin@aiplanning.local
       password: disabled-bootstrap-password
-      full-name: System Administrator
 
 logging:
   pattern:

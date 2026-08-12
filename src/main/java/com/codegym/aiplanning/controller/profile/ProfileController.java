@@ -4,6 +4,7 @@ import com.codegym.aiplanning.common.api.ApiError;
 import com.codegym.aiplanning.common.api.ApiResponse;
 import com.codegym.aiplanning.common.constant.ApiConstant;
 import com.codegym.aiplanning.controller.profile.dto.ChangePasswordRequest;
+import com.codegym.aiplanning.controller.profile.dto.CompleteProfileSetupRequest;
 import com.codegym.aiplanning.controller.profile.dto.ProfileResponse;
 import com.codegym.aiplanning.controller.profile.dto.UpdateProfileRequest;
 import com.codegym.aiplanning.service.auth.PasswordService;
@@ -55,12 +56,26 @@ public class ProfileController {
     @PreAuthorize("hasRole('USER')")
     @Operation(
             summary = "Update the authenticated user's personal learning profile",
-            description = "Updates only the current USER account. Learning preferences are never "
-                    + "available through an administrator endpoint.")
+            description = "Updates only the authenticated USER's shared profile after initial setup. "
+                    + "No administrator endpoint can access or edit it.")
     public ApiResponse<ProfileResponse> updateProfile(
             @Valid @RequestBody UpdateProfileRequest request,
             @AuthenticationPrincipal Jwt jwt) {
         return ApiResponse.of(profileService.updateCurrentProfile(
+                UUID.fromString(jwt.getSubject()), request));
+    }
+
+    @PutMapping(ApiConstant.PROFILE_SETUP)
+    @PreAuthorize("hasRole('USER')")
+    @Operation(
+            summary = "Complete first-access profile setup",
+            description = "Stores the display name, browser-detected IANA time zone and BCP 47 "
+                    + "system language for the authenticated USER. Repeating the same request is safe; "
+                    + "the original completion timestamp is preserved.")
+    public ApiResponse<ProfileResponse> completeInitialSetup(
+            @Valid @RequestBody CompleteProfileSetupRequest request,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ApiResponse.of(profileService.completeInitialSetup(
                 UUID.fromString(jwt.getSubject()), request));
     }
 

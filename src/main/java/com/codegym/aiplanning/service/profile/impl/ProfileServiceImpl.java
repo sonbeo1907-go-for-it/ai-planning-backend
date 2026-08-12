@@ -3,6 +3,7 @@ package com.codegym.aiplanning.service.profile.impl;
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.controller.profile.dto.ProfileResponse;
+import com.codegym.aiplanning.controller.profile.dto.CompleteProfileSetupRequest;
 import com.codegym.aiplanning.controller.profile.dto.UpdateProfileRequest;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.auth.UserAccount;
@@ -13,6 +14,8 @@ import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.profile.ProfileService;
 import java.time.DateTimeException;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.time.ZoneId;
 import java.util.IllformedLocaleException;
 import java.util.Locale;
@@ -49,34 +52,50 @@ public class ProfileServiceImpl implements ProfileService {
 
     @Override
     @Transactional
-    public ProfileResponse updateCurrentProfile(UUID userId, UpdateProfileRequest request) {
-        UserAccount account = userAccountRepository
-                .findByIdForUpdate(userId)
-                .orElseThrow(() -> new BusinessException(
-                        ErrorCode.AUTHENTICATION_REQUIRED, "Authentication is required."));
-        if (account.getRole() != UserRole.USER) {
-            throw new BusinessException(
-                    ErrorCode.ACCESS_DENIED,
-                    "Only personal USER accounts have learning preferences.");
-        }
+    public ProfileResponse completeInitialSetup(
+            UUID userId, CompleteProfileSetupRequest request) {
+        UserAccount account = requireUserAccountForUpdate(userId);
+        UserProfile profile = requireProfileForUpdate(userId);
+        boolean wasCompleted = profile.isSetupCompleted();
 
-        String fullName = normalizeFullName(request.fullName());
-        String timeZone = normalizeTimeZone(request.timeZone());
-        String locale = normalizeLocale(request.locale());
-        UserProfile profile = userProfileRepository
-                .findByUserIdForUpdate(userId)
-                .orElseThrow(() -> new BusinessException(
-                        ErrorCode.INTERNAL_ERROR, "The user profile is not initialized."));
-
-        account.changeFullName(fullName);
-        profile.update(
-                timeZone,
-                locale,
+        profile.completeSetup(
+                normalizeDisplayName(request.displayName()),
+                normalizeTimeZone(request.timeZone()),
+                normalizeLocale(request.locale()),
                 request.defaultDailyMinutes(),
-                request.learningPreferences());
+                Instant.now().truncatedTo(ChronoUnit.MICROS));
         auditLogService.logAction(
                 userId,
-                account.getUsername(),
+                account.getEmail(),
+                wasCompleted
+                        ? AuditEventAction.PROFILE_UPDATED
+                        : AuditEventAction.PROFILE_SETUP_COMPLETED,
+                "UserProfile",
+                profile.getId().toString());
+        return ProfileResponse.from(account, profile);
+    }
+
+    @Override
+    @Transactional
+    public ProfileResponse updateCurrentProfile(UUID userId, UpdateProfileRequest request) {
+        UserAccount account = requireUserAccountForUpdate(userId);
+        String timeZone = normalizeTimeZone(request.timeZone());
+        String locale = normalizeLocale(request.locale());
+        UserProfile profile = requireProfileForUpdate(userId);
+        if (!profile.isSetupCompleted()) {
+            throw new BusinessException(
+                    ErrorCode.PROFILE_SETUP_REQUIRED,
+                    "Complete the first-access profile setup before editing the profile.");
+        }
+
+        profile.update(
+                normalizeDisplayName(request.displayName()),
+                timeZone,
+                locale,
+                request.defaultDailyMinutes());
+        auditLogService.logAction(
+                userId,
+                account.getEmail(),
                 AuditEventAction.PROFILE_UPDATED,
                 "UserProfile",
                 profile.getId().toString());
@@ -91,14 +110,34 @@ public class ProfileServiceImpl implements ProfileService {
                         ErrorCode.INTERNAL_ERROR, "The user profile is not initialized."));
     }
 
-    private String normalizeFullName(String fullName) {
-        if (fullName == null) {
+    private UserAccount requireUserAccountForUpdate(UUID userId) {
+        UserAccount account = userAccountRepository
+                .findByIdForUpdate(userId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.AUTHENTICATION_REQUIRED, "Authentication is required."));
+        if (account.getRole() != UserRole.USER) {
+            throw new BusinessException(
+                    ErrorCode.ACCESS_DENIED,
+                    "Only personal USER accounts have a personal profile.");
+        }
+        return account;
+    }
+
+    private UserProfile requireProfileForUpdate(UUID userId) {
+        return userProfileRepository
+                .findByUserIdForUpdate(userId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.INTERNAL_ERROR, "The user profile is not initialized."));
+    }
+
+    private String normalizeDisplayName(String displayName) {
+        if (displayName == null) {
             return null;
         }
-        if (fullName.isBlank()) {
-            throw invalidProfileField("Full name must not be blank.");
+        if (displayName.isBlank()) {
+            throw invalidProfileField("Display name must not be blank.");
         }
-        return fullName.trim();
+        return displayName.trim();
     }
 
     private String normalizeTimeZone(String timeZone) {

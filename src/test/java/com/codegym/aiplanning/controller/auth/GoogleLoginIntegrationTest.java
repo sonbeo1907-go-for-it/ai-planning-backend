@@ -102,8 +102,9 @@ class GoogleLoginIntegrationTest {
         assertThat(account.getRole()).isEqualTo(UserRole.USER);
         assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
         assertThat(account.getPasswordHash()).isNull();
-        assertThat(account.getUsername()).startsWith("google_");
-        assertThat(userProfileRepository.findByUserId(account.getId())).isPresent();
+        var profile = userProfileRepository.findByUserId(account.getId()).orElseThrow();
+        assertThat(profile.getDisplayName()).isEqualTo("Google User");
+        assertThat(profile.isSetupCompleted()).isFalse();
 
         var identity = authIdentityRepository
                 .findByProviderAndProviderSubject(AuthProvider.GOOGLE, "google-subject-1")
@@ -149,10 +150,8 @@ class GoogleLoginIntegrationTest {
     @Test
     void matchingLocalEmailRequiresExplicitLinkInsteadOfAutomaticLink() throws Exception {
         userAccountRepository.saveAndFlush(UserAccount.create(
-                "existing_local",
                 COLLISION_EMAIL,
                 passwordEncoder.encode("Password@123"),
-                "Existing Local User",
                 UserRole.USER,
                 AccountStatus.ACTIVE));
         stubGoogleIdentity("google-subject-collision", COLLISION_EMAIL);

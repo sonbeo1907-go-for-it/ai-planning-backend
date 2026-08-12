@@ -152,7 +152,7 @@ public class SecurityConfig {
 
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
         converter.setJwtGrantedAuthoritiesConverter(authorities);
-        converter.setPrincipalClaimName("preferred_username");
+        converter.setPrincipalClaimName("email");
         return converter;
     }
 

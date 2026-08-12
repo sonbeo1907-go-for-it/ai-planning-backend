@@ -4,7 +4,7 @@ import com.codegym.aiplanning.service.auth.model.AuthResult;
 
 public interface AuthService {
 
-    void register(String email, String password, String fullName);
+    void register(String email, String password, String displayName);
 
     AuthResult login(String email, String password);
 

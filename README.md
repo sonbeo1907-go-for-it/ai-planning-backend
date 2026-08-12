@@ -4,8 +4,10 @@ Spring Boot foundation for the V2 personal AI learning backend. The current
 codebase provides authentication, authorization, persistence, API errors,
 audit logging, email, migrations, documentation, and testing infrastructure.
 
-Personal learning sources, versioned roadmaps, progress, versioned daily plans,
-AI review, and AI provider configuration are introduced in later V2 phases.
+The first personal-learning slice now provides profile setup and resumable,
+Roadmap-scoped onboarding backed by a GOAL LearningSource and Roadmap draft.
+Versioned Roadmap content, progress, versioned daily plans, AI review, and AI
+provider configuration are introduced in later V2 phases.
 The retired coding-center APIs and tables are absent from the active V2
 baseline. Their code and migrations remain available through Git history.
 
@@ -62,12 +64,11 @@ database is empty:
 
 ```text
 email: admin@aiplanning.local
-internal username: admin
 password: Admin@123
 ```
 
-Change these values with `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_USERNAME`
-and `BOOTSTRAP_ADMIN_PASSWORD`. Local bootstrap is disabled by default outside the
+Change these values with `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`.
+Local bootstrap is disabled by default outside the
 `local` and `test` profiles.
 
 ## Login example
@@ -120,7 +121,6 @@ The `local` profile loads this optional file. Do not commit `.env`.
 | `GOOGLE_AUTH_ENABLED` | Enable `POST /api/v1/auth/google`; default `false` |
 | `GOOGLE_CLIENT_ID` | Google OAuth Web Client ID used as the ID-token audience |
 | `BOOTSTRAP_ADMIN_EMAIL` | Local bootstrap Admin login email |
-| `BOOTSTRAP_ADMIN_USERNAME` | Local bootstrap Admin internal/display identifier |
 | `CORS_ALLOWED_ORIGINS` | Frontend origin list |
 | `SERVER_PORT` | HTTP port, default `8080` |
 
@@ -149,20 +149,26 @@ target/site/jacoco/index.html
 com.codegym.aiplanning
 |-- controller
 |   |-- auth/dto
-|   `-- profile/dto
+|   |-- profile/dto
+|   `-- onboarding/dto
 |-- service
 |   |-- auth
 |   |-- profile
+|   |-- onboarding
 |   |-- audit
 |   `-- email
 |-- repository
 |   |-- auth
 |   |-- audit
-|   `-- profile
+|   |-- profile
+|   |-- source
+|   `-- roadmap
 |-- entity
 |   |-- auth
 |   |-- audit
-|   `-- profile
+|   |-- profile
+|   |-- source
+|   `-- roadmap
 |-- common
 |   |-- api
 |   |-- constant

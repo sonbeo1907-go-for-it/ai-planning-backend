@@ -26,10 +26,6 @@ import com.codegym.aiplanning.service.auth.model.AuthResult;
 import com.codegym.aiplanning.service.auth.model.AuthToken;
 import java.time.Duration;
 import java.time.Instant;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -110,7 +106,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public void register(String email, String password, String fullName) {
+    public void register(String email, String password, String displayName) {
         String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
         String passwordHash = passwordEncoder.encode(password);
 
@@ -121,14 +117,12 @@ public class AuthServiceImpl implements AuthService {
                 }
 
                 UserAccount account = UserAccount.create(
-                        generatedUserUsername(),
                         normalizedEmail,
                         passwordHash,
-                        fullName.trim(),
                         UserRole.USER,
                         AccountStatus.ACTIVE);
                 userAccountRepository.saveAndFlush(account);
-                userProfileRepository.save(UserProfile.create(account));
+                userProfileRepository.save(UserProfile.create(account, displayName));
             });
         } catch (DataIntegrityViolationException exception) {
             // A concurrent registration can win the unique-email race. Return the same
@@ -317,13 +311,12 @@ public class AuthServiceImpl implements AuthService {
         }
 
         UserAccount account = userAccountRepository.saveAndFlush(UserAccount.create(
-                googleUsername(claims.subject()),
                 claims.email(),
                 null,
-                limitLength(claims.fullName(), 150),
                 UserRole.USER,
                 AccountStatus.ACTIVE));
-        userProfileRepository.save(UserProfile.create(account));
+        userProfileRepository.save(UserProfile.create(
+                account, limitLength(claims.displayName(), 150)));
         authIdentityRepository.save(AuthIdentity.google(
                 account, claims.subject(), claims.email()));
         return account;
@@ -340,16 +333,6 @@ public class AuthServiceImpl implements AuthService {
                 issueAccessToken(account, session.getId(), now),
                 rawRefreshToken,
                 sessionProperties.absoluteExpiration().toSeconds());
-    }
-
-    private String googleUsername(String subject) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(subject.getBytes(StandardCharsets.UTF_8));
-            return "google_" + HexFormat.of().formatHex(digest, 0, 12);
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable", exception);
-        }
     }
 
     private String limitLength(String value, int maxLength) {
@@ -370,8 +353,6 @@ public class AuthServiceImpl implements AuthService {
                 .claim("sid", sessionId.toString())
                 .claim("uid", account.getId().toString())
                 .claim("email", account.getEmail())
-                .claim("preferred_username", account.getUsername())
-                .claim("full_name", account.getFullName())
                 .claim("roles", List.of(role))
                 .build();
 
@@ -421,10 +402,6 @@ public class AuthServiceImpl implements AuthService {
     private BusinessException invalidSession() {
         return new BusinessException(
                 ErrorCode.INVALID_SESSION, "The login session is invalid or expired.");
-    }
-
-    private String generatedUserUsername() {
-        return "user_" + UUID.randomUUID().toString().replace("-", "");
     }
 
     private BusinessException invalidGoogleCredential() {

@@ -50,11 +50,11 @@ public class GoogleIdTokenVerifierImpl implements GoogleIdTokenVerifier {
             if (!Boolean.TRUE.equals(jwt.getClaimAsBoolean("email_verified"))) {
                 throw invalidCredential();
             }
-            String fullName = jwt.getClaimAsString("name");
-            if (fullName == null || fullName.isBlank()) {
-                fullName = "Google User";
+            String displayName = jwt.getClaimAsString("name");
+            if (displayName == null || displayName.isBlank()) {
+                displayName = "Google User";
             }
-            return new GoogleIdentityClaims(subject, email, fullName.trim());
+            return new GoogleIdentityClaims(subject, email, displayName.trim());
         } catch (JwtException | IllegalArgumentException exception) {
             throw invalidCredential();
         }

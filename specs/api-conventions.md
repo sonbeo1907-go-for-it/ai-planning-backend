@@ -48,9 +48,10 @@ Protected APIs use the standard error envelope for authentication failures.
 - Entity IDs use UUID.
 - Mutable entities use optimistic-locking versions.
 - APIs that modify versioned resources should expose or accept a version/ETag.
-- Submit, request-revision and approve commands must be idempotent.
+- Draft generation and regeneration commands must use explicit idempotency keys.
 
 ## Time
 
-Timestamps are stored in UTC. Time-zone conversion belongs at the API/client
-boundary according to the configured center time zone.
+Timestamps are stored in UTC. Learning-day and Daily Plan calculations must use
+the authenticated USER's IANA time zone stored in `UserProfile`; presentation
+conversion belongs at the API/client boundary.

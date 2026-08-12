@@ -52,7 +52,7 @@ public class PasswordServiceImpl implements PasswordService {
         if (!passwordEncoder.matches(request.currentPassword(), account.getPasswordHash())) {
             auditLogService.logAction(
                     userId,
-                    account.getUsername(),
+                    account.getEmail(),
                     com.codegym.aiplanning.entity.audit.AuditEventAction.PASSWORD_CHANGE_FAILED,
                     "UserAccount",
                     userId.toString());
@@ -62,7 +62,7 @@ public class PasswordServiceImpl implements PasswordService {
         if (passwordEncoder.matches(request.newPassword(), account.getPasswordHash())) {
             auditLogService.logAction(
                     userId,
-                    account.getUsername(),
+                    account.getEmail(),
                     com.codegym.aiplanning.entity.audit.AuditEventAction.PASSWORD_CHANGE_FAILED,
                     "UserAccount",
                     userId.toString());
@@ -76,7 +76,7 @@ public class PasswordServiceImpl implements PasswordService {
 
         auditLogService.logAction(
                 userId,
-                account.getUsername(),
+                account.getEmail(),
                 com.codegym.aiplanning.entity.audit.AuditEventAction.PASSWORD_CHANGED,
                 "UserAccount",
                 userId.toString());

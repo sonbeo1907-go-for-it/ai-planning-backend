@@ -73,7 +73,7 @@ class AuthControllerIntegrationTest {
     void clearAdminLoginFailures() {
         refreshTokenRepository.deleteAll();
         authSessionRepository.deleteAll();
-        userAccountRepository.findByUsernameIgnoreCase("admin").ifPresent(account -> {
+        userAccountRepository.findByEmailIgnoreCase("admin@aiplanning.local").ifPresent(account -> {
             account.clearLoginFailures();
             userAccountRepository.saveAndFlush(account);
         });
@@ -116,7 +116,6 @@ class AuthControllerIntegrationTest {
 
         mockMvc.perform(get(ApiConstant.PROFILE).header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.username").value("admin"))
                 .andExpect(jsonPath("$.data.email").value("admin@aiplanning.local"))
                 .andExpect(jsonPath("$.data.role").value("ADMIN"))
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"))
@@ -143,16 +142,13 @@ class AuthControllerIntegrationTest {
         UserAccount account = userAccountRepository
                 .findByEmailIgnoreCase(email.toUpperCase())
                 .orElseThrow();
-        org.assertj.core.api.Assertions.assertThat(account.getUsername())
-                .startsWith("user_");
-        org.assertj.core.api.Assertions.assertThat(account.getFullName())
-                .isEqualTo("New User");
         org.assertj.core.api.Assertions.assertThat(account.getRole())
                 .isEqualTo(UserRole.USER);
         org.assertj.core.api.Assertions.assertThat(account.getStatus())
                 .isEqualTo(AccountStatus.ACTIVE);
-        org.assertj.core.api.Assertions.assertThat(userProfileRepository.findByUserId(account.getId()))
-                .isPresent();
+        var profile = userProfileRepository.findByUserId(account.getId()).orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(profile.getDisplayName()).isEqualTo("New User");
+        org.assertj.core.api.Assertions.assertThat(profile.isSetupCompleted()).isFalse();
         org.assertj.core.api.Assertions.assertThat(passwordEncoder.matches(password, account.getPasswordHash()))
                 .isTrue();
 
@@ -240,7 +236,7 @@ class AuthControllerIntegrationTest {
                 .subject(original.getSubject())
                 .claim("typ", "access")
                 .claim("sid", original.getClaimAsString("sid"))
-                .claim("preferred_username", original.getClaimAsString("preferred_username"))
+                .claim("email", original.getClaimAsString("email"))
                 .claim("roles", original.getClaimAsStringList("roles"))
                 .build();
         String expiredToken = jwtEncoder
@@ -387,8 +383,7 @@ class AuthControllerIntegrationTest {
                 .id(UUID.randomUUID().toString())
                 .subject(UUID.randomUUID().toString())
                 .claim("uid", UUID.randomUUID().toString())
-                .claim("preferred_username", "expired-user")
-                .claim("full_name", "Expired User")
+                .claim("email", "expired-user@example.com")
                 .claim("roles", java.util.List.of("ROLE_USER"))
                 .build();
         String expiredToken = jwtEncoder
@@ -436,8 +431,9 @@ class AuthControllerIntegrationTest {
         login("admin", "wrong-password").andExpect(status().isUnauthorized());
         login("admin", "wrong-password").andExpect(status().isUnauthorized());
 
-        UserAccount account =
-                userAccountRepository.findByUsernameIgnoreCase("admin").orElseThrow();
+        UserAccount account = userAccountRepository
+                .findByEmailIgnoreCase("admin@aiplanning.local")
+                .orElseThrow();
         org.assertj.core.api.Assertions.assertThat(account.getFailedLoginAttempts()).isEqualTo(3);
         org.assertj.core.api.Assertions.assertThat(account.getLoginBlockedUntil()).isNotNull();
 
@@ -453,8 +449,9 @@ class AuthControllerIntegrationTest {
 
         login("admin", "Admin@123").andExpect(status().isOk());
 
-        UserAccount account =
-                userAccountRepository.findByUsernameIgnoreCase("admin").orElseThrow();
+        UserAccount account = userAccountRepository
+                .findByEmailIgnoreCase("admin@aiplanning.local")
+                .orElseThrow();
         org.assertj.core.api.Assertions.assertThat(account.getFailedLoginAttempts()).isZero();
         org.assertj.core.api.Assertions.assertThat(account.getLoginBlockedUntil()).isNull();
 
@@ -486,18 +483,18 @@ class AuthControllerIntegrationTest {
                 .andExpect(jsonPath("$.message").value("Invalid email or password."));
     }
 
-    private ResultActions login(String username, String password) throws Exception {
+    private ResultActions login(String accountAlias, String password) throws Exception {
         return mockMvc.perform(post(ApiConstant.AUTH_LOGIN)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(
-                        java.util.Map.of("email", loginEmail(username), "password", password))));
+                        java.util.Map.of("email", loginEmail(accountAlias), "password", password))));
     }
 
-    private String registrationPayload(String email, String password, String fullName) throws Exception {
+    private String registrationPayload(String email, String password, String displayName) throws Exception {
         return objectMapper.writeValueAsString(java.util.Map.of(
                 "email", email,
                 "password", password,
-                "fullName", fullName));
+                "displayName", displayName));
     }
 
     private LoginSession loginSuccessfully() throws Exception {
@@ -514,21 +511,20 @@ class AuthControllerIntegrationTest {
         return new LoginSession(accessToken, refreshCookie);
     }
 
-    private void createAccount(String username, AccountStatus status) {
-        userAccountRepository.findByUsernameIgnoreCase(username).ifPresent(userAccountRepository::delete);
+    private void createAccount(String accountAlias, AccountStatus status) {
+        String email = loginEmail(accountAlias);
+        userAccountRepository.findByEmailIgnoreCase(email).ifPresent(userAccountRepository::delete);
         userAccountRepository.saveAndFlush(UserAccount.create(
-                username,
-                loginEmail(username),
+                email,
                 passwordEncoder.encode("Password@123"),
-                username,
                 UserRole.USER,
                 status));
     }
 
-    private String loginEmail(String username) {
-        return "admin".equals(username)
+    private String loginEmail(String accountAlias) {
+        return "admin".equals(accountAlias)
                 ? "admin@aiplanning.local"
-                : username + "@example.com";
+                : accountAlias + "@example.com";
     }
     private void assertStandardApiError(MvcResult result, int status, String code) throws Exception {
         JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());

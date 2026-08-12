@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test;
 class V2FoundationMigrationTest {
 
     @Test
-    void cleanBaselineContainsOnlyV2FoundationAndRoles() throws Exception {
+    void cleanSchemaContainsV2FoundationAndRoadmapOnboardingConstraints() throws Exception {
         String databaseName = "v2_foundation_" + UUID.randomUUID().toString().replace("-", "");
         String url = "jdbc:h2:mem:" + databaseName
                 + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE";
@@ -36,7 +36,10 @@ class V2FoundationMigrationTest {
                     "refresh_tokens",
                     "auth_identities",
                     "password_reset_tokens",
-                    "audit_logs");
+                    "audit_logs",
+                    "learning_sources",
+                    "roadmaps",
+                    "roadmap_sources");
             assertThat(tables).doesNotContain("courses", "modules", "classes");
 
             UUID userId = UUID.randomUUID();
@@ -44,10 +47,10 @@ class V2FoundationMigrationTest {
                 statement.executeUpdate(accountInsert(userId, "USER", "v2-user@example.com"));
                 statement.executeUpdate("""
                         INSERT INTO user_profiles (
-                            id, user_id, time_zone, locale, default_daily_minutes,
+                            id, user_id, display_name, time_zone, locale, default_daily_minutes,
                             created_at, updated_at
                         ) VALUES (
-                            RANDOM_UUID(), '%s', 'UTC', 'en', 60,
+                            RANDOM_UUID(), '%s', 'V2 User', 'UTC', 'en', 60,
                             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                         )
                         """.formatted(userId));
@@ -60,10 +63,82 @@ class V2FoundationMigrationTest {
                         .isInstanceOf(java.sql.SQLException.class);
                 assertThatThrownBy(() -> statement.executeUpdate("""
                                 INSERT INTO user_profiles (
-                                    id, user_id, time_zone, locale, default_daily_minutes,
+                                    id, user_id, display_name, time_zone, locale, default_daily_minutes,
                                     created_at, updated_at
                                 ) VALUES (
-                                    RANDOM_UUID(), '%s', 'UTC', 'en', 60,
+                                    RANDOM_UUID(), '%s', 'Duplicate', 'UTC', 'en', 60,
+                                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                                )
+                                """.formatted(userId)))
+                        .isInstanceOf(java.sql.SQLException.class);
+
+                UUID sourceId = UUID.randomUUID();
+                UUID roadmapId = UUID.randomUUID();
+                statement.executeUpdate("""
+                        INSERT INTO learning_sources (
+                            id, owner_id, source_type, status, content_text,
+                            created_at, updated_at
+                        ) VALUES (
+                            '%s', '%s', 'GOAL', 'READY', 'Learn React',
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(sourceId, userId));
+                statement.executeUpdate("""
+                        INSERT INTO roadmaps (
+                            id, owner_id, status, proficiency_level,
+                            daily_commitment_minutes, expected_duration_days,
+                            onboarding_completed_at, created_at, updated_at
+                        ) VALUES (
+                            '%s', '%s', 'DRAFT', 'BEGINNER', 30, 30,
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(roadmapId, userId));
+                statement.executeUpdate("""
+                        INSERT INTO roadmap_sources (
+                            id, roadmap_id, learning_source_id, created_at, updated_at
+                        ) VALUES (
+                            RANDOM_UUID(), '%s', '%s', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(roadmapId, sourceId));
+
+                UUID onboardingRoadmapId = UUID.randomUUID();
+                statement.executeUpdate("""
+                        INSERT INTO roadmaps (
+                            id, owner_id, status, onboarding_slot_owner_id,
+                            created_at, updated_at
+                        ) VALUES (
+                            '%s', '%s', 'ONBOARDING', '%s',
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(onboardingRoadmapId, userId, userId));
+
+                assertThatThrownBy(() -> statement.executeUpdate("""
+                                INSERT INTO roadmaps (
+                                    id, owner_id, status, onboarding_slot_owner_id,
+                                    created_at, updated_at
+                                ) VALUES (
+                                    RANDOM_UUID(), '%s', 'ONBOARDING', '%s',
+                                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                                )
+                                """.formatted(userId, userId)))
+                        .isInstanceOf(java.sql.SQLException.class);
+
+                assertThatThrownBy(() -> statement.executeUpdate("""
+                                INSERT INTO roadmaps (
+                                    id, owner_id, status, daily_commitment_minutes,
+                                    created_at, updated_at
+                                ) VALUES (
+                                    RANDOM_UUID(), '%s', 'ONBOARDING', 45,
+                                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                                )
+                                """.formatted(userId)))
+                        .isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.executeUpdate("""
+                                INSERT INTO learning_sources (
+                                    id, owner_id, source_type, status,
+                                    created_at, updated_at
+                                ) VALUES (
+                                    RANDOM_UUID(), '%s', 'GOAL', 'READY',
                                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                                 )
                                 """.formatted(userId)))
@@ -85,12 +160,12 @@ class V2FoundationMigrationTest {
     private String accountInsert(UUID id, String role, String email) {
         return """
                 INSERT INTO user_accounts (
-                    id, username, email, password_hash, full_name, role, status,
+                    id, email, password_hash, role, status,
                     failed_login_attempts, created_at, updated_at
                 ) VALUES (
-                    '%s', 'user_%s', '%s', 'password-hash', 'V2 User', '%s', 'ACTIVE',
+                    '%s', '%s', 'password-hash', '%s', 'ACTIVE',
                     0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 )
-                """.formatted(id, id.toString().replace("-", ""), email, role);
+                """.formatted(id, email, role);
     }
 }

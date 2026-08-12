@@ -61,8 +61,8 @@ public class AuthController {
     @ResponseStatus(HttpStatus.ACCEPTED)
     @Operation(
             summary = "Register a local user account",
-            description = "Creates an ACTIVE account with the USER role, a personal profile, and a generated internal "
-                    + "username. To prevent email enumeration, every valid request receives the "
+            description = "Creates an ACTIVE email-login account with the USER role and an incomplete "
+                    + "personal profile. To prevent email enumeration, every valid request receives the "
                     + "same response whether or not the submitted email is already registered.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -75,7 +75,7 @@ public class AuthController {
                         com.codegym.aiplanning.common.api.ApiError.class)))
     })
     public void register(@Valid @RequestBody RegisterRequest request) {
-        authService.register(request.email(), request.password(), request.fullName());
+        authService.register(request.email(), request.password(), request.displayName());
     }
 
     @PostMapping(ApiConstant.LOGIN)

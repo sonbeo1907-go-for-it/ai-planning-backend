@@ -27,8 +27,10 @@ The retired `STUDENT` and `INSTRUCTOR` roles are not accepted by the V2 schema.
 | POST | `/api/v1/auth/password-reset-request` | Public |
 | POST | `/api/v1/auth/password-reset` | Public reset token |
 | GET | `/api/v1/profile` | Current `USER` or `ADMIN` |
+| PUT | `/api/v1/profile/setup` | Current `USER` only |
 | PATCH | `/api/v1/profile` | Current `USER` only |
 | PUT | `/api/v1/profile/password` | Current account |
+| POST/GET/PATCH | `/api/v1/roadmap-onboarding/**` | Current `USER` and owner scope |
 
 Every future path under `/api/v1/admin/**` requires `ROLE_ADMIN`. This route
 boundary is exclusively for AI provider/model administration. There are no V2
@@ -36,22 +38,23 @@ administrator user-management APIs.
 
 ## Registration and Google sign-in
 
-A valid local registration creates an `ACTIVE` `USER`, a generated
-`user_<uuid>` internal username, a BCrypt password hash, and a default
-`UserProfile`. Clients cannot choose a role or account status. Registration
+A valid local registration creates an `ACTIVE` `USER`, a lowercase email login,
+a BCrypt password hash, and an incomplete `UserProfile`. Clients cannot choose a
+role or account status. Registration
 returns `202 Accepted` without revealing whether the email already exists.
 
 The Google flow verifies an ID token. A first-time identity creates the same
 `USER` and profile with a null `password_hash`. An existing local account with
 the same email must be linked explicitly rather than silently merged.
 
-Email is normalized to lowercase and is the login identifier. The generated
-username remains an internal stable identifier.
+Email is normalized to lowercase and is the only local-login identifier. The
+legacy username and account-level full-name fields do not exist in V2; display
+name belongs to `UserProfile`.
 
 ## Sessions and credentials
 
 Login creates a PostgreSQL session and a hashed rotating refresh token. The
-access JWT contains account ID, session ID, email, username, and one authority:
+access JWT contains account ID, session ID, email, and one authority:
 `ROLE_USER` or `ROLE_ADMIN`. Refresh-token reuse revokes the entire session.
 Redis accelerates revocation and refresh locking; PostgreSQL remains
 authoritative when Redis is unavailable.
@@ -70,25 +73,36 @@ never accepts a target account ID. A USER response includes:
 {
   "data": {
     "id": "<uuid>",
-    "username": "user_<uuid>",
     "email": "user@example.com",
-    "fullName": "Example User",
     "role": "USER",
     "status": "ACTIVE",
-    "preferences": {
+    "profile": {
+      "displayName": "Vũ Ngọc Duy",
       "timeZone": "Asia/Ho_Chi_Minh",
       "locale": "vi-VN",
       "defaultDailyMinutes": 60,
-      "learningPreferences": "Prefer concise examples"
+      "setupCompleted": true,
+      "setupCompletedAt": "2026-08-12T06:00:00Z"
     }
   }
 }
 ```
 
-`PATCH /api/v1/profile` updates only the authenticated USER. Supported fields
-are `fullName`, IANA `timeZone`, BCP 47 `locale`, `defaultDailyMinutes` from 1 to
-1440, and optional `learningPreferences`. ADMIN may read its own account profile
-but cannot create personal learning preferences.
+The frontend detects the browser time zone (for example through
+`Intl.DateTimeFormat().resolvedOptions().timeZone`) and lets the user confirm or
+change it. `PUT /api/v1/profile/setup` validates and stores the display name,
+IANA time-zone ID, BCP 47 locale, and optional default daily minutes, then marks
+first-access setup complete. Repeating the request preserves the original
+completion timestamp.
+
+`PATCH /api/v1/profile` updates the same shared fields only after first-access
+setup is complete. `UserProfile` stores no learning-content preferences. ADMIN
+may read its own authentication account summary but cannot create, read, or
+modify a personal `UserProfile`.
+
+After profile setup, Roadmap onboarding is described in
+[`roadmap-onboarding.md`](roadmap-onboarding.md). Its learning parameters belong
+to a Roadmap and are not additional account-wide profile fields.
 
 ## Audit boundary
 
@@ -105,6 +119,7 @@ must never enter application logs or audit records.
 - Email login is case-insensitive and cannot enumerate accounts.
 - Refresh rotation and reuse detection revoke sessions correctly.
 - Redis failure does not bypass PostgreSQL session validation.
-- Profile reads and updates are derived from the authenticated subject.
+- Profile reads, initial setup, and updates are derived from the authenticated subject.
+- Invalid IANA time zones and BCP 47 locale tags are rejected.
 - ADMIN cannot update a personal learning profile.
 - Audit records contain identifiers and request correlation only.

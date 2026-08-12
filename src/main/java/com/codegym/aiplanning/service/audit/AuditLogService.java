@@ -12,7 +12,7 @@ public interface AuditLogService {
      */
     void logAction(
             UUID actorId,
-            String actorUsername,
+            String actorEmail,
             AuditEventAction action,
             String targetResource,
             String targetId);

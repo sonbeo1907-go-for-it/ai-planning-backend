@@ -21,6 +21,13 @@ public final class ApiConstant {
     public static final String AUTH_PASSWORD_RESET_REQUEST = AUTH + PASSWORD_RESET_REQUEST;
     public static final String AUTH_PASSWORD_RESET = AUTH + PASSWORD_RESET;
     public static final String PROFILE = API_V1 + "/profile";
+    public static final String PROFILE_SETUP = "/setup";
+    public static final String ROADMAP_ONBOARDING = API_V1 + "/roadmap-onboarding";
+    public static final String CURRENT = "/current";
+    public static final String COMPLETE = "/complete";
+    public static final String ROADMAP_ONBOARDING_BY_ID = "/{roadmapId}";
+    public static final String ROADMAP_ONBOARDING_COMPLETE =
+            ROADMAP_ONBOARDING_BY_ID + COMPLETE;
     public static final String ADMIN = API_V1 + "/admin";
 
     private ApiConstant() {}

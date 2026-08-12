@@ -18,6 +18,7 @@ Recommended files:
 
 ```text
 auth.md
+roadmap-onboarding.md
 learning-source.md
 roadmap.md
 daily-plan.md

@@ -40,24 +40,12 @@ public class LocalAdminSeeder implements ApplicationRunner {
             return;
         }
 
-        var existingAdmin = repository.findByUsernameIgnoreCase(properties.username());
-        if (existingAdmin.isPresent()) {
-            UserAccount admin = existingAdmin.get();
-            admin.changeEmail(properties.email());
-            repository.save(admin);
-            log.info("Updated local bootstrap admin login email to '{}'", properties.email());
-            return;
-        }
-
         UserAccount admin = UserAccount.create(
-                properties.username(),
                 properties.email(),
                 passwordEncoder.encode(properties.password()),
-                properties.fullName(),
                 UserRole.ADMIN,
                 AccountStatus.ACTIVE);
         repository.save(admin);
-        log.info("Created local bootstrap admin account '{}' with email '{}'",
-                properties.username(), properties.email());
+        log.info("Created local bootstrap admin account for configured email");
     }
 }
