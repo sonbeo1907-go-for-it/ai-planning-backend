@@ -66,7 +66,6 @@ public class SecurityConfig {
                                 ApiConstant.AUTH_GOOGLE_LOGIN,
                                 ApiConstant.AUTH_REFRESH,
                                 ApiConstant.AUTH_LOGOUT,
-                                ApiConstant.ACCOUNT_EVENTS,
                                 ApiConstant.AUTH_PASSWORD_RESET_REQUEST,
                                 ApiConstant.AUTH_PASSWORD_RESET,
                                 "/actuator/health",
@@ -76,7 +75,7 @@ public class SecurityConfig {
                         .permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**")
                         .permitAll()
-                        .requestMatchers(ApiConstant.COURSES, ApiConstant.COURSES + "/**")
+                        .requestMatchers(ApiConstant.ADMIN + "/**")
                         .hasRole("ADMIN")
                         .anyRequest()
                         .authenticated())

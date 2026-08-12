@@ -1,6 +1,7 @@
 package com.codegym.aiplanning.controller.profile;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -9,15 +10,17 @@ import com.codegym.aiplanning.common.constant.ApiConstant;
 import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
+import com.codegym.aiplanning.entity.profile.UserProfile;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -37,55 +40,79 @@ class ProfileControllerIntegrationTest {
     private UserAccountRepository userAccountRepository;
 
     @Autowired
+    private UserProfileRepository userProfileRepository;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Test
-    void studentProfileUsesCurrentDatabaseAccountAndExposesEnrollmentExtensionPoint()
-            throws Exception {
-        UserAccount student = createAccount("profile-student", UserRole.STUDENT, "Student Profile");
-        String accessToken = login(student.getUsername());
+    void userProfileReturnsPersonalLearningPreferences() throws Exception {
+        UserAccount user = createUser("profile-user", "User Profile");
+        String accessToken = login(user.getUsername());
 
         mockMvc.perform(get(ApiConstant.PROFILE)
                         .header("Authorization", "Bearer " + accessToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.id").value(student.getId().toString()))
-                .andExpect(jsonPath("$.data.username").value("profile-student"))
-                .andExpect(jsonPath("$.data.email").value("profile-student@example.com"))
-                .andExpect(jsonPath("$.data.fullName").value("Student Profile"))
-                .andExpect(jsonPath("$.data.role").value("STUDENT"))
+                .andExpect(jsonPath("$.data.id").value(user.getId().toString()))
+                .andExpect(jsonPath("$.data.username").value("profile-user"))
+                .andExpect(jsonPath("$.data.email").value("profile-user@example.com"))
+                .andExpect(jsonPath("$.data.fullName").value("User Profile"))
+                .andExpect(jsonPath("$.data.role").value("USER"))
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"))
-                .andExpect(jsonPath("$.data.student.currentEnrollments").isEmpty())
-                .andExpect(jsonPath("$.data.instructor").doesNotExist());
+                .andExpect(jsonPath("$.data.preferences.timeZone").value("UTC"))
+                .andExpect(jsonPath("$.data.preferences.locale").value("en"))
+                .andExpect(jsonPath("$.data.preferences.defaultDailyMinutes").value(60));
     }
 
     @Test
-    void instructorProfileExposesAssignedClassExtensionPoint() throws Exception {
-        UserAccount instructor =
-                createAccount("profile-instructor", UserRole.INSTRUCTOR, "Instructor Profile");
-        String accessToken = login(instructor.getUsername());
+    void userCanUpdateOnlyTheirOwnLearningProfile() throws Exception {
+        UserAccount user = createUser("profile-self", "Self Profile");
+        UserAccount other = createUser("profile-other", "Other Profile");
+        String accessToken = login(user.getUsername());
+
+        mockMvc.perform(patch(ApiConstant.PROFILE)
+                        .queryParam("userId", other.getId().toString())
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "fullName": "Updated User",
+                                  "timeZone": "Asia/Ho_Chi_Minh",
+                                  "locale": "vi-VN",
+                                  "defaultDailyMinutes": 90,
+                                  "learningPreferences": "Prefer concise examples"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(user.getId().toString()))
+                .andExpect(jsonPath("$.data.fullName").value("Updated User"))
+                .andExpect(jsonPath("$.data.preferences.timeZone").value("Asia/Ho_Chi_Minh"))
+                .andExpect(jsonPath("$.data.preferences.locale").value("vi-VN"))
+                .andExpect(jsonPath("$.data.preferences.defaultDailyMinutes").value(90))
+                .andExpect(jsonPath("$.data.preferences.learningPreferences")
+                        .value("Prefer concise examples"));
+
+        org.assertj.core.api.Assertions.assertThat(
+                        userAccountRepository.findById(other.getId()).orElseThrow().getFullName())
+                .isEqualTo("Other Profile");
+    }
+
+    @Test
+    void adminCanReadAccountProfileButCannotCreatePersonalLearningPreferences() throws Exception {
+        UserAccount admin = createAccount("profile-admin", "Profile Administrator", UserRole.ADMIN);
+        String accessToken = login(admin.getUsername());
 
         mockMvc.perform(get(ApiConstant.PROFILE)
                         .header("Authorization", "Bearer " + accessToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.role").value("INSTRUCTOR"))
-                .andExpect(jsonPath("$.data.instructor.assignedClasses").isEmpty())
-                .andExpect(jsonPath("$.data.student").doesNotExist());
-    }
+                .andExpect(jsonPath("$.data.role").value("ADMIN"))
+                .andExpect(jsonPath("$.data.preferences").doesNotExist());
 
-    @Test
-    void targetUserIdInRequestCannotChangeWhoseProfileIsReturned() throws Exception {
-        UserAccount authenticatedStudent =
-                createAccount("profile-self", UserRole.STUDENT, "Self Profile");
-        UserAccount otherStudent = createAccount("profile-other", UserRole.STUDENT, "Other Profile");
-        String accessToken = login(authenticatedStudent.getUsername());
-
-        mockMvc.perform(get(ApiConstant.PROFILE)
-                        .queryParam("userId", otherStudent.getId().toString())
-                        .header("Authorization", "Bearer " + accessToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.id").value(authenticatedStudent.getId().toString()))
-                .andExpect(jsonPath("$.data.username").value("profile-self"))
-                .andExpect(jsonPath("$.data.email").value("profile-self@example.com"));
+        mockMvc.perform(patch(ApiConstant.PROFILE)
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"defaultDailyMinutes\":90}"))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -101,8 +128,13 @@ class ProfileControllerIntegrationTest {
                 .contains("never accepts a target user ID");
     }
 
-    private UserAccount createAccount(String username, UserRole role, String fullName) {
-        userAccountRepository.findByUsernameIgnoreCase(username).ifPresent(userAccountRepository::delete);
+    private UserAccount createUser(String username, String fullName) {
+        UserAccount account = createAccount(username, fullName, UserRole.USER);
+        userProfileRepository.saveAndFlush(UserProfile.create(account));
+        return account;
+    }
+
+    private UserAccount createAccount(String username, String fullName, UserRole role) {
         return userAccountRepository.saveAndFlush(UserAccount.create(
                 username,
                 username + "@example.com",
@@ -113,11 +145,12 @@ class ProfileControllerIntegrationTest {
     }
 
     private String login(String username) throws Exception {
+        String email = username + "@example.com";
         MvcResult result = mockMvc.perform(post(ApiConstant.AUTH_LOGIN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
                                 java.util.Map.of(
-                                        "email", username + "@example.com",
+                                        "email", email,
                                         "password", "Password@123"))))
                 .andExpect(status().isOk())
                 .andReturn();

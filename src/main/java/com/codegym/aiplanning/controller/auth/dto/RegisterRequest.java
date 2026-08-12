@@ -10,7 +10,7 @@ import jakarta.validation.constraints.Size;
 public record RegisterRequest(
         @Schema(
                         description = "Email address used to sign in",
-                        example = "student@example.com",
+                        example = "user@example.com",
                         requiredMode = Schema.RequiredMode.REQUIRED)
                 @NotBlank(message = "Email is required")
                 @Email(message = "Email must be valid")

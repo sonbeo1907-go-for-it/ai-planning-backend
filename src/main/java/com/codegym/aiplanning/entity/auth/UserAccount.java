@@ -125,15 +125,9 @@ public class UserAccount extends BaseEntity {
         return loginBlockedUntil;
     }
 
-    public void updateProfile(String fullName, UserRole role, AccountStatus status) {
+    public void changeFullName(String fullName) {
         if (fullName != null && !fullName.isBlank()) {
-            this.fullName = fullName;
-        }
-        if (role != null) {
-            this.role = role;
-        }
-        if (status != null) {
-            this.status = status;
+            this.fullName = fullName.trim();
         }
     }
 
@@ -148,16 +142,6 @@ public class UserAccount extends BaseEntity {
             this.passwordHash = newPasswordHash;
             clearLoginFailures();
         }
-    }
-
-    public void setStatus(AccountStatus status) {
-        if (status != null) {
-            this.status = status;
-        }
-    }
-
-    public void deactivate() {
-        this.status = AccountStatus.INACTIVE;
     }
 
     private static String normalizeEmail(String email) {

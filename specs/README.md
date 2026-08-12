@@ -18,14 +18,18 @@ Recommended files:
 
 ```text
 auth.md
-course.md
-organization.md
-curriculum.md
-weekly-plan.md
+learning-source.md
+roadmap.md
 daily-plan.md
 progress.md
-review.md
+ai-review.md
+ai-provider.md
 ```
+
+Instructor, StudyClass, Enrollment, WeeklyPlan, and institution-owned
+course/curriculum modules are outside the V2 MVP. The project uses a clean V2
+Flyway baseline because all pre-V2 databases were declared disposable; the old
+migrations remain available through Git history only.
 
 The specification must be updated in the same pull request when an API contract
 or business rule changes.

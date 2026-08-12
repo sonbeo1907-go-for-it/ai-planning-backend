@@ -1,5 +1,6 @@
 package com.codegym.aiplanning.service.email;
 
+import com.codegym.aiplanning.common.utils.StringMaskUtils;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
@@ -48,7 +49,10 @@ public class SmtpEmailService implements EmailService {
 
             mailSender.send(message);
         } catch (MessagingException e) {
-            log.error("Failed to construct HTML email for: {}", toEmail, e);
+            log.error(
+                    "Failed to construct HTML email for: {}",
+                    StringMaskUtils.maskEmail(toEmail),
+                    e);
             throw new RuntimeException("Email construction failed", e);
         }
     }

@@ -15,7 +15,7 @@
     <artifactId>ai-planning-backend</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <name>AI Planning Backend</name>
-    <description>Planning Core backend for the CodeGym learning planning application</description>
+    <description>Backend for a personal AI-assisted learning platform</description>
 
     <properties>
         <java.version>17</java.version>
@@ -27,10 +27,6 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-websocket</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

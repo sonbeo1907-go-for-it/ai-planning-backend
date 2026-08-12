@@ -13,11 +13,8 @@ public class LocalEmailService implements EmailService {
 
     @Override
     public void sendPasswordResetEmail(String toEmail, String resetLink) {
-        log.debug("==========================================================================");
-        log.debug("LOCAL EMAIL SIMULATION");
-        log.debug("To: {}", toEmail);
-        log.debug("Subject: Password Reset Request");
-        log.debug("Link: {}", resetLink);
-        log.debug("==========================================================================");
+        // Reset links contain bearer credentials. Even the local fallback must not
+        // copy them, or the destination email, into application logs.
+        log.info("Local email delivery is disabled; password reset email was not sent.");
     }
 }

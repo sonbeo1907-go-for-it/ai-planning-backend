@@ -15,6 +15,8 @@ import com.codegym.aiplanning.repository.auth.AuthIdentityRepository;
 import com.codegym.aiplanning.repository.auth.AuthSessionRepository;
 import com.codegym.aiplanning.repository.auth.RefreshTokenRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import com.codegym.aiplanning.entity.profile.UserProfile;
+import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.codegym.aiplanning.service.auth.AuthService;
 import com.codegym.aiplanning.service.auth.GoogleIdTokenVerifier;
 import com.codegym.aiplanning.service.auth.LoginAttemptService;
@@ -57,6 +59,7 @@ public class AuthServiceImpl implements AuthService {
 
     private final AuthenticationManager authenticationManager;
     private final UserAccountRepository userAccountRepository;
+    private final UserProfileRepository userProfileRepository;
     private final AuthIdentityRepository authIdentityRepository;
     private final AuthSessionRepository authSessionRepository;
     private final RefreshTokenRepository refreshTokenRepository;
@@ -74,6 +77,7 @@ public class AuthServiceImpl implements AuthService {
     public AuthServiceImpl(
             AuthenticationManager authenticationManager,
             UserAccountRepository userAccountRepository,
+            UserProfileRepository userProfileRepository,
             AuthIdentityRepository authIdentityRepository,
             AuthSessionRepository authSessionRepository,
             RefreshTokenRepository refreshTokenRepository,
@@ -89,6 +93,7 @@ public class AuthServiceImpl implements AuthService {
             PasswordEncoder passwordEncoder) {
         this.authenticationManager = authenticationManager;
         this.userAccountRepository = userAccountRepository;
+        this.userProfileRepository = userProfileRepository;
         this.authIdentityRepository = authIdentityRepository;
         this.authSessionRepository = authSessionRepository;
         this.refreshTokenRepository = refreshTokenRepository;
@@ -116,13 +121,14 @@ public class AuthServiceImpl implements AuthService {
                 }
 
                 UserAccount account = UserAccount.create(
-                        generatedStudentUsername(),
+                        generatedUserUsername(),
                         normalizedEmail,
                         passwordHash,
                         fullName.trim(),
-                        UserRole.STUDENT,
+                        UserRole.USER,
                         AccountStatus.ACTIVE);
                 userAccountRepository.saveAndFlush(account);
+                userProfileRepository.save(UserProfile.create(account));
             });
         } catch (DataIntegrityViolationException exception) {
             // A concurrent registration can win the unique-email race. Return the same
@@ -315,8 +321,9 @@ public class AuthServiceImpl implements AuthService {
                 claims.email(),
                 null,
                 limitLength(claims.fullName(), 150),
-                UserRole.STUDENT,
+                UserRole.USER,
                 AccountStatus.ACTIVE));
+        userProfileRepository.save(UserProfile.create(account));
         authIdentityRepository.save(AuthIdentity.google(
                 account, claims.subject(), claims.email()));
         return account;
@@ -416,8 +423,8 @@ public class AuthServiceImpl implements AuthService {
                 ErrorCode.INVALID_SESSION, "The login session is invalid or expired.");
     }
 
-    private String generatedStudentUsername() {
-        return "student_" + UUID.randomUUID().toString().replace("-", "");
+    private String generatedUserUsername() {
+        return "user_" + UUID.randomUUID().toString().replace("-", "");
     }
 
     private BusinessException invalidGoogleCredential() {

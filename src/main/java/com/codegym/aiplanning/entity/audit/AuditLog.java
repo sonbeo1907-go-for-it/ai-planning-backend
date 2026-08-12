@@ -49,18 +49,6 @@ public class AuditLog extends BaseEntity {
             AuditEventAction action,
             String targetResource,
             String targetId,
-            String details) {
-        return create(actorId, actorUsername, action, targetResource, targetId, details, null, null);
-    }
-
-    public static AuditLog create(
-            UUID actorId,
-            String actorUsername,
-            AuditEventAction action,
-            String targetResource,
-            String targetId,
-            String details,
-            String metadata,
             String requestId) {
         AuditLog log = new AuditLog();
         log.actorId = actorId;
@@ -68,8 +56,6 @@ public class AuditLog extends BaseEntity {
         log.action = action;
         log.targetResource = targetResource;
         log.targetId = targetId;
-        log.details = details;
-        log.metadata = metadata;
         log.requestId = requestId;
         return log;
     }

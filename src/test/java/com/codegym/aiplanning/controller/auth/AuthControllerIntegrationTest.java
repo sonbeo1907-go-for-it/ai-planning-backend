@@ -12,6 +12,7 @@ import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.repository.auth.AuthSessionRepository;
 import com.codegym.aiplanning.repository.auth.RefreshTokenRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
@@ -49,6 +50,9 @@ class AuthControllerIntegrationTest {
 
     @Autowired
     private UserAccountRepository userAccountRepository;
+
+    @Autowired
+    private UserProfileRepository userProfileRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -122,13 +126,13 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
-    void registerCreatesAnActiveStudentThatCanLogIn() throws Exception {
+    void registerCreatesAnActiveUserThatCanLogIn() throws Exception {
         String email = "register-" + UUID.randomUUID() + "@example.com";
         String password = "Password@123";
 
         MvcResult registration = mockMvc.perform(post(ApiConstant.AUTH_REGISTER)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(registrationPayload(email, password, "New Student")))
+                        .content(registrationPayload(email, password, "New User")))
                 .andExpect(status().isAccepted())
                 .andReturn();
 
@@ -140,13 +144,15 @@ class AuthControllerIntegrationTest {
                 .findByEmailIgnoreCase(email.toUpperCase())
                 .orElseThrow();
         org.assertj.core.api.Assertions.assertThat(account.getUsername())
-                .startsWith("student_");
+                .startsWith("user_");
         org.assertj.core.api.Assertions.assertThat(account.getFullName())
-                .isEqualTo("New Student");
+                .isEqualTo("New User");
         org.assertj.core.api.Assertions.assertThat(account.getRole())
-                .isEqualTo(UserRole.STUDENT);
+                .isEqualTo(UserRole.USER);
         org.assertj.core.api.Assertions.assertThat(account.getStatus())
                 .isEqualTo(AccountStatus.ACTIVE);
+        org.assertj.core.api.Assertions.assertThat(userProfileRepository.findByUserId(account.getId()))
+                .isPresent();
         org.assertj.core.api.Assertions.assertThat(passwordEncoder.matches(password, account.getPasswordHash()))
                 .isTrue();
 
@@ -166,14 +172,14 @@ class AuthControllerIntegrationTest {
 
         MvcResult firstRegistration = mockMvc.perform(post(ApiConstant.AUTH_REGISTER)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(registrationPayload(email, originalPassword, "First Student")))
+                        .content(registrationPayload(email, originalPassword, "First User")))
                 .andExpect(status().isAccepted())
                 .andReturn();
         UserAccount originalAccount = userAccountRepository.findByEmailIgnoreCase(email).orElseThrow();
 
         MvcResult duplicateRegistration = mockMvc.perform(post(ApiConstant.AUTH_REGISTER)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(registrationPayload(email.toUpperCase(), replacementPassword, "Other Student")))
+                        .content(registrationPayload(email.toUpperCase(), replacementPassword, "Other User")))
                 .andExpect(status().isAccepted())
                 .andReturn();
 
@@ -197,7 +203,7 @@ class AuthControllerIntegrationTest {
         mockMvc.perform(post(ApiConstant.AUTH_REGISTER)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationPayload(
-                                "weak-password@example.com", "password", "New Student")))
+                                "weak-password@example.com", "password", "New User")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.violations[?(@.field == 'password')]").exists());
@@ -383,7 +389,7 @@ class AuthControllerIntegrationTest {
                 .claim("uid", UUID.randomUUID().toString())
                 .claim("preferred_username", "expired-user")
                 .claim("full_name", "Expired User")
-                .claim("roles", java.util.List.of("ROLE_STUDENT"))
+                .claim("roles", java.util.List.of("ROLE_USER"))
                 .build();
         String expiredToken = jwtEncoder
                 .encode(JwtEncoderParameters.from(
@@ -515,7 +521,7 @@ class AuthControllerIntegrationTest {
                 loginEmail(username),
                 passwordEncoder.encode("Password@123"),
                 username,
-                UserRole.STUDENT,
+                UserRole.USER,
                 status));
     }
 

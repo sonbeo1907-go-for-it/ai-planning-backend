@@ -5,17 +5,20 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.codegym.aiplanning.config.RequestIdFilter;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.audit.AuditLog;
 import com.codegym.aiplanning.repository.audit.AuditLogRepository;
 import com.codegym.aiplanning.service.audit.impl.AuditLogServiceImpl;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.MDC;
 
 @ExtendWith(MockitoExtension.class)
 class AuditLogServiceTest {
@@ -30,63 +33,36 @@ class AuditLogServiceTest {
         auditLogService = new AuditLogServiceImpl(auditLogRepository);
     }
 
-    @Test
-    void logAction_withBasicDetails_savesAuditLog() {
-        UUID actorId = UUID.randomUUID();
-        when(auditLogRepository.save(any(AuditLog.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        auditLogService.logAction(
-                actorId,
-                "admin@example.com",
-                AuditEventAction.USER_DISABLED,
-                "USER",
-                "user-123",
-                "Disabled user"
-        );
-
-        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
-        verify(auditLogRepository).save(captor.capture());
-
-        AuditLog saved = captor.getValue();
-        assertThat(saved.getActorId()).isEqualTo(actorId);
-        assertThat(saved.getActorUsername()).isEqualTo("admin@example.com");
-        assertThat(saved.getAction()).isEqualTo(AuditEventAction.USER_DISABLED);
-        assertThat(saved.getTargetResource()).isEqualTo("USER");
-        assertThat(saved.getTargetId()).isEqualTo("user-123");
-        assertThat(saved.getDetails()).isEqualTo("Disabled user");
-        assertThat(saved.getMetadata()).isNull();
-        assertThat(saved.getRequestId()).isNull();
+    @AfterEach
+    void clearMdc() {
+        MDC.clear();
     }
 
     @Test
-    void logAction_withMetadataAndRequestId_savesEnrichedAuditLog() {
+    void logActionStoresOnlyIdentifiersAndRequestCorrelation() {
         UUID actorId = UUID.randomUUID();
-        when(auditLogRepository.save(any(AuditLog.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        String metadataJson = "{\"studentId\":\"student-uuid\",\"classId\":\"class-uuid\"}";
-        String requestId = "req-9999";
+        when(auditLogRepository.save(any(AuditLog.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        MDC.put(RequestIdFilter.REQUEST_ID_MDC_KEY, "req-9999");
 
         auditLogService.logAction(
                 actorId,
-                "instructor@example.com",
-                AuditEventAction.STUDENT_ADDED_TO_CLASS,
-                "CLASS_MEMBERSHIP",
-                "membership-1",
-                "Added student to class",
-                metadataJson,
-                requestId
-        );
+                "user-123",
+                AuditEventAction.PROFILE_UPDATED,
+                "UserProfile",
+                "profile-123");
 
         ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
         verify(auditLogRepository).save(captor.capture());
 
         AuditLog saved = captor.getValue();
         assertThat(saved.getActorId()).isEqualTo(actorId);
-        assertThat(saved.getActorUsername()).isEqualTo("instructor@example.com");
-        assertThat(saved.getAction()).isEqualTo(AuditEventAction.STUDENT_ADDED_TO_CLASS);
-        assertThat(saved.getTargetResource()).isEqualTo("CLASS_MEMBERSHIP");
-        assertThat(saved.getTargetId()).isEqualTo("membership-1");
-        assertThat(saved.getMetadata()).isEqualTo(metadataJson);
-        assertThat(saved.getRequestId()).isEqualTo(requestId);
+        assertThat(saved.getActorUsername()).isEqualTo("user-123");
+        assertThat(saved.getAction()).isEqualTo(AuditEventAction.PROFILE_UPDATED);
+        assertThat(saved.getTargetResource()).isEqualTo("UserProfile");
+        assertThat(saved.getTargetId()).isEqualTo("profile-123");
+        assertThat(saved.getDetails()).isNull();
+        assertThat(saved.getMetadata()).isNull();
+        assertThat(saved.getRequestId()).isEqualTo("req-9999");
     }
 }

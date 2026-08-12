@@ -16,6 +16,7 @@ import com.codegym.aiplanning.repository.auth.AuthIdentityRepository;
 import com.codegym.aiplanning.repository.auth.AuthSessionRepository;
 import com.codegym.aiplanning.repository.auth.RefreshTokenRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.codegym.aiplanning.service.auth.GoogleIdTokenVerifier;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Map;
@@ -39,7 +40,7 @@ import org.springframework.test.web.servlet.MvcResult;
 })
 class GoogleLoginIntegrationTest {
 
-    private static final String GOOGLE_EMAIL = "google.student@example.com";
+    private static final String GOOGLE_EMAIL = "google.user@example.com";
     private static final String COLLISION_EMAIL = "existing.local@example.com";
 
     @Autowired
@@ -50,6 +51,9 @@ class GoogleLoginIntegrationTest {
 
     @Autowired
     private UserAccountRepository userAccountRepository;
+
+    @Autowired
+    private UserProfileRepository userProfileRepository;
 
     @Autowired
     private AuthIdentityRepository authIdentityRepository;
@@ -80,7 +84,7 @@ class GoogleLoginIntegrationTest {
     }
 
     @Test
-    void firstGoogleLoginCreatesStudentWithoutPasswordAndLocalSession() throws Exception {
+    void firstGoogleLoginCreatesUserWithoutPasswordAndLocalSession() throws Exception {
         stubGoogleIdentity("google-subject-1", GOOGLE_EMAIL);
 
         MvcResult result = googleLogin("valid-google-token")
@@ -95,10 +99,11 @@ class GoogleLoginIntegrationTest {
         UserAccount account = userAccountRepository
                 .findByEmailIgnoreCase(GOOGLE_EMAIL)
                 .orElseThrow();
-        assertThat(account.getRole()).isEqualTo(UserRole.STUDENT);
+        assertThat(account.getRole()).isEqualTo(UserRole.USER);
         assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
         assertThat(account.getPasswordHash()).isNull();
         assertThat(account.getUsername()).startsWith("google_");
+        assertThat(userProfileRepository.findByUserId(account.getId())).isPresent();
 
         var identity = authIdentityRepository
                 .findByProviderAndProviderSubject(AuthProvider.GOOGLE, "google-subject-1")
@@ -148,7 +153,7 @@ class GoogleLoginIntegrationTest {
                 COLLISION_EMAIL,
                 passwordEncoder.encode("Password@123"),
                 "Existing Local User",
-                UserRole.STUDENT,
+                UserRole.USER,
                 AccountStatus.ACTIVE));
         stubGoogleIdentity("google-subject-collision", COLLISION_EMAIL);
 
@@ -169,6 +174,6 @@ class GoogleLoginIntegrationTest {
     private void stubGoogleIdentity(String subject, String email) {
         when(googleIdTokenVerifier.verify(org.mockito.ArgumentMatchers.anyString()))
                 .thenReturn(new GoogleIdTokenVerifier.GoogleIdentityClaims(
-                        subject, email, "Google Student"));
+                        subject, email, "Google User"));
     }
 }

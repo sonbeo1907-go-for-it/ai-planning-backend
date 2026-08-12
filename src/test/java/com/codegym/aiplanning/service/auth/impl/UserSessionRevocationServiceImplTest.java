@@ -102,7 +102,7 @@ class UserSessionRevocationServiceImplTest {
                 username + "@example.com",
                 "password-hash",
                 username,
-                UserRole.STUDENT,
+                UserRole.USER,
                 AccountStatus.ACTIVE);
         AuthSession session = AuthSession.create(account, Instant.now().plus(lifetime));
         ReflectionTestUtils.setField(session, "id", UUID.randomUUID());

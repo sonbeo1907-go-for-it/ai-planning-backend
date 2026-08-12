@@ -55,8 +55,7 @@ public class PasswordServiceImpl implements PasswordService {
                     account.getUsername(),
                     com.codegym.aiplanning.entity.audit.AuditEventAction.PASSWORD_CHANGE_FAILED,
                     "UserAccount",
-                    userId.toString(),
-                    "Current password incorrect");
+                    userId.toString());
             throw new BusinessException(ErrorCode.CURRENT_PASSWORD_INCORRECT, "Current password is incorrect");
         }
 
@@ -66,8 +65,7 @@ public class PasswordServiceImpl implements PasswordService {
                     account.getUsername(),
                     com.codegym.aiplanning.entity.audit.AuditEventAction.PASSWORD_CHANGE_FAILED,
                     "UserAccount",
-                    userId.toString(),
-                    "New password must be different from current password");
+                    userId.toString());
             throw new BusinessException(
                     ErrorCode.NEW_PASSWORD_MUST_BE_DIFFERENT, "New password must be different from current password");
         }
@@ -81,7 +79,6 @@ public class PasswordServiceImpl implements PasswordService {
                 account.getUsername(),
                 com.codegym.aiplanning.entity.audit.AuditEventAction.PASSWORD_CHANGED,
                 "UserAccount",
-                userId.toString(),
-                "Password changed successfully");
+                userId.toString());
     }
 }

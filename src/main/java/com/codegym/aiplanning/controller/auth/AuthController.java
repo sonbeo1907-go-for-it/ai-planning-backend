@@ -60,8 +60,8 @@ public class AuthController {
     @SecurityRequirements
     @ResponseStatus(HttpStatus.ACCEPTED)
     @Operation(
-            summary = "Register a local Student account",
-            description = "Creates an ACTIVE account with the STUDENT role and a generated internal "
+            summary = "Register a local user account",
+            description = "Creates an ACTIVE account with the USER role, a personal profile, and a generated internal "
                     + "username. To prevent email enumeration, every valid request receives the "
                     + "same response whether or not the submitted email is already registered.")
     @ApiResponses({
@@ -117,7 +117,7 @@ public class AuthController {
             summary = "Sign in or register with Google",
             description = "Validates a Google Identity Services ID token. A previously linked "
                     + "Google identity signs in to its existing account; a first-time identity "
-                    + "creates an active Student account without a local password. The response "
+                    + "creates an active USER account and personal profile without a local password. The response "
                     + "uses the same local access JWT and HttpOnly refresh cookie as email login.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -237,7 +237,7 @@ public class AuthController {
                 .build();
     }
 
-    @PostMapping("/password-reset-request")
+    @PostMapping(ApiConstant.PASSWORD_RESET_REQUEST)
     @SecurityRequirements // Make it public
     @Operation(
             summary = "Request a password reset",
@@ -261,7 +261,7 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.of("If an account with that email exists, a password reset link has been sent."));
     }
 
-    @PostMapping("/password-reset")
+    @PostMapping(ApiConstant.PASSWORD_RESET)
     @SecurityRequirements // Make it public
     @Operation(
             summary = "Complete a password reset",

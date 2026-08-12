@@ -3,15 +3,23 @@ package com.codegym.aiplanning.controller.profile;
 import com.codegym.aiplanning.common.api.ApiError;
 import com.codegym.aiplanning.common.api.ApiResponse;
 import com.codegym.aiplanning.common.constant.ApiConstant;
+import com.codegym.aiplanning.controller.profile.dto.ChangePasswordRequest;
 import com.codegym.aiplanning.controller.profile.dto.ProfileResponse;
+import com.codegym.aiplanning.controller.profile.dto.UpdateProfileRequest;
+import com.codegym.aiplanning.service.auth.PasswordService;
 import com.codegym.aiplanning.service.profile.ProfileService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.Valid;
 import java.util.UUID;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -20,9 +28,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProfileController {
 
     private final ProfileService profileService;
-    private final com.codegym.aiplanning.service.auth.PasswordService passwordService;
+    private final PasswordService passwordService;
 
-    public ProfileController(ProfileService profileService, com.codegym.aiplanning.service.auth.PasswordService passwordService) {
+    public ProfileController(ProfileService profileService, PasswordService passwordService) {
         this.profileService = profileService;
         this.passwordService = passwordService;
     }
@@ -30,25 +38,38 @@ public class ProfileController {
     @GetMapping
     @Operation(
             summary = "Read the authenticated user's profile",
-            description = "Returns the current user only; this endpoint never accepts a target user ID.",
+            description = "Returns the current account only; this endpoint never accepts a target user ID.",
             responses = {
                 @io.swagger.v3.oas.annotations.responses.ApiResponse(
                         responseCode = "200", description = "Current profile"),
                 @io.swagger.v3.oas.annotations.responses.ApiResponse(
                         responseCode = "401",
-                        description = "Authentication is required or the access-token session has expired.",
+                        description = "Authentication is required or the session has expired.",
                         content = @Content(schema = @Schema(implementation = ApiError.class)))
             })
     public ApiResponse<ProfileResponse> getProfile(@AuthenticationPrincipal Jwt jwt) {
         return ApiResponse.of(profileService.getCurrentProfile(UUID.fromString(jwt.getSubject())));
     }
 
-    @org.springframework.web.bind.annotation.PutMapping("/password")
+    @PatchMapping
+    @PreAuthorize("hasRole('USER')")
     @Operation(
-            summary = "Đổi mật khẩu của chính mình (AUTH-08)",
-            description = "Người dùng xác nhận mật khẩu hiện tại và đổi sang mật khẩu mới. Thu hồi tất cả các phiên đăng nhập khác.")
+            summary = "Update the authenticated user's personal learning profile",
+            description = "Updates only the current USER account. Learning preferences are never "
+                    + "available through an administrator endpoint.")
+    public ApiResponse<ProfileResponse> updateProfile(
+            @Valid @RequestBody UpdateProfileRequest request,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ApiResponse.of(profileService.updateCurrentProfile(
+                UUID.fromString(jwt.getSubject()), request));
+    }
+
+    @PutMapping(ApiConstant.PASSWORD)
+    @Operation(
+            summary = "Change the authenticated user's password",
+            description = "Verifies the current password, changes it, and revokes other sessions.")
     public ApiResponse<Void> changePassword(
-            @jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody com.codegym.aiplanning.controller.profile.dto.ChangePasswordRequest request,
+            @Valid @RequestBody ChangePasswordRequest request,
             @AuthenticationPrincipal Jwt jwt) {
         UUID userId = UUID.fromString(jwt.getSubject());
         UUID currentSessionId = UUID.fromString(jwt.getClaimAsString("sid"));

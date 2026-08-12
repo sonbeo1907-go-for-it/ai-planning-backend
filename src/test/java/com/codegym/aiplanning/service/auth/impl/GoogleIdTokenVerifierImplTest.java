@@ -33,8 +33,8 @@ class GoogleIdTokenVerifierImplTest {
         var claims = verifier.verify("valid-token");
 
         assertThat(claims.subject()).isEqualTo("google-subject-123");
-        assertThat(claims.email()).isEqualTo("student@example.com");
-        assertThat(claims.fullName()).isEqualTo("Google Student");
+        assertThat(claims.email()).isEqualTo("user@example.com");
+        assertThat(claims.fullName()).isEqualTo("Google User");
     }
 
     @Test
@@ -81,9 +81,9 @@ class GoogleIdTokenVerifierImplTest {
                 .audience(List.of("google-client-id"))
                 .issuedAt(now.minusSeconds(30))
                 .expiresAt(now.plusSeconds(300))
-                .claim("email", "Student@Example.com")
+                .claim("email", "User@Example.com")
                 .claim("email_verified", emailVerified)
-                .claim("name", "Google Student")
+                .claim("name", "Google User")
                 .build();
     }
 }

@@ -3,9 +3,8 @@ package com.codegym.aiplanning.controller.profile.dto;
 import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
-import com.codegym.aiplanning.service.profile.model.ProfileRoleDetails;
+import com.codegym.aiplanning.entity.profile.UserProfile;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import java.util.List;
 import java.util.UUID;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -16,10 +15,9 @@ public record ProfileResponse(
         String fullName,
         UserRole role,
         AccountStatus status,
-        StudentProfile student,
-        InstructorProfile instructor) {
+        LearningPreferences preferences) {
 
-    public static ProfileResponse from(UserAccount account, ProfileRoleDetails details) {
+    public static ProfileResponse from(UserAccount account, UserProfile profile) {
         return new ProfileResponse(
                 account.getId(),
                 account.getUsername(),
@@ -27,28 +25,21 @@ public record ProfileResponse(
                 account.getFullName(),
                 account.getRole(),
                 account.getStatus(),
-                details.student(),
-                details.instructor());
+                profile == null ? null : LearningPreferences.from(profile));
     }
 
-    public record StudentProfile(List<EnrollmentSummary> currentEnrollments) {}
+    public record LearningPreferences(
+            String timeZone,
+            String locale,
+            int defaultDailyMinutes,
+            String learningPreferences) {
 
-    public record EnrollmentSummary(
-            UUID enrollmentId,
-            UUID classId,
-            String classCode,
-            String className,
-            UUID courseId,
-            String courseCode,
-            String courseName) {}
-
-    public record InstructorProfile(List<AssignedClassSummary> assignedClasses) {}
-
-    public record AssignedClassSummary(
-            UUID classId,
-            String classCode,
-            String className,
-            UUID courseId,
-            String courseCode,
-            String courseName) {}
+        static LearningPreferences from(UserProfile profile) {
+            return new LearningPreferences(
+                    profile.getTimeZone(),
+                    profile.getLocale(),
+                    profile.getDefaultDailyMinutes(),
+                    profile.getLearningPreferences());
+        }
+    }
 }

@@ -76,7 +76,8 @@ Google ID token as the application's session token.
 3. Obtain a real Google ID token through the frontend Google button.
 4. Call `POST /api/v1/auth/google` with that token.
 5. Confirm that the response sets `refresh_token`, `/api/v1/profile` reports
-   role `STUDENT`, and the new `user_accounts.password_hash` is null.
+   role `USER`, a default `user_profiles` row, and a null
+   `user_accounts.password_hash`.
 
 Google ID tokens are short-lived. Copying an old token into Swagger may return
 `401 INVALID_GOOGLE_CREDENTIAL`; obtain a fresh credential and try again.

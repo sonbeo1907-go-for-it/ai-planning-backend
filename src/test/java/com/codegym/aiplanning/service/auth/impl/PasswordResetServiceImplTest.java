@@ -186,8 +186,7 @@ class PasswordResetServiceImplTest {
                 eq(email),
                 eq(AuditEventAction.PASSWORD_RESET_REQUESTED),
                 eq("PasswordResetToken"),
-                anyString(),
-                contains("tes***@example.com"));
+                anyString());
 
         // 4. Publishes event
         verify(eventPublisher).publishEvent(eventCaptor.capture());

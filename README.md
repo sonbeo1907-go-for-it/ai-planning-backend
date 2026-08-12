@@ -1,11 +1,13 @@
 # AI Planning Backend
 
-Spring Boot backend for the manual Planning Core MVP. The codebase currently
-provides the shared foundation for authentication, authorization, persistence,
-API errors, migrations, documentation, testing, and the planning status model.
+Spring Boot foundation for the V2 personal AI learning backend. The current
+codebase provides authentication, authorization, persistence, API errors,
+audit logging, email, migrations, documentation, and testing infrastructure.
 
-AI generation, LMS content synchronization, notifications, reporting, and
-advanced dashboards are not part of this baseline.
+Personal learning sources, versioned roadmaps, progress, versioned daily plans,
+AI review, and AI provider configuration are introduced in later V2 phases.
+The retired coding-center APIs and tables are absent from the active V2
+baseline. Their code and migrations remain available through Git history.
 
 ## Technology
 
@@ -145,25 +147,28 @@ target/site/jacoco/index.html
 
 ```text
 com.codegym.aiplanning
-├── controller
-│   ├── auth
-│   │   └── dto
-│   └── profile
-│       └── dto
-├── service
-│   └── auth
-│       └── impl
-├── repository
-│   └── auth
-├── entity
-│   ├── auth
-│   └── plan
-├── common
-│   ├── api
-│   ├── constant
-│   ├── entity
-│   ├── exception
-└── config
+|-- controller
+|   |-- auth/dto
+|   `-- profile/dto
+|-- service
+|   |-- auth
+|   |-- profile
+|   |-- audit
+|   `-- email
+|-- repository
+|   |-- auth
+|   |-- audit
+|   `-- profile
+|-- entity
+|   |-- auth
+|   |-- audit
+|   `-- profile
+|-- common
+|   |-- api
+|   |-- constant
+|   |-- entity
+|   `-- exception
+`-- config
 ```
 
 New business modules should use the same layer-by-feature structure:
@@ -175,8 +180,9 @@ repository/<feature>/
 entity/<feature>/
 ```
 
-For example, DailyPlan uses `controller/daily`, `service/daily`,
-`repository/daily` and `entity/daily`.
+For example, future DailyPlan work uses `controller/daily`, `service/daily`,
+`repository/daily` and `entity/daily`. Instructor, class, enrollment,
+WeeklyPlan, and institution-owned curriculum modules are outside the V2 MVP.
 
 ## API conventions
 
@@ -186,6 +192,8 @@ For example, DailyPlan uses `controller/daily`, `service/daily`,
 - Errors contain `code`, `message`, `path`, `requestId`, and optional field
   violations.
 - Database schema changes require a new Flyway migration.
+- The clean V2 Flyway baseline requires an empty database; run
+  `docker compose down -v` before switching from the pre-V2 migration history.
 - Timestamps are stored in UTC.
 - Entities use UUID identifiers and optimistic-locking versions.
 - Authorization is enforced in backend code, not only by hiding frontend

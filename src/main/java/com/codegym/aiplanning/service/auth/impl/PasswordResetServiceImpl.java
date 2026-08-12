@@ -2,7 +2,6 @@ package com.codegym.aiplanning.service.auth.impl;
 
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
-import com.codegym.aiplanning.common.utils.StringMaskUtils;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.auth.PasswordResetToken;
 import com.codegym.aiplanning.entity.auth.UserAccount;
@@ -92,14 +91,13 @@ public class PasswordResetServiceImpl implements PasswordResetService {
         PasswordResetToken token = PasswordResetToken.create(user, tokenHash, expiresAt);
         tokenRepository.save(token);
 
-        // 5. Audit Logging (masked email)
+        // 5. Audit only the event and identifiers; never copy tokens or user input.
         auditLogService.logAction(
                 user.getId(),
                 user.getEmail(),
                 AuditEventAction.PASSWORD_RESET_REQUESTED,
                 "PasswordResetToken",
-                token.getId().toString(),
-                "Requested for: " + StringMaskUtils.maskEmail(normalizedEmail));
+                token.getId().toString());
 
         // 6. Publish Event (handled async after commit)
         String resetLink = resetUrlPrefix + "?token=" + rawToken;
@@ -150,8 +148,6 @@ public class PasswordResetServiceImpl implements PasswordResetService {
                 user.getEmail(),
                 AuditEventAction.PASSWORD_CHANGED,
                 "UserAccount",
-                user.getId().toString(),
-                "Password reset via email token."
-        );
+                user.getId().toString());
     }
 }
