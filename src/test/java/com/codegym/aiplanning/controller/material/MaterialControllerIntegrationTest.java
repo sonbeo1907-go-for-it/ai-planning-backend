@@ -177,11 +177,108 @@ class MaterialControllerIntegrationTest {
     }
 
     @Test
-    void dbFailureCleansUpStorage() throws Exception {
-        // This is a unit-test-like scenario where we verify rollback, but since we mock StorageService, 
-        // we can trigger DB fail by passing an invalid user, but userId is valid... 
-        // Actually to test DB failure rollback properly, we can mock repository in a separate unit test.
-        // For now, let's keep it here if we just want coverage.
+    void createTextHappyPath() throws Exception {
+        UserAccount user = createUser("create-text-user", "Create Text User");
+        String accessToken = login(user.getUsername());
+
+        String content = "a".repeat(50); // Minimum length
+        String requestJson = """
+                {
+                    "type": "TEXT",
+                    "content": "%s"
+                }
+                """.formatted(content);
+
+        mockMvc.perform(post(ApiConstant.MATERIALS + "/text")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestJson)
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.type").value("TEXT"))
+                .andExpect(jsonPath("$.data.status").value("READY"))
+                .andExpect(jsonPath("$.data.content").value(content));
+    }
+
+    @Test
+    void createGoalDescriptionHappyPath() throws Exception {
+        UserAccount user = createUser("create-goal-user", "Create Goal User");
+        String accessToken = login(user.getUsername());
+
+        String content = "b".repeat(50000); // Maximum length
+        String requestJson = """
+                {
+                    "type": "GOAL_DESCRIPTION",
+                    "content": "%s"
+                }
+                """.formatted(content);
+
+        mockMvc.perform(post(ApiConstant.MATERIALS + "/text")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestJson)
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.type").value("GOAL_DESCRIPTION"))
+                .andExpect(jsonPath("$.data.status").value("READY"));
+    }
+
+    @Test
+    void createTextTooShort() throws Exception {
+        UserAccount user = createUser("text-short-user", "Text Short User");
+        String accessToken = login(user.getUsername());
+
+        String content = "a".repeat(49); // Too short
+        String requestJson = """
+                {
+                    "type": "TEXT",
+                    "content": "%s"
+                }
+                """.formatted(content);
+
+        mockMvc.perform(post(ApiConstant.MATERIALS + "/text")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestJson)
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void createTextTooLong() throws Exception {
+        UserAccount user = createUser("text-long-user", "Text Long User");
+        String accessToken = login(user.getUsername());
+
+        String content = "a".repeat(50001); // Too long
+        String requestJson = """
+                {
+                    "type": "TEXT",
+                    "content": "%s"
+                }
+                """.formatted(content);
+
+        mockMvc.perform(post(ApiConstant.MATERIALS + "/text")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestJson)
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void createTextInvalidTypeFile() throws Exception {
+        UserAccount user = createUser("text-file-user", "Text File User");
+        String accessToken = login(user.getUsername());
+
+        String content = "a".repeat(50);
+        String requestJson = """
+                {
+                    "type": "FILE",
+                    "content": "%s"
+                }
+                """.formatted(content);
+
+        mockMvc.perform(post(ApiConstant.MATERIALS + "/text")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestJson)
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isBadRequest());
     }
 
     private UserAccount createUser(String username, String fullName) {

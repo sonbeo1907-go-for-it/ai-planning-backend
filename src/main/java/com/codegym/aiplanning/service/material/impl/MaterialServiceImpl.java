@@ -2,9 +2,11 @@ package com.codegym.aiplanning.service.material.impl;
 
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
-import com.codegym.aiplanning.controller.material.dto.MaterialUploadResponse;
+import com.codegym.aiplanning.controller.material.dto.CreateTextMaterialRequest;
+import com.codegym.aiplanning.controller.material.dto.MaterialResponse;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.material.Material;
+import com.codegym.aiplanning.entity.material.MaterialType;
 import com.codegym.aiplanning.repository.MaterialRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.service.material.MaterialService;
@@ -47,7 +49,7 @@ public class MaterialServiceImpl implements MaterialService {
 
     @Override
     @Transactional
-    public MaterialUploadResponse uploadMaterial(UUID userId, MultipartFile file) {
+    public MaterialResponse uploadMaterial(UUID userId, MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new BusinessException(ErrorCode.INVALID_FILE_TYPE, "File is empty or missing.");
         }
@@ -95,12 +97,15 @@ public class MaterialServiceImpl implements MaterialService {
             Material material = Material.create(user, originalFilename, detectedMimeType, file.getSize(), storageKey);
             Material saved = materialRepository.save(material);
             
-            return new MaterialUploadResponse(
+            return new MaterialResponse(
                     saved.getId(),
                     saved.getOriginalFileName(),
                     saved.getContentType(),
                     saved.getFileSize(),
-                    saved.getCreatedAt()
+                    saved.getCreatedAt(),
+                    saved.getType(),
+                    saved.getStatus(),
+                    null // Không trả content cho FILE
             );
         } catch (Exception e) {
             log.error("Failed to save material metadata to DB. Cleaning up storage file: {}", storageKey, e);
@@ -115,5 +120,31 @@ public class MaterialServiceImpl implements MaterialService {
             return "";
         }
         return filename.substring(dotIndex + 1).toLowerCase();
+    }
+
+    @Override
+    @Transactional
+    public MaterialResponse createFromText(UUID userId, CreateTextMaterialRequest request) {
+        if (request.getType() == MaterialType.FILE) {
+            throw new BusinessException(ErrorCode.INVALID_FILE_TYPE, "Type FILE is not allowed for text material.");
+        }
+        
+        UserAccount user = userAccountRepository.getReferenceById(userId);
+        
+        Material material = Material.createText(user, request.getType(), request.getContent());
+        Material saved = materialRepository.save(material);
+        
+        log.info("User {} created {} material with ID {}", userId, saved.getType(), saved.getId());
+        
+        return new MaterialResponse(
+                saved.getId(),
+                saved.getOriginalFileName(),
+                saved.getContentType(),
+                saved.getFileSize(),
+                saved.getCreatedAt(),
+                saved.getType(),
+                saved.getStatus(),
+                saved.getContent()
+        );
     }
 }

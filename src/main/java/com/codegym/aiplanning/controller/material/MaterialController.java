@@ -3,8 +3,10 @@ package com.codegym.aiplanning.controller.material;
 import com.codegym.aiplanning.common.api.ApiError;
 import com.codegym.aiplanning.common.api.ApiResponse;
 import com.codegym.aiplanning.common.constant.ApiConstant;
-import com.codegym.aiplanning.controller.material.dto.MaterialUploadResponse;
+import com.codegym.aiplanning.controller.material.dto.CreateTextMaterialRequest;
+import com.codegym.aiplanning.controller.material.dto.MaterialResponse;
 import com.codegym.aiplanning.service.material.MaterialService;
+import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -15,6 +17,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -49,11 +52,33 @@ public class MaterialController {
                         description = "Payload too large (exceeds 20MB)",
                         content = @Content(schema = @Schema(implementation = ApiError.class)))
             })
-    public ApiResponse<MaterialUploadResponse> uploadMaterial(
+    public ApiResponse<MaterialResponse> uploadMaterial(
             @RequestParam("file") MultipartFile file,
             @AuthenticationPrincipal Jwt jwt) {
         UUID userId = UUID.fromString(jwt.getSubject());
-        MaterialUploadResponse response = materialService.uploadMaterial(userId, file);
+        MaterialResponse response = materialService.uploadMaterial(userId, file);
+        return ApiResponse.of(response);
+    }
+
+    @PostMapping(value = "/text", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('USER') or hasRole('ADMIN')")
+    @Operation(
+            summary = "Create learning material from text",
+            description = "Creates a TEXT or GOAL_DESCRIPTION learning material.",
+            responses = {
+                @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                        responseCode = "201", description = "Material created successfully"),
+                @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                        responseCode = "400",
+                        description = "Invalid text length or invalid type",
+                        content = @Content(schema = @Schema(implementation = ApiError.class)))
+            })
+    public ApiResponse<MaterialResponse> createFromText(
+            @Valid @RequestBody CreateTextMaterialRequest request,
+            @AuthenticationPrincipal Jwt jwt) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        MaterialResponse response = materialService.createFromText(userId, request);
         return ApiResponse.of(response);
     }
 }
