@@ -29,6 +29,7 @@ public final class ApiConstant {
     public static final String ROADMAP_ONBOARDING_COMPLETE =
             ROADMAP_ONBOARDING_BY_ID + COMPLETE;
     public static final String ADMIN = API_V1 + "/admin";
+    public static final String DAILY_PLANS = API_V1 + "/daily-plans";
 
     private ApiConstant() {}
 }
