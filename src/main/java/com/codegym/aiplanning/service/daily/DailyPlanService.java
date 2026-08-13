@@ -22,7 +22,9 @@ public interface DailyPlanService {
 
     DailyPlanItemResponse addTaskToPlan(UUID planId, CreateDailyTaskRequest request, Jwt actorJwt);
 
-    DailyPlanItemResponse updateTaskStatus(UUID planId, UUID itemId, UpdateTaskStatusRequest request, Jwt actorJwt);
+    DailyPlanResponse activateVersion(UUID planId, UUID versionId, Jwt actorJwt);
+
+    DailyPlanItemResponse recordProgress(UUID planId, UUID itemId, com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest request, Jwt actorJwt);
 
     DailyPlanItemResponse recordPomodoroSession(UUID planId, UUID itemId, RecordPomodoroSessionRequest request, Jwt actorJwt);
 

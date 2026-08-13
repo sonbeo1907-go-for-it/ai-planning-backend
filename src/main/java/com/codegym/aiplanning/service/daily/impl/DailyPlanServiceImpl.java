@@ -82,9 +82,6 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 0);
         DailyPlanVersion savedVersion = dailyPlanVersionRepository.save(version);
 
-        savedPlan.updateActiveVersion(savedVersion.getId());
-        dailyPlanRepository.save(savedPlan);
-
         auditLogService.logAction(
                 userId,
                 username,
@@ -92,7 +89,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 "DailyPlan",
                 savedPlan.getId().toString());
 
-        return DailyPlanResponse.of(savedPlan, savedVersion.getAvailableMinutes(), savedVersion.getTotalPlannedMinutes(), List.of());
+        return DailyPlanResponse.of(savedPlan, savedVersion.getId(), savedVersion.getAvailableMinutes(), savedVersion.getTotalPlannedMinutes(), List.of());
     }
 
     @Override
@@ -134,7 +131,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         String username = extractUsername(actorJwt);
 
         DailyPlan plan = requirePlanForUser(planId, userId);
-        DailyPlanVersion version = requireActiveVersion(plan);
+        DailyPlanVersion version = requireLatestDraftVersion(plan);
 
         List<DailyPlanItem> existingItems = dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(version.getId());
         int orderIndex = existingItems.size();
@@ -166,7 +163,35 @@ public class DailyPlanServiceImpl implements DailyPlanService {
 
     @Override
     @Transactional
-    public DailyPlanItemResponse updateTaskStatus(UUID planId, UUID itemId, UpdateTaskStatusRequest request, Jwt actorJwt) {
+    public DailyPlanResponse activateVersion(UUID planId, UUID versionId, Jwt actorJwt) {
+        UUID userId = extractUserId(actorJwt);
+        String username = extractUsername(actorJwt);
+
+        DailyPlan plan = requirePlanForUser(planId, userId);
+        
+        DailyPlanVersion version = dailyPlanVersionRepository.findById(versionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INTERNAL_ERROR, "Version not found: " + versionId));
+
+        if (!version.getDailyPlanId().equals(plan.getId())) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "Version does not belong to this plan.");
+        }
+
+        List<DailyPlanItem> items = dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(version.getId());
+        if (items.isEmpty()) {
+            throw new BusinessException(ErrorCode.INVALID_PLAN_TRANSITION, "Cannot activate a version with no tasks.");
+        }
+
+        plan.activate(versionId);
+        dailyPlanRepository.save(plan);
+
+        auditLogService.logAction(userId, username, AuditEventAction.DAILY_PLAN_UPDATED, "DailyPlan", plan.getId().toString());
+
+        return buildDailyPlanResponse(plan);
+    }
+
+    @Override
+    @Transactional
+    public DailyPlanItemResponse recordProgress(UUID planId, UUID itemId, com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest request, Jwt actorJwt) {
         UUID userId = extractUserId(actorJwt);
         String username = extractUsername(actorJwt);
 
@@ -185,13 +210,29 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                     "Task item does not belong to active version of this daily plan.");
         }
 
-        item.updateStatus(request.status());
+        // Update item status if it's implicitly progressed
+        if (request.status() == com.codegym.aiplanning.entity.daily.ProgressEntryStatus.COMPLETED) {
+            item.updateStatus(com.codegym.aiplanning.entity.daily.DailyTaskStatus.COMPLETED);
+        } else {
+            item.updateStatus(com.codegym.aiplanning.entity.daily.DailyTaskStatus.IN_PROGRESS);
+        }
         DailyPlanItem savedItem = dailyPlanItemRepository.save(item);
 
         int actualMinutes = request.actualMinutes() != null ? request.actualMinutes() : item.getPlannedMinutes();
-        int percentage = request.status() == DailyTaskStatus.COMPLETED ? 100 : (request.status() == DailyTaskStatus.NOT_STARTED ? 0 : 50);
+        int percentage = request.status() == com.codegym.aiplanning.entity.daily.ProgressEntryStatus.COMPLETED ? 100 : (request.status() == com.codegym.aiplanning.entity.daily.ProgressEntryStatus.PARTIALLY_COMPLETED ? 50 : 0);
 
-        ProgressEntry entry = ProgressEntry.create(userId, itemId, request.status(), actualMinutes, percentage);
+        ProgressEntry entry = ProgressEntry.create(
+                userId, 
+                itemId, 
+                request.status(), 
+                actualMinutes, 
+                percentage,
+                request.actualResult(),
+                request.difficulty(),
+                request.understandingRating(),
+                request.note(),
+                null // supersedes logic can be added later or mapped here if provided
+        );
         progressEntryRepository.save(entry);
 
         auditLogService.logAction(
@@ -232,12 +273,22 @@ public class DailyPlanServiceImpl implements DailyPlanService {
 
         int pomodoroMinutes = request.completedMinutes() != null ? request.completedMinutes() : 25;
 
+        com.codegym.aiplanning.entity.daily.ProgressEntryStatus progressStatus = 
+                item.getStatus() == DailyTaskStatus.COMPLETED 
+                        ? com.codegym.aiplanning.entity.daily.ProgressEntryStatus.COMPLETED 
+                        : com.codegym.aiplanning.entity.daily.ProgressEntryStatus.PARTIALLY_COMPLETED;
+
         ProgressEntry entry = ProgressEntry.create(
                 userId,
                 itemId,
-                item.getStatus(),
+                progressStatus,
                 pomodoroMinutes,
-                item.getStatus() == DailyTaskStatus.COMPLETED ? 100 : 50);
+                item.getStatus() == DailyTaskStatus.COMPLETED ? 100 : 50,
+                "Pomodoro session",
+                null,
+                null,
+                null,
+                null);
         progressEntryRepository.save(entry);
 
         auditLogService.logAction(
@@ -257,7 +308,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         String username = extractUsername(actorJwt);
 
         DailyPlan plan = requirePlanForUser(planId, userId);
-        DailyPlanVersion version = requireActiveVersion(plan);
+        DailyPlanVersion version = requireLatestDraftVersion(plan);
 
         DailyPlanItem item = dailyPlanItemRepository
                 .findById(itemId)
@@ -308,9 +359,20 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                         "Active version not found: " + plan.getActiveVersionId()));
     }
 
+    private DailyPlanVersion requireLatestDraftVersion(DailyPlan plan) {
+        if (plan.getStatus() != com.codegym.aiplanning.entity.daily.DailyPlanStatus.DRAFT) {
+            throw new BusinessException(ErrorCode.DAILY_PLAN_LOCKED, "Cannot modify a plan that is not in DRAFT status.");
+        }
+        return dailyPlanVersionRepository.findTopByDailyPlanIdOrderByVersionNumberDesc(plan.getId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.INTERNAL_ERROR, "No draft version found for plan."));
+    }
+
     private DailyPlanResponse buildDailyPlanResponse(DailyPlan plan) {
         if (plan.getActiveVersionId() == null) {
-            return DailyPlanResponse.of(plan, 60, 0, List.of());
+            UUID draftId = dailyPlanVersionRepository.findTopByDailyPlanIdOrderByVersionNumberDesc(plan.getId())
+                    .map(DailyPlanVersion::getId)
+                    .orElse(null);
+            return DailyPlanResponse.of(plan, draftId, 60, 0, List.of());
         }
         DailyPlanVersion version = dailyPlanVersionRepository
                 .findById(plan.getActiveVersionId())
@@ -327,7 +389,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         int available = version != null ? version.getAvailableMinutes() : 60;
         int planned = version != null ? version.getTotalPlannedMinutes() : 0;
 
-        return DailyPlanResponse.of(plan, available, planned, items);
+        return DailyPlanResponse.of(plan, plan.getActiveVersionId(), available, planned, items);
     }
 
     private String getUserTimeZone(UUID userId) {

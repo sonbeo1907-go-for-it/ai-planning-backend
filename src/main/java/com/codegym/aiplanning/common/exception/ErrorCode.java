@@ -29,6 +29,8 @@ public enum ErrorCode {
     DAILY_PLAN_EXISTS(HttpStatus.CONFLICT),
     CONFLICT(HttpStatus.CONFLICT),
     TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS),
+    INVALID_PLAN_TRANSITION(HttpStatus.CONFLICT),
+    DAILY_PLAN_LOCKED(HttpStatus.CONFLICT),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR);
 
     private final HttpStatus status;

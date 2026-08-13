@@ -7,8 +7,8 @@ import com.codegym.aiplanning.controller.daily.dto.CreateDailyPlanRequest;
 import com.codegym.aiplanning.controller.daily.dto.CreateDailyTaskRequest;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanItemResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanResponse;
+import com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
-import com.codegym.aiplanning.controller.daily.dto.UpdateTaskStatusRequest;
 import com.codegym.aiplanning.service.daily.DailyPlanService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -96,16 +96,27 @@ public class DailyPlanController {
         return ApiResponse.of(dailyPlanService.addTaskToPlan(planId, request, actorJwt));
     }
 
-    @PatchMapping("/{planId}/items/{itemId}/status")
+    @PostMapping("/{planId}/versions/{versionId}/activate")
     @Operation(
-            summary = "Check or update task completion status (US-TSK-01-MANUAL)",
-            description = "Interactive checklist: Updates task status (COMPLETED, IN_PROGRESS, etc.), records progress entry, and recalculates daily percentage.")
-    public ApiResponse<DailyPlanItemResponse> updateTaskStatus(
+            summary = "Activate a daily plan version (US-PLN-01-MANUAL)",
+            description = "Transitions a daily plan from DRAFT to READY by activating a specific version.")
+    public ApiResponse<DailyPlanResponse> activateVersion(
+            @PathVariable UUID planId,
+            @PathVariable UUID versionId,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(dailyPlanService.activateVersion(planId, versionId, actorJwt));
+    }
+
+    @PostMapping("/{planId}/items/{itemId}/progress")
+    @Operation(
+            summary = "Record detailed task progress (US-PLN-01-MANUAL)",
+            description = "Appends a progress entry for a task with detailed tracking including difficulty and notes.")
+    public ApiResponse<DailyPlanItemResponse> recordProgress(
             @PathVariable UUID planId,
             @PathVariable UUID itemId,
-            @Valid @RequestBody UpdateTaskStatusRequest request,
+            @Valid @RequestBody RecordProgressRequest request,
             @AuthenticationPrincipal Jwt actorJwt) {
-        return ApiResponse.of(dailyPlanService.updateTaskStatus(planId, itemId, request, actorJwt));
+        return ApiResponse.of(dailyPlanService.recordProgress(planId, itemId, request, actorJwt));
     }
 
     @PostMapping("/{planId}/items/{itemId}/pomodoro")

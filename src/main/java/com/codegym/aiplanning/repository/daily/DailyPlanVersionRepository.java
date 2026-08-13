@@ -11,4 +11,6 @@ public interface DailyPlanVersionRepository extends JpaRepository<DailyPlanVersi
     Optional<DailyPlanVersion> findByDailyPlanIdAndVersionNumber(UUID dailyPlanId, Integer versionNumber);
 
     List<DailyPlanVersion> findByDailyPlanIdOrderByVersionNumberDesc(UUID dailyPlanId);
+
+    Optional<DailyPlanVersion> findTopByDailyPlanIdOrderByVersionNumberDesc(UUID dailyPlanId);
 }

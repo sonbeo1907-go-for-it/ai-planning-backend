@@ -40,6 +40,9 @@ public class DailyPlanVersion {
     @Column(name = "total_planned_minutes", nullable = false)
     private Integer totalPlannedMinutes;
 
+    @Column(name = "content_hash", length = 64)
+    private String contentHash;
+
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -91,5 +94,9 @@ public class DailyPlanVersion {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getContentHash() {
+        return contentHash;
     }
 }

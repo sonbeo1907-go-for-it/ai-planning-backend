@@ -6,6 +6,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -29,6 +30,15 @@ public class DailyPlan extends BaseEntity {
     @Column(name = "active_version_id")
     private UUID activeVersionId;
 
+    @Column(name = "started_at")
+    private Instant startedAt;
+
+    @Column(name = "completed_at")
+    private Instant completedAt;
+
+    @Column(name = "cancelled_at")
+    private Instant cancelledAt;
+
     protected DailyPlan() {}
 
     public static DailyPlan create(UUID userId, LocalDate planDate, String timeZoneSnapshot) {
@@ -36,12 +46,20 @@ public class DailyPlan extends BaseEntity {
         plan.userId = userId;
         plan.planDate = planDate;
         plan.timeZoneSnapshot = timeZoneSnapshot != null ? timeZoneSnapshot : "UTC";
-        plan.status = DailyPlanStatus.READY;
+        plan.status = DailyPlanStatus.DRAFT;
         return plan;
     }
 
     public void updateActiveVersion(UUID versionId) {
         this.activeVersionId = versionId;
+    }
+
+    public void activate(UUID versionId) {
+        if (this.status != DailyPlanStatus.DRAFT) {
+            throw new IllegalStateException("Only DRAFT plan can be activated.");
+        }
+        this.activeVersionId = versionId;
+        this.status = DailyPlanStatus.READY;
     }
 
     public void updateStatus(DailyPlanStatus newStatus) {
@@ -66,5 +84,17 @@ public class DailyPlan extends BaseEntity {
 
     public UUID getActiveVersionId() {
         return activeVersionId;
+    }
+
+    public Instant getStartedAt() {
+        return startedAt;
+    }
+
+    public Instant getCompletedAt() {
+        return completedAt;
+    }
+
+    public Instant getCancelledAt() {
+        return cancelledAt;
     }
 }

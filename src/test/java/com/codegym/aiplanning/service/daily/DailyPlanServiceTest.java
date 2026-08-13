@@ -11,7 +11,7 @@ import com.codegym.aiplanning.controller.daily.dto.CreateDailyTaskRequest;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanItemResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
-import com.codegym.aiplanning.controller.daily.dto.UpdateTaskStatusRequest;
+import com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest;
 import com.codegym.aiplanning.entity.daily.DailyPlan;
 import com.codegym.aiplanning.entity.daily.DailyPlanItem;
 import com.codegym.aiplanning.entity.daily.DailyPlanVersion;
@@ -135,7 +135,7 @@ class DailyPlanServiceTest {
         ReflectionTestUtils.setField(version, "id", versionId);
 
         when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
-        when(dailyPlanVersionRepository.findById(versionId)).thenReturn(Optional.of(version));
+        when(dailyPlanVersionRepository.findTopByDailyPlanIdOrderByVersionNumberDesc(planId)).thenReturn(Optional.of(version));
         when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId)).thenReturn(List.of());
         when(dailyPlanItemRepository.save(any(DailyPlanItem.class))).thenAnswer(inv -> {
             DailyPlanItem item = inv.getArgument(0);
@@ -153,14 +153,14 @@ class DailyPlanServiceTest {
     }
 
     @Test
-    void updateTaskStatus_completesAndCalculatesPercentage() {
+    void recordProgress_completesAndCalculatesPercentage() {
         UUID planId = UUID.randomUUID();
         UUID versionId = UUID.randomUUID();
         UUID itemId = UUID.randomUUID();
 
         DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
         ReflectionTestUtils.setField(plan, "id", planId);
-        plan.updateActiveVersion(versionId);
+        plan.activate(versionId);
 
         DailyPlanVersion version = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 30);
         ReflectionTestUtils.setField(version, "id", versionId);
@@ -174,8 +174,8 @@ class DailyPlanServiceTest {
         when(dailyPlanItemRepository.save(any(DailyPlanItem.class))).thenAnswer(inv -> inv.getArgument(0));
         when(progressEntryRepository.save(any(ProgressEntry.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        UpdateTaskStatusRequest updateReq = new UpdateTaskStatusRequest(DailyTaskStatus.COMPLETED, 30);
-        DailyPlanItemResponse response = dailyPlanService.updateTaskStatus(planId, itemId, updateReq, userJwt);
+        RecordProgressRequest updateReq = new RecordProgressRequest(com.codegym.aiplanning.entity.daily.ProgressEntryStatus.COMPLETED, 30, "Done", 3, 4, "Notes");
+        DailyPlanItemResponse response = dailyPlanService.recordProgress(planId, itemId, updateReq, userJwt);
 
         assertThat(response.status()).isEqualTo(DailyTaskStatus.COMPLETED);
         assertThat(response.completedAt()).isNotNull();
@@ -189,7 +189,7 @@ class DailyPlanServiceTest {
 
         DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
         ReflectionTestUtils.setField(plan, "id", planId);
-        plan.updateActiveVersion(versionId);
+        plan.activate(versionId);
 
         DailyPlanVersion version = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 0);
         ReflectionTestUtils.setField(version, "id", versionId);

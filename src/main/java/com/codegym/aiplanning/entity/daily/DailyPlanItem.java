@@ -16,6 +16,9 @@ public class DailyPlanItem extends BaseEntity {
     @Column(name = "daily_plan_version_id", nullable = false)
     private UUID dailyPlanVersionId;
 
+    @Column(name = "roadmap_item_id")
+    private UUID roadmapItemId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private DailyTaskCategory category;
@@ -98,5 +101,9 @@ public class DailyPlanItem extends BaseEntity {
 
     public Instant getCompletedAt() {
         return completedAt;
+    }
+
+    public UUID getRoadmapItemId() {
+        return roadmapItemId;
     }
 }

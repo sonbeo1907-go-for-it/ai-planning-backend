@@ -14,6 +14,7 @@ import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.entity.profile.UserProfile;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanVersionRepository;
 import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
@@ -43,6 +44,9 @@ class DailyPlanControllerIntegrationTest {
 
     @Autowired
     private UserProfileRepository userProfileRepository;
+
+    @Autowired
+    private DailyPlanVersionRepository dailyPlanVersionRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -94,6 +98,16 @@ class DailyPlanControllerIntegrationTest {
 
         String itemId = objectMapper.readTree(addTaskResult.getResponse().getContentAsString())
                 .path("data").path("id").asText();
+                
+        String versionId = dailyPlanVersionRepository.findTopByDailyPlanIdOrderByVersionNumberDesc(java.util.UUID.fromString(planId))
+                .orElseThrow()
+                .getId()
+                .toString();
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/versions/" + versionId + "/activate")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
 
         String pomodoroPayload = """
                 {
@@ -108,17 +122,20 @@ class DailyPlanControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"));
 
-        String checkStatusPayload = """
+        String progressPayload = """
                 {
                     "status": "COMPLETED",
-                    "actualMinutes": 45
+                    "actualMinutes": 45,
+                    "difficulty": 3,
+                    "understandingRating": 4,
+                    "note": "Done"
                 }
                 """;
 
-        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + itemId + "/status")
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + itemId + "/progress")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(checkStatusPayload))
+                        .content(progressPayload))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("COMPLETED"))
                 .andExpect(jsonPath("$.data.completedAt").isNotEmpty());

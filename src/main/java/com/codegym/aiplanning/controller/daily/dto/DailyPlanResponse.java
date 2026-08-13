@@ -17,6 +17,7 @@ public record DailyPlanResponse(
         String timeZoneSnapshot,
         DailyPlanStatus status,
         UUID activeVersionId,
+        UUID latestVersionId,
         Integer availableMinutes,
         Integer totalPlannedMinutes,
         Integer totalItemsCount,
@@ -28,6 +29,7 @@ public record DailyPlanResponse(
 ) {
     public static DailyPlanResponse of(
             DailyPlan plan,
+            UUID latestVersionId,
             Integer availableMinutes,
             Integer totalPlannedMinutes,
             List<DailyPlanItemResponse> items) {
@@ -42,6 +44,7 @@ public record DailyPlanResponse(
                 plan.getTimeZoneSnapshot(),
                 plan.getStatus(),
                 plan.getActiveVersionId(),
+                latestVersionId,
                 availableMinutes != null ? availableMinutes : 60,
                 totalPlannedMinutes != null ? totalPlannedMinutes : 0,
                 total,
