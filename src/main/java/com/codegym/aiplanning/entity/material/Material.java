@@ -42,13 +42,23 @@ public class Material extends BaseEntity {
     @Column(name = "storage_key", unique = true)
     private String storageKey;
 
+    @Column(name = "error_code", length = 50)
+    @Enumerated(EnumType.STRING)
+    private ExtractionErrorCode errorCode;
+
+    @Column(name = "error_message", columnDefinition = "TEXT")
+    private String errorMessage;
+
+    @Column(name = "processing_started_at")
+    private java.time.Instant processingStartedAt;
+
     protected Material() {}
 
     public static Material create(UserAccount user, String originalFileName, String contentType, Long fileSize, String storageKey) {
         Material material = new Material();
         material.user = user;
         material.type = MaterialType.FILE;
-        material.status = MaterialStatus.READY;
+        material.status = MaterialStatus.PENDING; // Luôn bắt đầu bằng PENDING để chờ extract
         material.originalFileName = originalFileName;
         material.contentType = contentType;
         material.fileSize = fileSize;
@@ -60,9 +70,39 @@ public class Material extends BaseEntity {
         Material material = new Material();
         material.user = user;
         material.type = type;
-        material.status = MaterialStatus.READY;
+        material.status = MaterialStatus.READY; // Text/Goal thì có sẵn content nên READY luôn
         material.content = content;
         return material;
+    }
+
+    public void markAsProcessing() {
+        if (this.status != MaterialStatus.PENDING) {
+            throw new IllegalStateException("Only PENDING materials can be marked as PROCESSING.");
+        }
+        this.status = MaterialStatus.PROCESSING;
+        this.processingStartedAt = java.time.Instant.now();
+    }
+
+    public void markAsReady(String extractedText) {
+        if (this.status != MaterialStatus.PROCESSING) {
+            throw new IllegalStateException("Only PROCESSING materials can be marked as READY.");
+        }
+        this.status = MaterialStatus.READY;
+        this.content = extractedText;
+        this.errorCode = null;
+        this.errorMessage = null;
+    }
+
+    public void markAsFailed(ExtractionErrorCode code, String message) {
+        if (this.status != MaterialStatus.PROCESSING) {
+            throw new IllegalStateException("Only PROCESSING materials can be marked as FAILED.");
+        }
+        if (code == null || message == null || message.isBlank()) {
+            throw new IllegalArgumentException("ErrorCode and ErrorMessage must be provided when marking as FAILED.");
+        }
+        this.status = MaterialStatus.FAILED;
+        this.errorCode = code;
+        this.errorMessage = message;
     }
 
     public UserAccount getUser() {
@@ -95,5 +135,17 @@ public class Material extends BaseEntity {
 
     public String getContent() {
         return content;
+    }
+
+    public ExtractionErrorCode getErrorCode() {
+        return errorCode;
+    }
+
+    public String getErrorMessage() {
+        return errorMessage;
+    }
+
+    public java.time.Instant getProcessingStartedAt() {
+        return processingStartedAt;
     }
 }

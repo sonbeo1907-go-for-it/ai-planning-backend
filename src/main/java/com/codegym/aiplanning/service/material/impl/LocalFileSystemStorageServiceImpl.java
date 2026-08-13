@@ -72,4 +72,18 @@ public class LocalFileSystemStorageServiceImpl implements StorageService {
             log.error("Failed to delete file during cleanup: {}", storageKey, e);
         }
     }
+
+    @Override
+    public java.io.InputStream load(String storageKey) {
+        try {
+            Path file = rootLocation.resolve(Paths.get(storageKey)).normalize().toAbsolutePath();
+            if (file.getParent().startsWith(this.rootLocation) && Files.exists(file)) {
+                return Files.newInputStream(file);
+            }
+            throw new BusinessException(ErrorCode.FILE_STORAGE_ERROR, "File not found on local storage.");
+        } catch (IOException e) {
+            log.error("Failed to load file with storage key: {}", storageKey, e);
+            throw new BusinessException(ErrorCode.FILE_STORAGE_ERROR, "Failed to load file.");
+        }
+    }
 }

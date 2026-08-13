@@ -16,6 +16,8 @@ public record MaterialResponse(
         Instant createdAt,
         MaterialType type,
         MaterialStatus status,
-        String content
+        String content,
+        com.codegym.aiplanning.entity.material.ExtractionErrorCode errorCode,
+        String errorMessage
 ) {
 }

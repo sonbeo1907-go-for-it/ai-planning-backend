@@ -9,6 +9,7 @@ import com.codegym.aiplanning.entity.material.Material;
 import com.codegym.aiplanning.entity.material.MaterialType;
 import com.codegym.aiplanning.repository.MaterialRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import com.codegym.aiplanning.service.material.MaterialExtractionService;
 import com.codegym.aiplanning.service.material.MaterialService;
 import com.codegym.aiplanning.service.material.StorageService;
 import org.apache.tika.Tika;
@@ -30,20 +31,25 @@ public class MaterialServiceImpl implements MaterialService {
     private final MaterialRepository materialRepository;
     private final UserAccountRepository userAccountRepository;
     private final StorageService storageService;
+    private final MaterialExtractionService materialExtractionService;
     private final Tika tika;
     
     private static final Set<String> ALLOWED_MIME_TYPES = Set.of(
             "application/pdf",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // docx
+            "application/x-tika-msoffice", // encrypted docx / older doc
+            "application/x-tika-ooxml-protected", // encrypted docx
             "text/plain"
     );
 
     public MaterialServiceImpl(MaterialRepository materialRepository, 
                                UserAccountRepository userAccountRepository, 
-                               StorageService storageService) {
+                               StorageService storageService,
+                               MaterialExtractionService materialExtractionService) {
         this.materialRepository = materialRepository;
         this.userAccountRepository = userAccountRepository;
         this.storageService = storageService;
+        this.materialExtractionService = materialExtractionService;
         this.tika = new Tika();
     }
 
@@ -79,7 +85,9 @@ public class MaterialServiceImpl implements MaterialService {
             log.warn("SECURITY WARNING: File extension spoofing detected. Expected pdf, got {}", detectedMimeType);
             throw new BusinessException(ErrorCode.INVALID_FILE_TYPE, "File content does not match pdf extension.");
         }
-        if (extension.equals("docx") && !detectedMimeType.equals("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) {
+        if (extension.equals("docx") && !(detectedMimeType.equals("application/vnd.openxmlformats-officedocument.wordprocessingml.document") 
+                                       || detectedMimeType.equals("application/x-tika-msoffice")
+                                       || detectedMimeType.equals("application/x-tika-ooxml-protected"))) {
             log.warn("SECURITY WARNING: File extension spoofing detected. Expected docx, got {}", detectedMimeType);
             throw new BusinessException(ErrorCode.INVALID_FILE_TYPE, "File content does not match docx extension.");
         }
@@ -97,6 +105,20 @@ public class MaterialServiceImpl implements MaterialService {
             Material material = Material.create(user, originalFilename, detectedMimeType, file.getSize(), storageKey);
             Material saved = materialRepository.save(material);
             
+            // Trigger background extraction after transaction commits
+            if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+                org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            materialExtractionService.extractTextAsync(saved.getId());
+                        }
+                    }
+                );
+            } else {
+                materialExtractionService.extractTextAsync(saved.getId());
+            }
+            
             return new MaterialResponse(
                     saved.getId(),
                     saved.getOriginalFileName(),
@@ -105,7 +127,9 @@ public class MaterialServiceImpl implements MaterialService {
                     saved.getCreatedAt(),
                     saved.getType(),
                     saved.getStatus(),
-                    null // Không trả content cho FILE
+                    null, // Không trả content cho FILE
+                    saved.getErrorCode(),
+                    saved.getErrorMessage()
             );
         } catch (Exception e) {
             log.error("Failed to save material metadata to DB. Cleaning up storage file: {}", storageKey, e);
@@ -144,7 +168,9 @@ public class MaterialServiceImpl implements MaterialService {
                 saved.getCreatedAt(),
                 saved.getType(),
                 saved.getStatus(),
-                saved.getContent()
+                saved.getContent(),
+                saved.getErrorCode(),
+                saved.getErrorMessage()
         );
     }
 }

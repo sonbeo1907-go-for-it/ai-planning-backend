@@ -102,4 +102,18 @@ public class S3StorageServiceImpl implements StorageService {
             log.error("CRITICAL: Failed to delete file during cleanup from S3. Orphan file detected. Bucket: {}, Key: {}", bucketName, storageKey, e);
         }
     }
+
+    @Override
+    public java.io.InputStream load(String storageKey) {
+        try {
+            software.amazon.awssdk.services.s3.model.GetObjectRequest getObjectRequest = software.amazon.awssdk.services.s3.model.GetObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(storageKey)
+                    .build();
+            return s3Client.getObject(getObjectRequest);
+        } catch (S3Exception e) {
+            log.error("S3 error occurred while loading file: {}", storageKey, e);
+            throw new BusinessException(ErrorCode.FILE_STORAGE_ERROR, "Failed to read file from S3.");
+        }
+    }
 }
