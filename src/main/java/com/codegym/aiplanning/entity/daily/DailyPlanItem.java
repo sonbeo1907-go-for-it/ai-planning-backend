@@ -76,9 +76,9 @@ public class DailyPlanItem extends BaseEntity {
 
     public void updateStatus(DailyTaskStatus newStatus) {
         this.status = newStatus;
-        if (newStatus == DailyTaskStatus.COMPLETED) {
+        if (newStatus == DailyTaskStatus.COMPLETED || newStatus == DailyTaskStatus.PARTIALLY_COMPLETED || newStatus == DailyTaskStatus.SKIPPED) {
             this.completedAt = Instant.now();
-        } else if (newStatus == DailyTaskStatus.NOT_STARTED) {
+        } else if (newStatus == DailyTaskStatus.NOT_STARTED || newStatus == DailyTaskStatus.IN_PROGRESS) {
             this.completedAt = null;
         }
     }

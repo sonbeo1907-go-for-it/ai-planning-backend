@@ -303,9 +303,13 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                     "Task item does not belong to active version of this daily plan.");
         }
 
-        // Update item status if it's implicitly progressed
+        // Update item status based on progress entry status
         if (request.status() == com.codegym.aiplanning.entity.daily.ProgressEntryStatus.COMPLETED) {
             item.updateStatus(com.codegym.aiplanning.entity.daily.DailyTaskStatus.COMPLETED);
+        } else if (request.status() == com.codegym.aiplanning.entity.daily.ProgressEntryStatus.PARTIALLY_COMPLETED) {
+            item.updateStatus(com.codegym.aiplanning.entity.daily.DailyTaskStatus.PARTIALLY_COMPLETED);
+        } else if (request.status() == com.codegym.aiplanning.entity.daily.ProgressEntryStatus.SKIPPED) {
+            item.updateStatus(com.codegym.aiplanning.entity.daily.DailyTaskStatus.SKIPPED);
         } else {
             item.updateStatus(com.codegym.aiplanning.entity.daily.DailyTaskStatus.IN_PROGRESS);
         }

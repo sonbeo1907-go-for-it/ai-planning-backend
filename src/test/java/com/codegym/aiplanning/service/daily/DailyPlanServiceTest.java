@@ -197,6 +197,64 @@ class DailyPlanServiceTest {
     }
 
     @Test
+    void recordProgress_partiallyCompleted() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        plan.activate(versionId);
+
+        DailyPlanVersion version = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 30);
+        ReflectionTestUtils.setField(version, "id", versionId);
+
+        DailyPlanItem item = DailyPlanItem.create(versionId, DailyTaskCategory.CUSTOM, "Task 1", "Desc", 30, 0);
+        ReflectionTestUtils.setField(item, "id", itemId);
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findById(versionId)).thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(dailyPlanItemRepository.save(any(DailyPlanItem.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(progressEntryRepository.save(any(ProgressEntry.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        RecordProgressRequest updateReq = new RecordProgressRequest(com.codegym.aiplanning.entity.daily.ProgressEntryStatus.PARTIALLY_COMPLETED, 15, "Done half", 3, 4, "Notes");
+        DailyPlanItemResponse response = dailyPlanService.recordProgress(planId, itemId, updateReq, userJwt);
+
+        assertThat(response.status()).isEqualTo(DailyTaskStatus.PARTIALLY_COMPLETED);
+        assertThat(response.completedAt()).isNotNull();
+    }
+
+    @Test
+    void recordProgress_skipped() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        plan.activate(versionId);
+
+        DailyPlanVersion version = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 30);
+        ReflectionTestUtils.setField(version, "id", versionId);
+
+        DailyPlanItem item = DailyPlanItem.create(versionId, DailyTaskCategory.CUSTOM, "Task 1", "Desc", 30, 0);
+        ReflectionTestUtils.setField(item, "id", itemId);
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findById(versionId)).thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(dailyPlanItemRepository.save(any(DailyPlanItem.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(progressEntryRepository.save(any(ProgressEntry.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        RecordProgressRequest updateReq = new RecordProgressRequest(com.codegym.aiplanning.entity.daily.ProgressEntryStatus.SKIPPED, 0, "Skip", 1, 1, "Notes");
+        DailyPlanItemResponse response = dailyPlanService.recordProgress(planId, itemId, updateReq, userJwt);
+
+        assertThat(response.status()).isEqualTo(DailyTaskStatus.SKIPPED);
+        assertThat(response.completedAt()).isNotNull();
+    }
+
+    @Test
     void recordPomodoroSession_success() {
         UUID planId = UUID.randomUUID();
         UUID versionId = UUID.randomUUID();
