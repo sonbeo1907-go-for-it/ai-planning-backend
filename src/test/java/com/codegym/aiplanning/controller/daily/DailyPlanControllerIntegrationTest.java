@@ -16,6 +16,15 @@ import com.codegym.aiplanning.entity.profile.UserProfile;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanVersionRepository;
 import com.codegym.aiplanning.repository.profile.UserProfileRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapVersionRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
+import com.codegym.aiplanning.entity.roadmap.Roadmap;
+import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
+import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
+import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import org.junit.jupiter.api.Test;
@@ -47,6 +56,15 @@ class DailyPlanControllerIntegrationTest {
 
     @Autowired
     private DailyPlanVersionRepository dailyPlanVersionRepository;
+
+    @Autowired
+    private RoadmapRepository roadmapRepository;
+
+    @Autowired
+    private RoadmapVersionRepository roadmapVersionRepository2;
+
+    @Autowired
+    private RoadmapItemRepository roadmapItemRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -239,5 +257,66 @@ class DailyPlanControllerIntegrationTest {
                 .path("data")
                 .path("accessToken")
                 .asText();
+    }
+
+    @Test
+    void createDailyPlan_withRoadmapIntegration_flow() throws Exception {
+        UserAccount user = createUser("daily-rmp-user", "Rmp User");
+        String token = login("daily-rmp-user");
+
+        // 1. Create a Roadmap and RoadmapVersion
+        Roadmap roadmap = roadmapRepository.saveAndFlush(Roadmap.manualDraft(user, "Integration Roadmap", "Desc"));
+        RoadmapVersion rVersion = roadmapVersionRepository2.saveAndFlush(RoadmapVersion.draft(roadmap, 1, RoadmapVersionOrigin.MANUAL));
+        
+        // Activate version
+        roadmap.activateVersion(rVersion.getId());
+        roadmap = roadmapRepository.saveAndFlush(roadmap);
+        rVersion.activate(java.time.Instant.now());
+        rVersion = roadmapVersionRepository2.saveAndFlush(rVersion);
+
+        // Add a Topic to active Roadmap version
+        RoadmapItem milestone = roadmapItemRepository.saveAndFlush(RoadmapItem.milestone(rVersion, "Week 1", "Desc", 0));
+        RoadmapItem topic = roadmapItemRepository.saveAndFlush(RoadmapItem.topic(rVersion, milestone, "Learn Java Records", "Desc", 0, 45));
+
+        // 2. Create Daily Plan linking to the Roadmap
+        LocalDate today = LocalDate.now();
+        String createPlanPayload = String.format("""
+                {
+                    "planDate": "%s",
+                    "availableMinutes": 120,
+                    "roadmapId": "%s"
+                }
+                """, today, roadmap.getId());
+
+        MvcResult createResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createPlanPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.roadmapId").value(roadmap.getId().toString()))
+                .andExpect(jsonPath("$.data.items[0].title").value("Learn Java Records"))
+                .andExpect(jsonPath("$.data.items[0].roadmapItemId").value(topic.getId().toString()))
+                .andReturn();
+
+        String planId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+
+        // 3. Add manual task with roadmapItemId
+        String addTaskPayload = String.format("""
+                {
+                    "title": "Học Lập trình Java Core Module 1",
+                    "description": "Thực hành chuỗi và mảng trong Java",
+                    "category": "NEW_MATERIAL",
+                    "plannedMinutes": 45,
+                    "roadmapItemId": "%s"
+                }
+                """, topic.getId());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(addTaskPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.roadmapItemId").value(topic.getId().toString()));
     }
 }

@@ -51,6 +51,17 @@ public class DailyPlanItem extends BaseEntity {
             String description,
             Integer plannedMinutes,
             Integer orderIndex) {
+        return create(dailyPlanVersionId, category, title, description, plannedMinutes, orderIndex, null);
+    }
+
+    public static DailyPlanItem create(
+            UUID dailyPlanVersionId,
+            DailyTaskCategory category,
+            String title,
+            String description,
+            Integer plannedMinutes,
+            Integer orderIndex,
+            UUID roadmapItemId) {
         DailyPlanItem item = new DailyPlanItem();
         item.dailyPlanVersionId = dailyPlanVersionId;
         item.category = category != null ? category : DailyTaskCategory.CUSTOM;
@@ -59,6 +70,7 @@ public class DailyPlanItem extends BaseEntity {
         item.plannedMinutes = plannedMinutes != null ? plannedMinutes : 30;
         item.orderIndex = orderIndex != null ? orderIndex : 0;
         item.status = DailyTaskStatus.NOT_STARTED;
+        item.roadmapItemId = roadmapItemId;
         return item;
     }
 

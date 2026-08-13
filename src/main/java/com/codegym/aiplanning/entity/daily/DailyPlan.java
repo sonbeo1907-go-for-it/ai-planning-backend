@@ -17,6 +17,9 @@ public class DailyPlan extends BaseEntity {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
+    @Column(name = "roadmap_id")
+    private UUID roadmapId;
+
     @Column(name = "plan_date", nullable = false)
     private LocalDate planDate;
 
@@ -42,11 +45,16 @@ public class DailyPlan extends BaseEntity {
     protected DailyPlan() {}
 
     public static DailyPlan create(UUID userId, LocalDate planDate, String timeZoneSnapshot) {
+        return create(userId, planDate, timeZoneSnapshot, null);
+    }
+
+    public static DailyPlan create(UUID userId, LocalDate planDate, String timeZoneSnapshot, UUID roadmapId) {
         DailyPlan plan = new DailyPlan();
         plan.userId = userId;
         plan.planDate = planDate;
         plan.timeZoneSnapshot = timeZoneSnapshot != null ? timeZoneSnapshot : "UTC";
         plan.status = DailyPlanStatus.DRAFT;
+        plan.roadmapId = roadmapId;
         return plan;
     }
 
@@ -96,5 +104,13 @@ public class DailyPlan extends BaseEntity {
 
     public Instant getCancelledAt() {
         return cancelledAt;
+    }
+
+    public UUID getRoadmapId() {
+        return roadmapId;
+    }
+
+    public void setRoadmapId(UUID roadmapId) {
+        this.roadmapId = roadmapId;
     }
 }

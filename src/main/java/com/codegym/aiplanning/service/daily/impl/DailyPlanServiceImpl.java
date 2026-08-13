@@ -25,8 +25,16 @@ import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.daily.DailyPlanService;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
+import com.codegym.aiplanning.entity.roadmap.Roadmap;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
+import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
+import com.codegym.aiplanning.entity.daily.DailyTaskCategory;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +47,8 @@ public class DailyPlanServiceImpl implements DailyPlanService {
     private final DailyPlanItemRepository dailyPlanItemRepository;
     private final ProgressEntryRepository progressEntryRepository;
     private final UserProfileRepository userProfileRepository;
+    private final RoadmapRepository roadmapRepository;
+    private final RoadmapItemRepository roadmapItemRepository;
     private final AuditLogService auditLogService;
 
     public DailyPlanServiceImpl(
@@ -47,12 +57,16 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             DailyPlanItemRepository dailyPlanItemRepository,
             ProgressEntryRepository progressEntryRepository,
             UserProfileRepository userProfileRepository,
+            RoadmapRepository roadmapRepository,
+            RoadmapItemRepository roadmapItemRepository,
             AuditLogService auditLogService) {
         this.dailyPlanRepository = dailyPlanRepository;
         this.dailyPlanVersionRepository = dailyPlanVersionRepository;
         this.dailyPlanItemRepository = dailyPlanItemRepository;
         this.progressEntryRepository = progressEntryRepository;
         this.userProfileRepository = userProfileRepository;
+        this.roadmapRepository = roadmapRepository;
+        this.roadmapItemRepository = roadmapItemRepository;
         this.auditLogService = auditLogService;
     }
 
@@ -68,10 +82,28 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                     "A daily plan already exists for date: " + request.planDate());
         }
 
+        UUID resolvedRoadmapId = request.roadmapId();
+        Roadmap roadmap = null;
+        if (resolvedRoadmapId != null) {
+            roadmap = roadmapRepository.findByIdAndOwnerId(resolvedRoadmapId, userId)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Roadmap not found"));
+            if (roadmap.getStatus() == RoadmapStatus.ONBOARDING || roadmap.getStatus() == RoadmapStatus.ARCHIVED) {
+                throw new BusinessException(ErrorCode.INVALID_PLAN_TRANSITION, "Roadmap is not in a valid state");
+            }
+        } else {
+            List<Roadmap> activeRoadmaps = roadmapRepository.findAllByOwnerIdOrderByUpdatedAtDesc(userId).stream()
+                    .filter(r -> r.getStatus() == RoadmapStatus.ACTIVE)
+                    .toList();
+            if (!activeRoadmaps.isEmpty()) {
+                roadmap = activeRoadmaps.get(0);
+                resolvedRoadmapId = roadmap.getId();
+            }
+        }
+
         String timeZone = getUserTimeZone(userId);
         int availableMinutes = request.availableMinutes() != null ? request.availableMinutes() : 60;
 
-        DailyPlan plan = DailyPlan.create(userId, request.planDate(), timeZone);
+        DailyPlan plan = DailyPlan.create(userId, request.planDate(), timeZone, resolvedRoadmapId);
         DailyPlan savedPlan = dailyPlanRepository.save(plan);
 
         DailyPlanVersion version = DailyPlanVersion.create(
@@ -82,6 +114,50 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 0);
         DailyPlanVersion savedVersion = dailyPlanVersionRepository.save(version);
 
+        int totalPlannedMinutes = 0;
+        List<DailyPlanItemResponse> itemResponses = new ArrayList<>();
+
+        if (roadmap != null && roadmap.getActiveVersionId() != null) {
+            UUID activeVersionId = roadmap.getActiveVersionId();
+            List<RoadmapItem> milestones = roadmapItemRepository.findAllByRoadmapVersionIdAndItemTypeAndParentIsNullOrderByOrderIndexAsc(activeVersionId, RoadmapItemType.MILESTONE);
+            List<RoadmapItem> topics = new ArrayList<>();
+            for (RoadmapItem milestone : milestones) {
+                topics.addAll(roadmapItemRepository.findAllByRoadmapVersionIdAndParentIdOrderByOrderIndexAsc(activeVersionId, milestone.getId()));
+            }
+
+            List<UUID> completedTopicIds = dailyPlanItemRepository.findCompletedRoadmapItemIds(userId, DailyTaskStatus.COMPLETED);
+            List<RoadmapItem> uncompletedTopics = topics.stream()
+                    .filter(t -> !completedTopicIds.contains(t.getId()))
+                    .toList();
+
+            int orderIndex = 0;
+            for (RoadmapItem topic : uncompletedTopics) {
+                int estMinutes = topic.getEstimatedMinutes() != null ? topic.getEstimatedMinutes() : 30;
+                if (totalPlannedMinutes == 0 || totalPlannedMinutes + estMinutes <= availableMinutes) {
+                    DailyPlanItem item = DailyPlanItem.create(
+                            savedVersion.getId(),
+                            DailyTaskCategory.NEW_MATERIAL,
+                            topic.getTitle(),
+                            topic.getDescription(),
+                            estMinutes,
+                            orderIndex,
+                            topic.getId()
+                    );
+                    DailyPlanItem savedItem = dailyPlanItemRepository.save(item);
+                    itemResponses.add(DailyPlanItemResponse.from(savedItem));
+                    totalPlannedMinutes += estMinutes;
+                    orderIndex++;
+                } else {
+                    break;
+                }
+            }
+
+            if (totalPlannedMinutes > 0) {
+                savedVersion.updateTotalPlannedMinutes(totalPlannedMinutes);
+                dailyPlanVersionRepository.save(savedVersion);
+            }
+        }
+
         auditLogService.logAction(
                 userId,
                 username,
@@ -89,7 +165,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 "DailyPlan",
                 savedPlan.getId().toString());
 
-        return DailyPlanResponse.of(savedPlan, savedVersion.getId(), savedVersion.getAvailableMinutes(), savedVersion.getTotalPlannedMinutes(), List.of());
+        return DailyPlanResponse.of(savedPlan, savedVersion.getId(), savedVersion.getAvailableMinutes(), savedVersion.getTotalPlannedMinutes(), itemResponses);
     }
 
     @Override
@@ -137,13 +213,30 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         int orderIndex = existingItems.size();
         int plannedMinutes = request.plannedMinutes() != null ? request.plannedMinutes() : 30;
 
+        UUID roadmapItemId = request.roadmapItemId();
+        if (roadmapItemId != null) {
+            RoadmapItem roadmapItem = roadmapItemRepository.findById(roadmapItemId)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Roadmap item not found"));
+            Roadmap roadmap = roadmapItem.getRoadmapVersion().getRoadmap();
+            if (!roadmap.getOwner().getId().equals(userId)) {
+                throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Roadmap item not found");
+            }
+            if (plan.getRoadmapId() == null) {
+                plan.setRoadmapId(roadmap.getId());
+                dailyPlanRepository.save(plan);
+            } else if (!plan.getRoadmapId().equals(roadmap.getId())) {
+                throw new BusinessException(ErrorCode.INVALID_PLAN_TRANSITION, "Roadmap item does not belong to the plan's roadmap");
+            }
+        }
+
         DailyPlanItem item = DailyPlanItem.create(
                 version.getId(),
                 request.category(),
                 request.title().trim(),
                 request.description() != null ? request.description().trim() : null,
                 plannedMinutes,
-                orderIndex);
+                orderIndex,
+                roadmapItemId);
 
         DailyPlanItem savedItem = dailyPlanItemRepository.save(item);
 
@@ -368,14 +461,19 @@ public class DailyPlanServiceImpl implements DailyPlanService {
     }
 
     private DailyPlanResponse buildDailyPlanResponse(DailyPlan plan) {
-        if (plan.getActiveVersionId() == null) {
-            UUID draftId = dailyPlanVersionRepository.findTopByDailyPlanIdOrderByVersionNumberDesc(plan.getId())
+        UUID versionId = plan.getActiveVersionId();
+        if (versionId == null) {
+            versionId = dailyPlanVersionRepository.findTopByDailyPlanIdOrderByVersionNumberDesc(plan.getId())
                     .map(DailyPlanVersion::getId)
                     .orElse(null);
-            return DailyPlanResponse.of(plan, draftId, 60, 0, List.of());
         }
+
+        if (versionId == null) {
+            return DailyPlanResponse.of(plan, null, 60, 0, List.of());
+        }
+
         DailyPlanVersion version = dailyPlanVersionRepository
-                .findById(plan.getActiveVersionId())
+                .findById(versionId)
                 .orElse(null);
 
         List<DailyPlanItemResponse> items = version != null
@@ -389,7 +487,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         int available = version != null ? version.getAvailableMinutes() : 60;
         int planned = version != null ? version.getTotalPlannedMinutes() : 0;
 
-        return DailyPlanResponse.of(plan, plan.getActiveVersionId(), available, planned, items);
+        return DailyPlanResponse.of(plan, versionId, available, planned, items);
     }
 
     private String getUserTimeZone(UUID userId) {

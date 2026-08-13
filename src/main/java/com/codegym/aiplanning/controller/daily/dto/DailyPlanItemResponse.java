@@ -18,7 +18,8 @@ public record DailyPlanItemResponse(
         Integer orderIndex,
         DailyTaskStatus status,
         Instant completedAt,
-        Instant createdAt
+        Instant createdAt,
+        UUID roadmapItemId
 ) {
     public static DailyPlanItemResponse from(DailyPlanItem item) {
         return new DailyPlanItemResponse(
@@ -31,7 +32,8 @@ public record DailyPlanItemResponse(
                 item.getOrderIndex(),
                 item.getStatus(),
                 item.getCompletedAt(),
-                item.getCreatedAt()
+                item.getCreatedAt(),
+                item.getRoadmapItemId()
         );
     }
 }

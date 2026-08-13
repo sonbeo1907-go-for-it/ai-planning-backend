@@ -25,7 +25,8 @@ public record DailyPlanResponse(
         Double completionPercentage,
         List<DailyPlanItemResponse> items,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        UUID roadmapId
 ) {
     public static DailyPlanResponse of(
             DailyPlan plan,
@@ -52,7 +53,8 @@ public record DailyPlanResponse(
                 percentage,
                 items != null ? items : List.of(),
                 plan.getCreatedAt(),
-                plan.getUpdatedAt()
+                plan.getUpdatedAt(),
+                plan.getRoadmapId()
         );
     }
 }
