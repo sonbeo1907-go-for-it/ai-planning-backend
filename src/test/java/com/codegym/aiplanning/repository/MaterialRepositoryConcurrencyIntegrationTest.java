@@ -37,6 +37,9 @@ class MaterialRepositoryConcurrencyIntegrationTest {
     @Autowired
     private TransactionTemplate transactionTemplate;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     private UUID testMaterialId;
 
     @BeforeEach
@@ -45,6 +48,9 @@ class MaterialRepositoryConcurrencyIntegrationTest {
     // Therefore, we shouldn't use @Transactional on the test method itself.
     void setUp() {
         // Clean up
+        jdbcTemplate.execute("DELETE FROM refresh_tokens");
+        jdbcTemplate.execute("DELETE FROM auth_sessions");
+        jdbcTemplate.execute("DELETE FROM auth_identities");
         materialRepository.deleteAll();
         userAccountRepository.deleteAll();
 

@@ -1,6 +1,8 @@
 package com.codegym.aiplanning.controller.material;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -279,6 +281,26 @@ class MaterialControllerIntegrationTest {
                         .content(requestJson)
                         .header("Authorization", "Bearer " + accessToken))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getMyMaterialsHappyPath() throws Exception {
+        UserAccount user = createUser("get-mats-user", "Get Mats User");
+        String accessToken = login(user.getUsername());
+
+        mockMvc.perform(get(ApiConstant.MATERIALS + "?page=0&size=10")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void getMyMaterialsExplicitSort() throws Exception {
+        UserAccount user = createUser("get-mats-sort", "Get Mats Sort User");
+        String accessToken = login(user.getUsername());
+
+        mockMvc.perform(get(ApiConstant.MATERIALS + "?page=0&size=10&sort=createdAt,desc")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk());
     }
 
     private UserAccount createUser(String username, String fullName) {

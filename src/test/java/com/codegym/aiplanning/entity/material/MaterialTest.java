@@ -97,4 +97,37 @@ class MaterialTest {
         assertThatThrownBy(() -> material.markAsFailed(null, "Error"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void archive_FromReady_ShouldSetArchivedAt() {
+        Material material = Material.createText(user, MaterialType.TEXT, "Some text");
+        
+        material.archive();
+        
+        assertThat(material.isArchived()).isTrue();
+        assertThat(material.getArchivedAt()).isNotNull();
+    }
+
+    @Test
+    void archive_FromPending_ShouldThrowException() {
+        Material material = Material.create(user, "test.pdf", "application/pdf", 1024L, "s3://key");
+        
+        assertThatThrownBy(material::archive)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Cannot archive a material that is PENDING or PROCESSING");
+    }
+
+    @Test
+    void archive_WhenAlreadyArchived_ShouldBeIdempotent() {
+        Material material = Material.createText(user, MaterialType.TEXT, "Some text");
+        material.archive();
+        java.time.Instant firstTime = material.getArchivedAt();
+        
+        // Wait a bit to ensure time would change if it wasn't idempotent
+        try { Thread.sleep(10); } catch (InterruptedException ignored) {}
+        
+        material.archive();
+        
+        assertThat(material.getArchivedAt()).isEqualTo(firstTime);
+    }
 }

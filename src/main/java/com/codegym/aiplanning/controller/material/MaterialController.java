@@ -16,6 +16,14 @@ import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
+import org.springdoc.core.annotations.ParameterObject;
+import com.codegym.aiplanning.controller.material.dto.MaterialListResponse;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -80,5 +88,31 @@ public class MaterialController {
         UUID userId = UUID.fromString(jwt.getSubject());
         MaterialResponse response = materialService.createFromText(userId, request);
         return ApiResponse.of(response);
+    }
+
+    @GetMapping
+    @PreAuthorize("hasRole('USER') or hasRole('ADMIN')")
+    @Operation(
+            summary = "Get my learning materials",
+            description = "Returns a paginated list of learning materials owned by the current user. Archived materials are excluded.")
+    public ApiResponse<Page<MaterialListResponse>> getMyMaterials(
+            @ParameterObject @PageableDefault(size = 20, sort = "createdAt", direction = org.springframework.data.domain.Sort.Direction.DESC) Pageable pageable,
+            @AuthenticationPrincipal Jwt jwt) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        Page<MaterialListResponse> response = materialService.getMyMaterials(userId, pageable);
+        return ApiResponse.of(response);
+    }
+
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasRole('USER') or hasRole('ADMIN')")
+    @Operation(
+            summary = "Archive a learning material",
+            description = "Soft-deletes the material so it won't appear in lists, but keeps it for roadmap reference.")
+    public void archiveMaterial(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal Jwt jwt) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        materialService.archiveMaterial(userId, id);
     }
 }

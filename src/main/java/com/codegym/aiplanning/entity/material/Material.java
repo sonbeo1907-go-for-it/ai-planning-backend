@@ -52,6 +52,9 @@ public class Material extends BaseEntity {
     @Column(name = "processing_started_at")
     private java.time.Instant processingStartedAt;
 
+    @Column(name = "archived_at")
+    private java.time.Instant archivedAt;
+
     protected Material() {}
 
     public static Material create(UserAccount user, String originalFileName, String contentType, Long fileSize, String storageKey) {
@@ -105,6 +108,20 @@ public class Material extends BaseEntity {
         this.errorMessage = message;
     }
 
+    public boolean isArchived() {
+        return archivedAt != null;
+    }
+
+    public void archive() {
+        if (isArchived()) {
+            return; // Idempotent
+        }
+        if (this.status == MaterialStatus.PENDING || this.status == MaterialStatus.PROCESSING) {
+            throw new IllegalStateException("Cannot archive a material that is PENDING or PROCESSING.");
+        }
+        this.archivedAt = java.time.Instant.now();
+    }
+
     public UserAccount getUser() {
         return user;
     }
@@ -147,5 +164,9 @@ public class Material extends BaseEntity {
 
     public java.time.Instant getProcessingStartedAt() {
         return processingStartedAt;
+    }
+
+    public java.time.Instant getArchivedAt() {
+        return archivedAt;
     }
 }

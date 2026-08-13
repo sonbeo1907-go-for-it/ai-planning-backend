@@ -23,6 +23,10 @@ import java.io.IOException;
 import java.util.Set;
 import java.util.UUID;
 
+import com.codegym.aiplanning.controller.material.dto.MaterialListResponse;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
 @Service
 public class MaterialServiceImpl implements MaterialService {
 
@@ -172,5 +176,33 @@ public class MaterialServiceImpl implements MaterialService {
                 saved.getErrorCode(),
                 saved.getErrorMessage()
         );
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<MaterialListResponse> getMyMaterials(UUID userId, Pageable pageable) {
+        Page<Material> materials = materialRepository.findByUserIdAndArchivedAtIsNull(userId, pageable);
+        return materials.map(MaterialListResponse::from);
+    }
+
+    @Override
+    @Transactional
+    public void archiveMaterial(UUID userId, UUID materialId) {
+        Material material = materialRepository.findByIdAndUserId(materialId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Material not found or not owned by user."));
+        
+        if (material.isArchived()) {
+            log.info("Material {} is already archived. Ignoring.", materialId);
+            return;
+        }
+
+        try {
+            material.archive();
+        } catch (IllegalStateException e) {
+            throw new BusinessException(ErrorCode.CONFLICT, e.getMessage());
+        }
+
+        materialRepository.save(material);
+        log.info("User {} archived material {}", userId, materialId);
     }
 }
