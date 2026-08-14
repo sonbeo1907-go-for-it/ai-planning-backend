@@ -81,7 +81,9 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler({
         MethodArgumentTypeMismatchException.class,
-        HttpMessageNotReadableException.class
+        HttpMessageNotReadableException.class,
+        org.springframework.web.bind.MissingServletRequestParameterException.class,
+        org.springframework.web.multipart.support.MissingServletRequestPartException.class
     })
     ResponseEntity<ApiError> handleMalformedRequest(
             Exception exception, HttpServletRequest request) {
@@ -134,6 +136,30 @@ public class GlobalExceptionHandler {
                 HttpStatus.CONFLICT,
                 ErrorCode.CONCURRENT_MODIFICATION.name(),
                 "The resource was modified by another request. Reload it and try again.",
+                request,
+                List.of());
+    }
+
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    ResponseEntity<ApiError> handleMaxUploadSizeExceeded(
+            org.springframework.web.multipart.MaxUploadSizeExceededException exception, HttpServletRequest request) {
+        return build(
+                HttpStatus.PAYLOAD_TOO_LARGE,
+                ErrorCode.FILE_TOO_LARGE.name(),
+                "The uploaded file or request exceeds the maximum configured size limit.",
+                request,
+                List.of());
+    }
+
+    @ExceptionHandler({
+        org.springframework.web.servlet.resource.NoResourceFoundException.class,
+        org.springframework.web.servlet.NoHandlerFoundException.class
+    })
+    ResponseEntity<ApiError> handleNotFound(Exception exception, HttpServletRequest request) {
+        return build(
+                HttpStatus.NOT_FOUND,
+                ErrorCode.RESOURCE_NOT_FOUND.name(),
+                "The requested resource was not found.",
                 request,
                 List.of());
     }

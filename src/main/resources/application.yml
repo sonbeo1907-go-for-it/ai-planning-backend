@@ -18,6 +18,9 @@ spring:
   flyway:
     enabled: true
   data:
+    web:
+      pageable:
+        max-page-size: 100
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
@@ -26,6 +29,10 @@ spring:
         enabled: false
   jackson:
     default-property-inclusion: non_null
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
 
 server:
   port: ${SERVER_PORT:8080}
@@ -82,6 +89,19 @@ app:
       enabled: false
       email: admin@aiplanning.local
       password: disabled-bootstrap-password
+  storage:
+    provider: ${STORAGE_PROVIDER:local}
+    local:
+      upload-dir: ${STORAGE_LOCAL_DIR:./data/materials}
+    s3:
+      endpoint: ${B2_ENDPOINT:https://s3.us-west-004.backblazeb2.com}
+      bucket-name: ${B2_BUCKET_NAME:ai-planning-materials}
+      access-key: ${B2_ACCESS_KEY:}
+      secret-key: ${B2_SECRET_KEY:}
+      region: ${B2_REGION:us-west-004}
+      api-call-timeout-ms: ${B2_API_TIMEOUT_MS:30000}
+      api-call-attempt-timeout-ms: ${B2_API_ATTEMPT_TIMEOUT_MS:10000}
+      max-retries: ${B2_MAX_RETRIES:3}
 
 logging:
   pattern:
