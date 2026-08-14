@@ -217,6 +217,32 @@ class ManualRoadmapControllerIntegrationTest {
     }
 
     @Test
+    void listReturnsNestedContentForMultipleRoadmaps() throws Exception {
+        String token = login(createAccount(UserRole.USER));
+        CreatedRoadmap backend = createRoadmap(token, "Backend with Java");
+        CreatedRoadmap frontend = createRoadmap(token, "Frontend with React");
+        UUID backendMilestone = addMilestone(token, backend, "Backend Week 1", 0);
+        UUID frontendMilestone = addMilestone(token, frontend, "Frontend Week 1", 0);
+        addTopic(token, backend, backendMilestone, "Spring Boot", 0, 60);
+        addTopic(token, frontend, frontendMilestone, "React", 0, 45);
+
+        MvcResult result = mockMvc.perform(get(ApiConstant.ROADMAPS)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andReturn();
+
+        assertThat(data(result).findValuesAsText("title"))
+                .contains(
+                        "Backend with Java",
+                        "Backend Week 1",
+                        "Spring Boot",
+                        "Frontend with React",
+                        "Frontend Week 1",
+                        "React");
+    }
+
+    @Test
     void swaggerDocumentsManualRoadmapEndpoints() throws Exception {
         JsonNode document = objectMapper.readTree(mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())

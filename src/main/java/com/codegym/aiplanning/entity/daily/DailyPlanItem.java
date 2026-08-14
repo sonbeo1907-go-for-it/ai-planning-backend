@@ -75,12 +75,14 @@ public class DailyPlanItem extends BaseEntity {
     }
 
     public void updateStatus(DailyTaskStatus newStatus) {
-        this.status = newStatus;
         if (newStatus == DailyTaskStatus.COMPLETED) {
-            this.completedAt = Instant.now();
-        } else if (newStatus == DailyTaskStatus.NOT_STARTED) {
+            if (status != DailyTaskStatus.COMPLETED) {
+                this.completedAt = Instant.now();
+            }
+        } else {
             this.completedAt = null;
         }
+        this.status = newStatus;
     }
 
     public UUID getDailyPlanVersionId() {

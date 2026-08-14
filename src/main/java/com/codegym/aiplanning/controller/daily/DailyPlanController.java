@@ -7,6 +7,7 @@ import com.codegym.aiplanning.controller.daily.dto.CreateDailyPlanRequest;
 import com.codegym.aiplanning.controller.daily.dto.CreateDailyTaskRequest;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanItemResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanResponse;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
 import com.codegym.aiplanning.service.daily.DailyPlanService;
@@ -22,7 +23,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -59,7 +59,7 @@ public class DailyPlanController {
         return ApiResponse.of(dailyPlanService.createDailyPlan(request, actorJwt));
     }
 
-    @GetMapping("/today")
+    @GetMapping(ApiConstant.DAILY_PLAN_TODAY)
     @Operation(
             summary = "Get today's daily plan (US-TSK-01-MANUAL)",
             description = "Returns today's daily plan and task checklist based on the user's timezone.")
@@ -67,7 +67,7 @@ public class DailyPlanController {
         return ApiResponse.of(dailyPlanService.getTodayPlan(actorJwt));
     }
 
-    @GetMapping("/{planId}")
+    @GetMapping(ApiConstant.DAILY_PLAN_BY_ID)
     @Operation(
             summary = "Get daily plan details by ID (US-TSK-01-MANUAL)",
             description = "Returns a specific daily plan and its items. Only accessible by the plan owner.")
@@ -85,21 +85,46 @@ public class DailyPlanController {
         return ApiResponse.of(dailyPlanService.getUserDailyPlans(actorJwt));
     }
 
-    @PostMapping("/{planId}/items")
-    @Operation(
-            summary = "Add a manual task to daily plan (US-TSK-01-MANUAL)",
-            description = "Adds a manual learning task item to the active version of the daily plan.")
-    public ApiResponse<DailyPlanItemResponse> addTaskToPlan(
-            @PathVariable UUID planId,
-            @Valid @RequestBody CreateDailyTaskRequest request,
-            @AuthenticationPrincipal Jwt actorJwt) {
-        return ApiResponse.of(dailyPlanService.addTaskToPlan(planId, request, actorJwt));
+    @GetMapping(ApiConstant.DAILY_PLAN_VERSIONS)
+    @Operation(summary = "List all versions belonging to one owner-scoped Daily Plan")
+    public ApiResponse<List<DailyPlanVersionResponse>> getVersions(
+            @PathVariable UUID planId, @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(dailyPlanService.getVersions(planId, actorJwt));
     }
 
-    @PostMapping("/{planId}/versions/{versionId}/activate")
+    @GetMapping(ApiConstant.DAILY_PLAN_VERSION_BY_ID)
+    @Operation(summary = "Read one exact Daily Plan version and its tasks")
+    public ApiResponse<DailyPlanVersionResponse> getVersion(
+            @PathVariable UUID planId,
+            @PathVariable UUID versionId,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(dailyPlanService.getVersion(planId, versionId, actorJwt));
+    }
+
+    @PostMapping(ApiConstant.DAILY_PLAN_VERSIONS)
+    @Operation(summary = "Create the next editable Daily Plan draft from the active version")
+    public ApiResponse<DailyPlanVersionResponse> createDraftVersion(
+            @PathVariable UUID planId, @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(dailyPlanService.createDraftVersion(planId, actorJwt));
+    }
+
+    @PostMapping(ApiConstant.DAILY_PLAN_VERSION_ITEMS)
+    @Operation(
+            summary = "Add a manual task to daily plan (US-TSK-01-MANUAL)",
+            description = "Adds a manual learning task to one exact DRAFT version.")
+    public ApiResponse<DailyPlanItemResponse> addTaskToPlan(
+            @PathVariable UUID planId,
+            @PathVariable UUID versionId,
+            @Valid @RequestBody CreateDailyTaskRequest request,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(
+                dailyPlanService.addTaskToPlan(planId, versionId, request, actorJwt));
+    }
+
+    @PostMapping(ApiConstant.DAILY_PLAN_VERSION_ACTIVATE)
     @Operation(
             summary = "Activate a daily plan version (US-PLN-01-MANUAL)",
-            description = "Transitions a daily plan from DRAFT to READY by activating a specific version.")
+            description = "Activates one exact DRAFT version and preserves the previous ACTIVE version as SUPERSEDED.")
     public ApiResponse<DailyPlanResponse> activateVersion(
             @PathVariable UUID planId,
             @PathVariable UUID versionId,
@@ -107,7 +132,7 @@ public class DailyPlanController {
         return ApiResponse.of(dailyPlanService.activateVersion(planId, versionId, actorJwt));
     }
 
-    @PostMapping("/{planId}/items/{itemId}/progress")
+    @PostMapping(ApiConstant.DAILY_PLAN_ITEM_PROGRESS)
     @Operation(
             summary = "Record detailed task progress (US-PLN-01-MANUAL)",
             description = "Appends a progress entry for a task with detailed tracking including difficulty and notes.")
@@ -119,7 +144,7 @@ public class DailyPlanController {
         return ApiResponse.of(dailyPlanService.recordProgress(planId, itemId, request, actorJwt));
     }
 
-    @PostMapping("/{planId}/items/{itemId}/pomodoro")
+    @PostMapping(ApiConstant.DAILY_PLAN_ITEM_POMODORO)
     @Operation(
             summary = "Record a completed Pomodoro focus session (US-TSK-02)",
             description = "Records a completed Pomodoro study session (default 25 minutes) for a specific task and updates progress entries.")
@@ -131,14 +156,16 @@ public class DailyPlanController {
         return ApiResponse.of(dailyPlanService.recordPomodoroSession(planId, itemId, request, actorJwt));
     }
 
-    @DeleteMapping("/{planId}/items/{itemId}")
+    @DeleteMapping(ApiConstant.DAILY_PLAN_VERSION_ITEM_BY_ID)
     @Operation(
             summary = "Delete manual task from daily plan (US-TSK-01-MANUAL)",
             description = "Deletes a manual task and returns the updated daily plan with recalculated percentage.")
-    public ApiResponse<DailyPlanResponse> deleteTask(
+    public ApiResponse<DailyPlanVersionResponse> deleteTask(
             @PathVariable UUID planId,
+            @PathVariable UUID versionId,
             @PathVariable UUID itemId,
             @AuthenticationPrincipal Jwt actorJwt) {
-        return ApiResponse.of(dailyPlanService.deleteTask(planId, itemId, actorJwt));
+        return ApiResponse.of(
+                dailyPlanService.deleteTask(planId, versionId, itemId, actorJwt));
     }
 }

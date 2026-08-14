@@ -11,11 +11,10 @@ public interface DailyPlanItemRepository extends JpaRepository<DailyPlanItem, UU
 
     List<DailyPlanItem> findByDailyPlanVersionIdOrderByOrderIndexAsc(UUID dailyPlanVersionId);
 
-    @Query("select distinct item.roadmapItemId from DailyPlanItem item "
-            + "join DailyPlanVersion version on item.dailyPlanVersionId = version.id "
-            + "join DailyPlan plan on version.dailyPlanId = plan.id "
-            + "where plan.userId = :userId and item.status = :status and item.roadmapItemId is not null")
-    List<UUID> findCompletedRoadmapItemIds(
-            @Param("userId") UUID userId,
-            @Param("status") com.codegym.aiplanning.entity.daily.DailyTaskStatus status);
+    @Query("select item from DailyPlanItem item "
+            + "where item.dailyPlanVersionId in :versionIds "
+            + "order by item.dailyPlanVersionId, item.orderIndex")
+    List<DailyPlanItem> findByDailyPlanVersionIds(
+            @Param("versionIds") List<UUID> versionIds);
+
 }

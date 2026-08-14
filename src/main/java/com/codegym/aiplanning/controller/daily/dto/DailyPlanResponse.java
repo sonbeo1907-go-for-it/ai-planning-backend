@@ -36,7 +36,14 @@ public record DailyPlanResponse(
             List<DailyPlanItemResponse> items) {
         int total = items != null ? items.size() : 0;
         int completed = items != null ? (int) items.stream().filter(i -> i.status() == DailyTaskStatus.COMPLETED).count() : 0;
-        double percentage = total > 0 ? Math.round((double) completed / total * 1000.0) / 10.0 : 0.0;
+        int earnedPercentage = items != null
+                ? items.stream()
+                        .mapToInt(item -> item.status().completionPercentage())
+                        .sum()
+                : 0;
+        double percentage = total > 0
+                ? Math.round((double) earnedPercentage / total * 10.0) / 10.0
+                : 0.0;
 
         return new DailyPlanResponse(
                 plan.getId(),

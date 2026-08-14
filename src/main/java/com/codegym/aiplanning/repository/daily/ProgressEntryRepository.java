@@ -10,4 +10,6 @@ public interface ProgressEntryRepository extends JpaRepository<ProgressEntry, UU
     List<ProgressEntry> findByUserIdOrderByRecordedAtDesc(UUID userId);
 
     List<ProgressEntry> findByDailyPlanItemIdOrderByRecordedAtDesc(UUID dailyPlanItemId);
+
+    boolean existsByDailyPlanItemId(UUID dailyPlanItemId);
 }

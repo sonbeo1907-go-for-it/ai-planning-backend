@@ -62,12 +62,26 @@ public class DailyPlan extends BaseEntity {
         this.activeVersionId = versionId;
     }
 
-    public void activate(UUID versionId) {
-        if (this.status != DailyPlanStatus.DRAFT) {
-            throw new IllegalStateException("Only DRAFT plan can be activated.");
+    public void activateVersion(UUID versionId) {
+        if (status != DailyPlanStatus.DRAFT && status != DailyPlanStatus.READY) {
+            throw new IllegalStateException(
+                    "Daily Plan versions can only be activated before execution starts.");
         }
         this.activeVersionId = versionId;
-        this.status = DailyPlanStatus.READY;
+        if (status == DailyPlanStatus.DRAFT) {
+            status = DailyPlanStatus.READY;
+        }
+    }
+
+    public void startExecution(Instant startedAt) {
+        if (status == DailyPlanStatus.READY) {
+            status = DailyPlanStatus.IN_PROGRESS;
+            this.startedAt = startedAt;
+            return;
+        }
+        if (status != DailyPlanStatus.IN_PROGRESS) {
+            throw new IllegalStateException("Only a ready Daily Plan can start execution.");
+        }
     }
 
     public void updateStatus(DailyPlanStatus newStatus) {

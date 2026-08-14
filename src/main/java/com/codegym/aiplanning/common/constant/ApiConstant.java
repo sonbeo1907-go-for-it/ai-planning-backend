@@ -30,6 +30,21 @@ public final class ApiConstant {
             ROADMAP_ONBOARDING_BY_ID + COMPLETE;
     public static final String ADMIN = API_V1 + "/admin";
     public static final String DAILY_PLANS = API_V1 + "/daily-plans";
+    public static final String DAILY_PLAN_TODAY = "/today";
+    public static final String DAILY_PLAN_BY_ID = "/{planId}";
+    public static final String DAILY_PLAN_VERSIONS = DAILY_PLAN_BY_ID + "/versions";
+    public static final String DAILY_PLAN_VERSION_BY_ID =
+            DAILY_PLAN_VERSIONS + "/{versionId}";
+    public static final String DAILY_PLAN_VERSION_ACTIVATE =
+            DAILY_PLAN_VERSION_BY_ID + "/activate";
+    public static final String DAILY_PLAN_VERSION_ITEMS =
+            DAILY_PLAN_VERSION_BY_ID + "/items";
+    public static final String DAILY_PLAN_VERSION_ITEM_BY_ID =
+            DAILY_PLAN_VERSION_ITEMS + "/{itemId}";
+    public static final String DAILY_PLAN_ITEM_PROGRESS =
+            DAILY_PLAN_BY_ID + "/items/{itemId}/progress";
+    public static final String DAILY_PLAN_ITEM_POMODORO =
+            DAILY_PLAN_BY_ID + "/items/{itemId}/pomodoro";
     public static final String ROADMAPS = API_V1 + "/roadmaps";
     public static final String ROADMAP_BY_ID = "/{roadmapId}";
     public static final String ROADMAP_VERSIONS = ROADMAP_BY_ID + "/versions";
