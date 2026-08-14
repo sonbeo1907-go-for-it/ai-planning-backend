@@ -15,6 +15,13 @@ public interface RoadmapVersionRepository extends JpaRepository<RoadmapVersion, 
 
     List<RoadmapVersion> findAllByRoadmapIdOrderByVersionNumberDesc(UUID roadmapId);
 
+    @Query("select version from RoadmapVersion version "
+            + "join fetch version.roadmap roadmap "
+            + "where roadmap.id in :roadmapIds "
+            + "order by roadmap.id, version.versionNumber desc")
+    List<RoadmapVersion> findAllByRoadmapIds(
+            @Param("roadmapIds") List<UUID> roadmapIds);
+
     Optional<RoadmapVersion> findByRoadmapIdAndStatus(
             UUID roadmapId, RoadmapVersionStatus status);
 

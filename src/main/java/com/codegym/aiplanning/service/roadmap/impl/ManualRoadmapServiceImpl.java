@@ -78,8 +78,38 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
     @Override
     @Transactional(readOnly = true)
     public List<RoadmapResponse> list(UUID userId) {
-        return roadmapRepository.findAllByOwnerIdOrderByUpdatedAtDesc(userId).stream()
-                .map(this::roadmapResponse)
+        List<Roadmap> roadmaps =
+                roadmapRepository.findAllByOwnerIdOrderByUpdatedAtDesc(userId);
+        if (roadmaps.isEmpty()) {
+            return List.of();
+        }
+
+        List<RoadmapVersion> versions = roadmapVersionRepository.findAllByRoadmapIds(
+                roadmaps.stream().map(Roadmap::getId).toList());
+        Map<UUID, List<RoadmapVersion>> versionsByRoadmapId = new HashMap<>();
+        for (RoadmapVersion version : versions) {
+            versionsByRoadmapId
+                    .computeIfAbsent(version.getRoadmap().getId(), ignored -> new ArrayList<>())
+                    .add(version);
+        }
+
+        Map<UUID, List<RoadmapItem>> itemsByVersionId = new HashMap<>();
+        if (!versions.isEmpty()) {
+            List<RoadmapItem> items = roadmapItemRepository.findAllByRoadmapVersionIds(
+                    versions.stream().map(RoadmapVersion::getId).toList());
+            for (RoadmapItem item : items) {
+                itemsByVersionId
+                        .computeIfAbsent(
+                                item.getRoadmapVersion().getId(), ignored -> new ArrayList<>())
+                        .add(item);
+            }
+        }
+
+        return roadmaps.stream()
+                .map(roadmap -> roadmapListResponse(
+                        roadmap,
+                        versionsByRoadmapId.getOrDefault(roadmap.getId(), List.of()),
+                        itemsByVersionId))
                 .toList();
     }
 
@@ -321,6 +351,43 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
                 .map(this::versionResponse)
                 .toList();
         return RoadmapResponse.from(roadmap, versions);
+    }
+
+    private RoadmapResponse roadmapListResponse(
+            Roadmap roadmap,
+            List<RoadmapVersion> versions,
+            Map<UUID, List<RoadmapItem>> itemsByVersionId) {
+        return RoadmapResponse.from(
+                roadmap,
+                versions.stream()
+                        .map(version -> versionListResponse(
+                                version,
+                                itemsByVersionId.getOrDefault(version.getId(), List.of())))
+                        .toList());
+    }
+
+    private RoadmapVersionResponse versionListResponse(
+            RoadmapVersion version, List<RoadmapItem> items) {
+        Map<UUID, List<RoadmapItem>> topicsByMilestoneId = new HashMap<>();
+        for (RoadmapItem item : items) {
+            if (item.getItemType() == RoadmapItemType.TOPIC && item.getParent() != null) {
+                topicsByMilestoneId
+                        .computeIfAbsent(item.getParent().getId(), ignored -> new ArrayList<>())
+                        .add(item);
+            }
+        }
+
+        List<RoadmapItemResponse> milestones = items.stream()
+                .filter(item -> item.getItemType() == RoadmapItemType.MILESTONE)
+                .map(milestone -> RoadmapItemResponse.from(
+                        milestone,
+                        topicsByMilestoneId
+                                .getOrDefault(milestone.getId(), List.of())
+                                .stream()
+                                .map(this::itemResponse)
+                                .toList()))
+                .toList();
+        return RoadmapVersionResponse.from(version, milestones);
     }
 
     private RoadmapVersionResponse versionResponse(RoadmapVersion version) {

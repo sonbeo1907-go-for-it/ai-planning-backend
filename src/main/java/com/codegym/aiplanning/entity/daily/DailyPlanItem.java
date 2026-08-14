@@ -16,6 +16,9 @@ public class DailyPlanItem extends BaseEntity {
     @Column(name = "daily_plan_version_id", nullable = false)
     private UUID dailyPlanVersionId;
 
+    @Column(name = "roadmap_item_id")
+    private UUID roadmapItemId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private DailyTaskCategory category;
@@ -48,6 +51,17 @@ public class DailyPlanItem extends BaseEntity {
             String description,
             Integer plannedMinutes,
             Integer orderIndex) {
+        return create(dailyPlanVersionId, category, title, description, plannedMinutes, orderIndex, null);
+    }
+
+    public static DailyPlanItem create(
+            UUID dailyPlanVersionId,
+            DailyTaskCategory category,
+            String title,
+            String description,
+            Integer plannedMinutes,
+            Integer orderIndex,
+            UUID roadmapItemId) {
         DailyPlanItem item = new DailyPlanItem();
         item.dailyPlanVersionId = dailyPlanVersionId;
         item.category = category != null ? category : DailyTaskCategory.CUSTOM;
@@ -56,16 +70,19 @@ public class DailyPlanItem extends BaseEntity {
         item.plannedMinutes = plannedMinutes != null ? plannedMinutes : 30;
         item.orderIndex = orderIndex != null ? orderIndex : 0;
         item.status = DailyTaskStatus.NOT_STARTED;
+        item.roadmapItemId = roadmapItemId;
         return item;
     }
 
     public void updateStatus(DailyTaskStatus newStatus) {
-        this.status = newStatus;
         if (newStatus == DailyTaskStatus.COMPLETED) {
-            this.completedAt = Instant.now();
-        } else if (newStatus == DailyTaskStatus.NOT_STARTED) {
+            if (status != DailyTaskStatus.COMPLETED) {
+                this.completedAt = Instant.now();
+            }
+        } else {
             this.completedAt = null;
         }
+        this.status = newStatus;
     }
 
     public UUID getDailyPlanVersionId() {
@@ -98,5 +115,9 @@ public class DailyPlanItem extends BaseEntity {
 
     public Instant getCompletedAt() {
         return completedAt;
+    }
+
+    public UUID getRoadmapItemId() {
+        return roadmapItemId;
     }
 }

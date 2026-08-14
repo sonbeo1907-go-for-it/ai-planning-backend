@@ -32,10 +32,25 @@ public class ProgressEntry {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
-    private DailyTaskStatus status;
+    private ProgressEntryStatus status;
 
     @Column(name = "actual_minutes", nullable = false)
     private Integer actualMinutes;
+
+    @Column(columnDefinition = "TEXT", name = "actual_result")
+    private String actualResult;
+
+    @Column(name = "difficulty")
+    private Integer difficulty;
+
+    @Column(name = "understanding_rating")
+    private Integer understandingRating;
+
+    @Column(columnDefinition = "TEXT", name = "note")
+    private String note;
+
+    @Column(name = "supersedes_entry_id")
+    private UUID supersedesEntryId;
 
     @Column(name = "completion_percentage", nullable = false)
     private Integer completionPercentage;
@@ -49,15 +64,25 @@ public class ProgressEntry {
     public static ProgressEntry create(
             UUID userId,
             UUID dailyPlanItemId,
-            DailyTaskStatus status,
+            ProgressEntryStatus status,
             Integer actualMinutes,
-            Integer completionPercentage) {
+            Integer completionPercentage,
+            String actualResult,
+            Integer difficulty,
+            Integer understandingRating,
+            String note,
+            UUID supersedesEntryId) {
         ProgressEntry entry = new ProgressEntry();
         entry.userId = userId;
         entry.dailyPlanItemId = dailyPlanItemId;
         entry.status = status;
         entry.actualMinutes = actualMinutes != null ? actualMinutes : 0;
-        entry.completionPercentage = completionPercentage != null ? completionPercentage : (status == DailyTaskStatus.COMPLETED ? 100 : 0);
+        entry.completionPercentage = completionPercentage != null ? completionPercentage : (status == ProgressEntryStatus.COMPLETED ? 100 : 0);
+        entry.actualResult = actualResult;
+        entry.difficulty = difficulty;
+        entry.understandingRating = understandingRating;
+        entry.note = note;
+        entry.supersedesEntryId = supersedesEntryId;
         return entry;
     }
 
@@ -73,8 +98,8 @@ public class ProgressEntry {
         return dailyPlanItemId;
     }
 
-    public DailyTaskStatus getStatus() {
-        return status;
+    public Instant getRecordedAt() {
+        return recordedAt;
     }
 
     public Integer getActualMinutes() {
@@ -85,7 +110,27 @@ public class ProgressEntry {
         return completionPercentage;
     }
 
-    public Instant getRecordedAt() {
-        return recordedAt;
+    public ProgressEntryStatus getStatus() {
+        return status;
+    }
+
+    public String getActualResult() {
+        return actualResult;
+    }
+
+    public Integer getDifficulty() {
+        return difficulty;
+    }
+
+    public Integer getUnderstandingRating() {
+        return understandingRating;
+    }
+
+    public String getNote() {
+        return note;
+    }
+
+    public UUID getSupersedesEntryId() {
+        return supersedesEntryId;
     }
 }

@@ -17,6 +17,7 @@ public record DailyPlanResponse(
         String timeZoneSnapshot,
         DailyPlanStatus status,
         UUID activeVersionId,
+        UUID latestVersionId,
         Integer availableMinutes,
         Integer totalPlannedMinutes,
         Integer totalItemsCount,
@@ -24,16 +25,25 @@ public record DailyPlanResponse(
         Double completionPercentage,
         List<DailyPlanItemResponse> items,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        UUID roadmapId
 ) {
     public static DailyPlanResponse of(
             DailyPlan plan,
+            UUID latestVersionId,
             Integer availableMinutes,
             Integer totalPlannedMinutes,
             List<DailyPlanItemResponse> items) {
         int total = items != null ? items.size() : 0;
         int completed = items != null ? (int) items.stream().filter(i -> i.status() == DailyTaskStatus.COMPLETED).count() : 0;
-        double percentage = total > 0 ? Math.round((double) completed / total * 1000.0) / 10.0 : 0.0;
+        int earnedPercentage = items != null
+                ? items.stream()
+                        .mapToInt(item -> item.status().completionPercentage())
+                        .sum()
+                : 0;
+        double percentage = total > 0
+                ? Math.round((double) earnedPercentage / total * 10.0) / 10.0
+                : 0.0;
 
         return new DailyPlanResponse(
                 plan.getId(),
@@ -42,6 +52,7 @@ public record DailyPlanResponse(
                 plan.getTimeZoneSnapshot(),
                 plan.getStatus(),
                 plan.getActiveVersionId(),
+                latestVersionId,
                 availableMinutes != null ? availableMinutes : 60,
                 totalPlannedMinutes != null ? totalPlannedMinutes : 0,
                 total,
@@ -49,7 +60,8 @@ public record DailyPlanResponse(
                 percentage,
                 items != null ? items : List.of(),
                 plan.getCreatedAt(),
-                plan.getUpdatedAt()
+                plan.getUpdatedAt(),
+                plan.getRoadmapId()
         );
     }
 }
