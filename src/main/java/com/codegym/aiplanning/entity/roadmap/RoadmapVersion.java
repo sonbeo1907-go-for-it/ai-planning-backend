@@ -89,4 +89,8 @@ public class RoadmapVersion extends BaseEntity {
         }
         status = RoadmapVersionStatus.SUPERSEDED;
     }
+
+    public void clearDraftSlot() {
+        this.draftSlotRoadmapId = null;
+    }
 }
