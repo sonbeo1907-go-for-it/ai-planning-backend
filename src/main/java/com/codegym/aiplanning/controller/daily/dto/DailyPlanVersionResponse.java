@@ -23,7 +23,9 @@ public record DailyPlanVersionResponse(
         Instant supersededAt,
         List<DailyPlanItemResponse> items,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        String aiExplanation,
+        Boolean requiresUserDecision) {
 
     public static DailyPlanVersionResponse from(
             DailyPlanVersion version, List<DailyPlanItem> items) {
@@ -42,7 +44,9 @@ public record DailyPlanVersionResponse(
                         ? List.of()
                         : items.stream().map(DailyPlanItemResponse::from).toList(),
                 version.getCreatedAt(),
-                version.getUpdatedAt());
+                version.getUpdatedAt(),
+                version.getAiExplanation(),
+                version.getRequiresUserDecision());
     }
 
     @Override

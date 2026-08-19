@@ -176,6 +176,18 @@ public class GlobalExceptionHandler {
                 List.of());
     }
 
+    @ExceptionHandler(com.codegym.aiplanning.service.ai.AiServiceException.class)
+    ResponseEntity<ApiError> handleAiServiceException(
+            com.codegym.aiplanning.service.ai.AiServiceException exception, HttpServletRequest request) {
+        log.error("AI service error", exception);
+        return build(
+                HttpStatus.BAD_GATEWAY,
+                ErrorCode.AI_SERVICE_ERROR.name(),
+                exception.getMessage() != null ? exception.getMessage() : "AI service encountered an error.",
+                request,
+                List.of());
+    }
+
     private FieldViolation toViolation(FieldError error) {
         return new FieldViolation(error.getField(), error.getDefaultMessage());
     }

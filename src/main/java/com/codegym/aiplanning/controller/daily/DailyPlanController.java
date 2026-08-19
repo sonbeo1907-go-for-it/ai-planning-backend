@@ -108,6 +108,13 @@ public class DailyPlanController {
         return ApiResponse.of(dailyPlanService.createDraftVersion(planId, actorJwt));
     }
 
+    @PostMapping(ApiConstant.DAILY_PLAN_VERSIONS + "/generate")
+    @Operation(summary = "Generate the next Daily Plan draft using AI (US-PLN-AI)")
+    public ApiResponse<DailyPlanVersionResponse> generateAiDraftVersion(
+            @PathVariable UUID planId, @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(dailyPlanService.generateAiDraftVersion(planId, actorJwt));
+    }
+
     @PostMapping(ApiConstant.DAILY_PLAN_VERSION_ITEMS)
     @Operation(
             summary = "Add a manual task to daily plan (US-TSK-01-MANUAL)",

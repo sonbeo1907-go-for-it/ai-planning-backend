@@ -3,6 +3,7 @@ package com.codegym.aiplanning.controller.daily.dto;
 import com.codegym.aiplanning.entity.daily.DailyPlanItem;
 import com.codegym.aiplanning.entity.daily.DailyTaskCategory;
 import com.codegym.aiplanning.entity.daily.DailyTaskStatus;
+import com.codegym.aiplanning.entity.daily.AiAdjustmentAction;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.UUID;
@@ -19,7 +20,9 @@ public record DailyPlanItemResponse(
         DailyTaskStatus status,
         Instant completedAt,
         Instant createdAt,
-        UUID roadmapItemId
+        UUID roadmapItemId,
+        AiAdjustmentAction aiAdjustmentAction,
+        String aiAdjustmentReason
 ) {
     public static DailyPlanItemResponse from(DailyPlanItem item) {
         return new DailyPlanItemResponse(
@@ -33,7 +36,9 @@ public record DailyPlanItemResponse(
                 item.getStatus(),
                 item.getCompletedAt(),
                 item.getCreatedAt(),
-                item.getRoadmapItemId()
+                item.getRoadmapItemId(),
+                item.getAiAdjustmentAction(),
+                item.getAiAdjustmentReason()
         );
     }
 }

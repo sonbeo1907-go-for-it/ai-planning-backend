@@ -43,6 +43,17 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
+import com.codegym.aiplanning.service.ai.AiClient;
+import com.codegym.aiplanning.service.ai.AiServiceException;
+import com.codegym.aiplanning.service.daily.ai.AiPlanParser;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanAiResponse;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanConstraintEvaluator;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanValidator;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext;
+import com.codegym.aiplanning.service.daily.ai.PlanningContextBuilder;
+import com.codegym.aiplanning.service.daily.DailyPlanPersistenceService;
+import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -72,6 +83,18 @@ class DailyPlanServiceTest {
     private RoadmapItemRepository roadmapItemRepository;
     @Mock
     private AuditLogService auditLogService;
+    @Mock
+    private PlanningContextBuilder contextBuilder;
+    @Mock
+    private AiClient aiClient;
+    @Mock
+    private AiPlanParser planParser;
+    @Mock
+    private DailyPlanValidator validator;
+    @Mock
+    private DailyPlanConstraintEvaluator evaluator;
+    @Mock
+    private DailyPlanPersistenceService persistenceService;
 
     private DailyPlanServiceImpl dailyPlanService;
 
@@ -88,7 +111,13 @@ class DailyPlanServiceTest {
                 userProfileRepository,
                 roadmapRepository,
                 roadmapItemRepository,
-                auditLogService);
+                auditLogService,
+                contextBuilder,
+                aiClient,
+                planParser,
+                validator,
+                evaluator,
+                persistenceService);
 
         userId = UUID.randomUUID();
         userJwt = Jwt.withTokenValue("mock-token")
@@ -461,5 +490,69 @@ class DailyPlanServiceTest {
                 .hasMessageContaining("progress history");
 
         verify(dailyPlanItemRepository, never()).delete(any());
+    }
+
+    @Test
+    void generateAiDraftVersion_success() throws Exception {
+        UUID planId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        ReflectionTestUtils.setField(plan, "status", DailyPlanStatus.READY);
+
+        DailyPlanningContext context = new DailyPlanningContext(LocalDate.now(), 60, null, null, null, null, null);
+        String rawJson = "{}";
+        DailyPlanAiResponse response = new DailyPlanAiResponse(List.of());
+        DailyPlanConstraintEvaluator.EvaluationResult evalResult = new DailyPlanConstraintEvaluator.EvaluationResult(false);
+
+        DailyPlanVersion savedDraft = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.AI_GENERATED, 60, 0);
+        ReflectionTestUtils.setField(savedDraft, "id", UUID.randomUUID());
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+        when(contextBuilder.buildContext(planId)).thenReturn(context);
+        when(aiClient.generate(any(), any())).thenReturn(rawJson);
+        when(planParser.parse(rawJson)).thenReturn(response);
+        when(evaluator.evaluate(response, context)).thenReturn(evalResult);
+        when(persistenceService.persistAiGeneratedDraft(
+                any(), any(), any(), any(Integer.class), any(), any(Boolean.class), any()))
+                .thenReturn(savedDraft);
+        when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(savedDraft.getId()))
+                .thenReturn(List.of());
+
+        DailyPlanVersionResponse result = dailyPlanService.generateAiDraftVersion(planId, userJwt);
+
+        assertThat(result).isNotNull();
+        assertThat(result.origin()).isEqualTo(DailyPlanVersionOrigin.AI_GENERATED);
+        verify(validator).validateResponse(response, context);
+    }
+
+    @Test
+    void generateAiDraftVersion_planNotReadyOrDraft_throwsException() {
+        UUID planId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        ReflectionTestUtils.setField(plan, "status", DailyPlanStatus.IN_PROGRESS);
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+
+        assertThatThrownBy(() -> dailyPlanService.generateAiDraftVersion(planId, userJwt))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Cannot generate AI plan");
+    }
+
+    @Test
+    void generateAiDraftVersion_aiClientFails_throwsAiServiceException() {
+        UUID planId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        ReflectionTestUtils.setField(plan, "status", DailyPlanStatus.DRAFT);
+        DailyPlanningContext context = new DailyPlanningContext(LocalDate.now(), 60, null, null, null, null, null);
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+        when(contextBuilder.buildContext(planId)).thenReturn(context);
+        when(aiClient.generate(any(), any())).thenThrow(new RuntimeException("API error"));
+
+        assertThatThrownBy(() -> dailyPlanService.generateAiDraftVersion(planId, userJwt))
+                .isInstanceOf(AiServiceException.class)
+                .hasMessageContaining("Failed to generate plan from AI");
     }
 }

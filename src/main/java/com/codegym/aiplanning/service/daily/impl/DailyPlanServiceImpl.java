@@ -41,6 +41,15 @@ import java.util.UUID;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.codegym.aiplanning.service.ai.AiClient;
+import com.codegym.aiplanning.service.ai.AiServiceException;
+import com.codegym.aiplanning.service.daily.ai.AiPlanParser;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanAiResponse;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanConstraintEvaluator;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanValidator;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext;
+import com.codegym.aiplanning.service.daily.ai.PlanningContextBuilder;
+import com.codegym.aiplanning.service.daily.DailyPlanPersistenceService;
 
 @Service
 public class DailyPlanServiceImpl implements DailyPlanService {
@@ -53,6 +62,12 @@ public class DailyPlanServiceImpl implements DailyPlanService {
     private final RoadmapRepository roadmapRepository;
     private final RoadmapItemRepository roadmapItemRepository;
     private final AuditLogService auditLogService;
+    private final PlanningContextBuilder contextBuilder;
+    private final AiClient aiClient;
+    private final AiPlanParser planParser;
+    private final DailyPlanValidator validator;
+    private final DailyPlanConstraintEvaluator evaluator;
+    private final DailyPlanPersistenceService persistenceService;
 
     public DailyPlanServiceImpl(
             DailyPlanRepository dailyPlanRepository,
@@ -62,7 +77,13 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             UserProfileRepository userProfileRepository,
             RoadmapRepository roadmapRepository,
             RoadmapItemRepository roadmapItemRepository,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            PlanningContextBuilder contextBuilder,
+            AiClient aiClient,
+            AiPlanParser planParser,
+            DailyPlanValidator validator,
+            DailyPlanConstraintEvaluator evaluator,
+            DailyPlanPersistenceService persistenceService) {
         this.dailyPlanRepository = dailyPlanRepository;
         this.dailyPlanVersionRepository = dailyPlanVersionRepository;
         this.dailyPlanItemRepository = dailyPlanItemRepository;
@@ -71,6 +92,12 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         this.roadmapRepository = roadmapRepository;
         this.roadmapItemRepository = roadmapItemRepository;
         this.auditLogService = auditLogService;
+        this.contextBuilder = contextBuilder;
+        this.aiClient = aiClient;
+        this.planParser = planParser;
+        this.validator = validator;
+        this.evaluator = evaluator;
+        this.persistenceService = persistenceService;
     }
 
     @Override
@@ -286,6 +313,64 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 "DailyPlanVersion",
                 draft.getId().toString());
         return DailyPlanVersionResponse.from(draft, savedCopies);
+    }
+
+    @Override
+    public DailyPlanVersionResponse generateAiDraftVersion(UUID planId, Jwt actorJwt) {
+        UUID userId = extractUserId(actorJwt);
+        String username = extractUsername(actorJwt);
+
+        DailyPlan plan = requirePlanForUser(planId, userId);
+        if (plan.getStatus() != DailyPlanStatus.READY && plan.getStatus() != DailyPlanStatus.DRAFT) {
+            throw new BusinessException(
+                    ErrorCode.DAILY_PLAN_LOCKED,
+                    "Cannot generate AI plan for a Daily Plan that is already in progress or completed.");
+        }
+
+        // 1. Build Context
+        DailyPlanningContext context = contextBuilder.buildContext(planId);
+
+        // 2. Call AI
+        String systemPrompt = "You are an AI planner. Distribute the tasks.";
+        String userPrompt = "Plan for date: " + context.targetDate() + " with budget: " + context.availableMinutes();
+        
+        String rawJson;
+        try {
+            rawJson = aiClient.generate(systemPrompt, userPrompt);
+        } catch (Exception e) {
+            throw new AiServiceException("Failed to generate plan from AI", e);
+        }
+
+        // 3. Parse AI Response
+        DailyPlanAiResponse response;
+        try {
+            response = planParser.parse(rawJson);
+        } catch (Exception e) {
+            throw new AiServiceException("Failed to parse AI response", e);
+        }
+
+        // 4. Validate Response
+        validator.validateResponse(response, context);
+
+        // 5. Evaluate Constraints
+        DailyPlanConstraintEvaluator.EvaluationResult evalResult = evaluator.evaluate(response, context);
+        
+        int totalPlannedMinutes = response.items() != null 
+            ? response.items().stream().mapToInt(i -> i.plannedMinutes() != null ? i.plannedMinutes() : 0).sum() 
+            : 0;
+
+        // 6. Persistence (Transactional boundary)
+        DailyPlanVersion savedDraft = persistenceService.persistAiGeneratedDraft(
+                planId,
+                userId,
+                username,
+                totalPlannedMinutes,
+                "AI generated plan based on Roadmap and Progress.",
+                evalResult.requiresUserDecision(),
+                response.items() == null ? java.util.List.of() : response.items()
+        );
+
+        return versionResponse(savedDraft);
     }
 
     @Override
