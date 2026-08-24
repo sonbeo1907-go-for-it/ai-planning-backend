@@ -29,6 +29,27 @@ public final class ApiConstant {
     public static final String ROADMAP_ONBOARDING_COMPLETE =
             ROADMAP_ONBOARDING_BY_ID + COMPLETE;
     public static final String ADMIN = API_V1 + "/admin";
+    public static final String ADMIN_AI_PROVIDERS = ADMIN + "/ai-providers";
+    public static final String AI_PROVIDER_BY_ID = "/{providerId}";
+    public static final String AI_PROVIDER_ENABLE = AI_PROVIDER_BY_ID + "/enable";
+    public static final String AI_PROVIDER_DISABLE = AI_PROVIDER_BY_ID + "/disable";
+    public static final String AI_PROVIDER_CREDENTIALS = AI_PROVIDER_BY_ID + "/credentials";
+    public static final String AI_PROVIDER_CREDENTIAL_BY_ID =
+            AI_PROVIDER_CREDENTIALS + "/{credentialId}";
+    public static final String AI_PROVIDER_CREDENTIAL_ENABLE =
+            AI_PROVIDER_CREDENTIAL_BY_ID + "/enable";
+    public static final String AI_PROVIDER_CREDENTIAL_DISABLE =
+            AI_PROVIDER_CREDENTIAL_BY_ID + "/disable";
+    public static final String ADMIN_AI_PROVIDER_CONFIGS = ADMIN + "/ai-provider-configs";
+    public static final String AI_PROVIDER_CONFIG_BY_ID = "/{configId}";
+    public static final String AI_PROVIDER_CONFIG_ENABLE =
+            AI_PROVIDER_CONFIG_BY_ID + "/enable";
+    public static final String AI_PROVIDER_CONFIG_DISABLE =
+            AI_PROVIDER_CONFIG_BY_ID + "/disable";
+    public static final String AI_PROVIDER_CONFIG_DEFAULT =
+            AI_PROVIDER_CONFIG_BY_ID + "/default";
+    public static final String AI_PROVIDER_TEST_CONNECTION =
+            AI_PROVIDER_CONFIG_BY_ID + "/test-connection";
     public static final String DAILY_PLANS = API_V1 + "/daily-plans";
     public static final String DAILY_PLAN_TODAY = "/today";
     public static final String DAILY_PLAN_BY_ID = "/{planId}";

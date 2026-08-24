@@ -6,8 +6,10 @@ audit logging, email, migrations, documentation, and testing infrastructure.
 
 The first personal-learning slice now provides profile setup and resumable,
 Roadmap-scoped onboarding backed by a GOAL LearningSource and Roadmap draft.
-Versioned Roadmap content, progress, versioned daily plans, AI review, and AI
-provider configuration are introduced in later V2 phases.
+The current Sprint 1 code also provides versioned manual Roadmaps, versioned
+Daily Plans, progress recording, personal learning materials, and ADMIN-only
+AI provider registry, credential references, and purpose configuration. AI-generated Roadmaps,
+Daily Plans, and AI Review remain later V2 phases.
 The retired coding-center APIs and tables are absent from the active V2
 baseline. Their code and migrations remain available through Git history.
 
@@ -122,6 +124,9 @@ The `local` profile loads this optional file. Do not commit `.env`.
 | `GOOGLE_CLIENT_ID` | Google OAuth Web Client ID used as the ID-token audience |
 | `BOOTSTRAP_ADMIN_EMAIL` | Local bootstrap Admin login email |
 | `CORS_ALLOWED_ORIGINS` | Frontend origin list |
+| `AI_ALLOW_INSECURE_HTTP_PROVIDER_BASE_URLS` | Permit HTTP provider URLs only for controlled mocks/tests; keep `false` elsewhere |
+| `OPENAI_API_KEY` | OpenAI secret resolved by `env:OPENAI_API_KEY`; blank until configured |
+| `DEEPSEEK_API_KEY` | DeepSeek secret resolved by `env:DEEPSEEK_API_KEY`; blank until configured |
 | `SERVER_PORT` | HTTP port, default `8080` |
 
 Production must provide database credentials and a strong random JWT secret.
@@ -130,6 +135,9 @@ Do not rely on values in `application-local.yml`.
 Google login configuration and frontend request details are documented in
 [`specs/google-auth-setup.md`](specs/google-auth-setup.md). Google login does not
 require an API key or client secret when using the ID-token endpoint.
+
+AI provider administration and external secret references are documented in
+[`specs/ai-provider-configuration.md`](specs/ai-provider-configuration.md).
 
 ## Verify changes
 
@@ -148,22 +156,26 @@ target/site/jacoco/index.html
 ```text
 com.codegym.aiplanning
 |-- controller
+|   |-- admin/ai/dto
 |   |-- auth/dto
 |   |-- profile/dto
 |   `-- onboarding/dto
 |-- service
+|   |-- ai
 |   |-- auth
 |   |-- profile
 |   |-- onboarding
 |   |-- audit
 |   `-- email
 |-- repository
+|   |-- ai
 |   |-- auth
 |   |-- audit
 |   |-- profile
 |   |-- source
 |   `-- roadmap
 |-- entity
+|   |-- ai
 |   |-- auth
 |   |-- audit
 |   |-- profile

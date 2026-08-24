@@ -89,6 +89,8 @@ app:
       enabled: false
       email: admin@aiplanning.local
       password: disabled-bootstrap-password
+  ai:
+    allow-insecure-http-base-urls: ${AI_ALLOW_INSECURE_HTTP_PROVIDER_BASE_URLS:false}
   storage:
     provider: ${STORAGE_PROVIDER:local}
     local:

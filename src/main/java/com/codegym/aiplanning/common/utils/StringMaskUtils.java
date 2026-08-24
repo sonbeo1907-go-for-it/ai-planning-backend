@@ -16,4 +16,12 @@ public class StringMaskUtils {
         }
         return email.substring(0, 3) + "***" + email.substring(atIndex);
     }
+
+    public static String maskSecret(String secret) {
+        if (secret == null || secret.isBlank()) {
+            return null;
+        }
+        int visibleCharacters = Math.min(4, secret.length());
+        return "****" + secret.substring(secret.length() - visibleCharacters);
+    }
 }

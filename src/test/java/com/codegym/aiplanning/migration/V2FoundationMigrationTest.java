@@ -41,7 +41,10 @@ class V2FoundationMigrationTest {
                     "roadmaps",
                     "roadmap_sources",
                     "roadmap_versions",
-                    "roadmap_items");
+                    "roadmap_items",
+                    "ai_providers",
+                    "ai_provider_credentials",
+                    "ai_provider_configs");
             assertThat(tables).doesNotContain("courses", "modules", "classes");
 
             UUID userId = UUID.randomUUID();
@@ -195,6 +198,66 @@ class V2FoundationMigrationTest {
                                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                                 )
                                 """.formatted(userId)))
+                        .isInstanceOf(java.sql.SQLException.class);
+
+                UUID deepSeekProviderId = UUID.randomUUID();
+                statement.executeUpdate("""
+                        INSERT INTO ai_providers (
+                            id, code, display_name, base_url, protocol,
+                            credential_strategy, enabled, created_at, updated_at
+                        ) VALUES (
+                            '%s', 'DEEPSEEK', 'DeepSeek', 'https://api.deepseek.com/v1',
+                            'OPENAI_COMPATIBLE', 'PRIORITY', TRUE,
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(deepSeekProviderId));
+                statement.executeUpdate("""
+                        INSERT INTO ai_provider_credentials (
+                            id, provider_id, label, secret_ref, priority, enabled,
+                            created_at, updated_at
+                        ) VALUES (
+                            RANDOM_UUID(), '%s', 'Primary', 'env:DEEPSEEK_API_KEY',
+                            100, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(deepSeekProviderId));
+                statement.executeUpdate("""
+                        INSERT INTO ai_provider_configs (
+                            id, provider_id, purpose, model,
+                            enabled, default_provider, default_slot_purpose,
+                            timeout_seconds, max_input_tokens, max_output_tokens,
+                            temperature, created_at, updated_at
+                        ) VALUES (
+                            RANDOM_UUID(), '%s', 'ROADMAP_GENERATION',
+                            'deepseek-chat', TRUE, TRUE,
+                            'ROADMAP_GENERATION', 10, 100000, 8000, 0.2,
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(deepSeekProviderId));
+
+                UUID openAiProviderId = UUID.randomUUID();
+                statement.executeUpdate("""
+                        INSERT INTO ai_providers (
+                            id, code, display_name, base_url, protocol,
+                            credential_strategy, enabled, created_at, updated_at
+                        ) VALUES (
+                            '%s', 'OPENAI', 'OpenAI', 'https://api.openai.com/v1',
+                            'OPENAI_COMPATIBLE', 'PRIORITY', TRUE,
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(openAiProviderId));
+                assertThatThrownBy(() -> statement.executeUpdate("""
+                                INSERT INTO ai_provider_configs (
+                                    id, provider_id, purpose, model,
+                                    enabled, default_provider, default_slot_purpose,
+                                    timeout_seconds, max_input_tokens, max_output_tokens,
+                                    temperature, created_at, updated_at
+                                ) VALUES (
+                                    RANDOM_UUID(), '%s', 'ROADMAP_GENERATION',
+                                    'gpt-5.6-luna', TRUE, TRUE,
+                                    'ROADMAP_GENERATION', 10, 100000, 8000, 0.2,
+                                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                                )
+                                """.formatted(openAiProviderId)))
                         .isInstanceOf(java.sql.SQLException.class);
             }
         }
