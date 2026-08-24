@@ -106,6 +106,33 @@ class V2FoundationMigrationTest {
                         )
                         """.formatted(roadmapId, sourceId));
 
+                UUID materialId = UUID.randomUUID();
+                statement.executeUpdate("""
+                        INSERT INTO materials (
+                            id, user_id, type, status, content, created_at, updated_at
+                        ) VALUES (
+                            '%s', '%s', 'TEXT', 'READY', 'Spring Security reference',
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(materialId, userId));
+                statement.executeUpdate("""
+                        INSERT INTO roadmap_sources (
+                            id, roadmap_id, material_id, created_at, updated_at
+                        ) VALUES (
+                            RANDOM_UUID(), '%s', '%s', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(roadmapId, materialId));
+                assertThatThrownBy(() -> statement.executeUpdate("""
+                                INSERT INTO roadmap_sources (
+                                    id, roadmap_id, learning_source_id, material_id,
+                                    created_at, updated_at
+                                ) VALUES (
+                                    RANDOM_UUID(), '%s', '%s', '%s',
+                                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                                )
+                                """.formatted(roadmapId, sourceId, materialId)))
+                        .isInstanceOf(java.sql.SQLException.class);
+
                 UUID roadmapVersionId = UUID.randomUUID();
                 UUID milestoneId = UUID.randomUUID();
                 statement.executeUpdate("""
@@ -136,12 +163,22 @@ class V2FoundationMigrationTest {
                         )
                         """.formatted(roadmapVersionId, milestoneId));
 
+                statement.executeUpdate("""
+                        INSERT INTO roadmap_versions (
+                            id, roadmap_id, version_number, status, origin,
+                            created_at, updated_at
+                        ) VALUES (
+                            RANDOM_UUID(), '%s', 2, 'SUPERSEDED', 'AI_GENERATED',
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(roadmapId));
+
                 assertThatThrownBy(() -> statement.executeUpdate("""
                                 INSERT INTO roadmap_versions (
                                     id, roadmap_id, version_number, status, origin,
                                     draft_slot_roadmap_id, created_at, updated_at
                                 ) VALUES (
-                                    RANDOM_UUID(), '%s', 2, 'DRAFT', 'USER_EDITED', '%s',
+                                    RANDOM_UUID(), '%s', 3, 'DRAFT', 'USER_EDITED', '%s',
                                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                                 )
                                 """.formatted(roadmapId, roadmapId)))

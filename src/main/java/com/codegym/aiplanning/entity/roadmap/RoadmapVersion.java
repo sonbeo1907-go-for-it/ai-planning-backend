@@ -89,4 +89,12 @@ public class RoadmapVersion extends BaseEntity {
         }
         status = RoadmapVersionStatus.SUPERSEDED;
     }
+
+    public void supersedeDraft() {
+        if (status != RoadmapVersionStatus.DRAFT) {
+            throw new IllegalStateException("Only a draft Roadmap version can be superseded as a draft.");
+        }
+        status = RoadmapVersionStatus.SUPERSEDED;
+        draftSlotRoadmapId = null;
+    }
 }

@@ -257,6 +257,12 @@ class ManualRoadmapControllerIntegrationTest {
         assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}~1versions~1{versionId}~1activate/post")
                         .isMissingNode())
                 .isFalse();
+        assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}~1generate-ai/post")
+                        .isMissingNode())
+                .isFalse();
+        assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}~1regenerate-ai/post")
+                        .isMissingNode())
+                .isFalse();
     }
 
     private CreatedRoadmap createRoadmap(String token, String title) throws Exception {
