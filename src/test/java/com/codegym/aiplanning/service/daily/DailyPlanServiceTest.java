@@ -43,6 +43,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanAiResponse;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanAiGenerator;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext;
+import com.codegym.aiplanning.service.daily.ai.PlanningContextBuilder;
+import com.codegym.aiplanning.service.daily.DailyPlanPersistenceService;
+import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -72,6 +79,12 @@ class DailyPlanServiceTest {
     private RoadmapItemRepository roadmapItemRepository;
     @Mock
     private AuditLogService auditLogService;
+    @Mock
+    private PlanningContextBuilder contextBuilder;
+    @Mock
+    private DailyPlanAiGenerator aiGenerator;
+    @Mock
+    private DailyPlanPersistenceService persistenceService;
 
     private DailyPlanServiceImpl dailyPlanService;
 
@@ -88,7 +101,10 @@ class DailyPlanServiceTest {
                 userProfileRepository,
                 roadmapRepository,
                 roadmapItemRepository,
-                auditLogService);
+                auditLogService,
+                contextBuilder,
+                aiGenerator,
+                persistenceService);
 
         userId = UUID.randomUUID();
         userJwt = Jwt.withTokenValue("mock-token")
@@ -461,5 +477,141 @@ class DailyPlanServiceTest {
                 .hasMessageContaining("progress history");
 
         verify(dailyPlanItemRepository, never()).delete(any());
+    }
+
+    @Test
+    void generateAiDraftVersion_success() {
+        UUID planId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        ReflectionTestUtils.setField(plan, "status", DailyPlanStatus.READY);
+
+        DailyPlanningContext context = planningContext(planId, 60);
+        DailyPlanAiResponse response = new DailyPlanAiResponse(
+                "Balanced plan",
+                List.of(new DailyPlanAiResponse.AiPlanItemDto(
+                        null,
+                        "Task 1",
+                        null,
+                        DailyTaskCategory.PRACTICE,
+                        30,
+                        null,
+                        null)),
+                List.of());
+
+        DailyPlanVersion savedDraft = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.AI_GENERATED, 60, 0);
+        ReflectionTestUtils.setField(savedDraft, "id", UUID.randomUUID());
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+        when(contextBuilder.buildContext(planId, userId)).thenReturn(context);
+        when(aiGenerator.generate(context))
+                .thenReturn(new DailyPlanAiGenerator.GeneratedDailyPlan(response, false));
+        when(persistenceService.persistAiGeneratedDraft(
+                any(),
+                any(),
+                any(),
+                any(Integer.class),
+                any(),
+                any(Boolean.class),
+                org.mockito.ArgumentMatchers.isNull(),
+                any()))
+                .thenReturn(savedDraft);
+        when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(savedDraft.getId()))
+                .thenReturn(List.of());
+
+        DailyPlanVersionResponse result =
+                dailyPlanService.generateAiDraftVersion(planId, null, userJwt);
+
+        assertThat(result).isNotNull();
+        assertThat(result.origin()).isEqualTo(DailyPlanVersionOrigin.AI_GENERATED);
+        verify(aiGenerator).generate(context);
+    }
+
+    @Test
+    void generateAiDraftVersion_planNotReadyOrDraft_throwsException() {
+        UUID planId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        ReflectionTestUtils.setField(plan, "status", DailyPlanStatus.IN_PROGRESS);
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+
+        assertThatThrownBy(() -> dailyPlanService.generateAiDraftVersion(planId, null, userJwt))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Cannot generate AI plan");
+    }
+
+    @Test
+    void generateAiDraftVersion_aiProviderFailure_isPropagatedWithoutChangingVersions() {
+        UUID planId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        ReflectionTestUtils.setField(plan, "status", DailyPlanStatus.DRAFT);
+        DailyPlanningContext context = planningContext(planId, 60);
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+        when(contextBuilder.buildContext(planId, userId)).thenReturn(context);
+        when(aiGenerator.generate(context)).thenThrow(new BusinessException(
+                com.codegym.aiplanning.common.exception.ErrorCode.AI_PROVIDER_UNAVAILABLE,
+                "Provider unavailable"));
+
+        assertThatThrownBy(() -> dailyPlanService.generateAiDraftVersion(planId, null, userJwt))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Provider unavailable");
+        verify(persistenceService, never()).persistAiGeneratedDraft(
+                any(), any(), any(), any(Integer.class), any(), any(Boolean.class), any(), any());
+    }
+
+    @Test
+    void generateAiDraftVersion_sameIdempotencyKey_returnsExistingVersion() {
+        UUID planId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        ReflectionTestUtils.setField(plan, "status", DailyPlanStatus.READY);
+        DailyPlanVersion existing = DailyPlanVersion.create(
+                planId,
+                2,
+                DailyPlanVersionOrigin.AI_GENERATED,
+                60,
+                30);
+        ReflectionTestUtils.setField(existing, "id", UUID.randomUUID());
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByDailyPlanIdAndGenerationRequestKey(
+                        planId,
+                        "request-123"))
+                .thenReturn(Optional.of(existing));
+        when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(existing.getId()))
+                .thenReturn(List.of());
+
+        DailyPlanVersionResponse result = dailyPlanService.generateAiDraftVersion(
+                planId,
+                " request-123 ",
+                userJwt);
+
+        assertThat(result.id()).isEqualTo(existing.getId());
+        verify(contextBuilder, never()).buildContext(any(), any());
+        verify(aiGenerator, never()).generate(any());
+    }
+
+    private DailyPlanningContext planningContext(UUID planId, int availableMinutes) {
+        return new DailyPlanningContext(
+                planId,
+                userId,
+                LocalDate.now(),
+                "UTC",
+                availableMinutes,
+                new DailyPlanningContext.RoadmapContext(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        1,
+                        "Roadmap",
+                        null,
+                        List.of()),
+                List.of(),
+                List.of(),
+                List.of(),
+                null);
     }
 }

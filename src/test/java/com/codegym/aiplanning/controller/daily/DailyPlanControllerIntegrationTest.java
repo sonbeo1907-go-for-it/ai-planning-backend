@@ -394,6 +394,12 @@ class DailyPlanControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"title\":\"Attacker Task\", \"plannedMinutes\": 30}"))
                 .andExpect(status().isNotFound());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
+                        + "/versions/generate")
+                        .header("Authorization", "Bearer " + attackerToken)
+                        .header("Idempotency-Key", "attacker-request"))
+                .andExpect(status().isNotFound());
     }
 
     @Test
@@ -402,6 +408,13 @@ class DailyPlanControllerIntegrationTest {
         String adminToken = login("daily-admin");
 
         mockMvc.perform(get(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/"
+                        + java.util.UUID.randomUUID()
+                        + "/versions/generate")
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));

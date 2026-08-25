@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -106,6 +107,16 @@ public class DailyPlanController {
     public ApiResponse<DailyPlanVersionResponse> createDraftVersion(
             @PathVariable UUID planId, @AuthenticationPrincipal Jwt actorJwt) {
         return ApiResponse.of(dailyPlanService.createDraftVersion(planId, actorJwt));
+    }
+
+    @PostMapping(ApiConstant.DAILY_PLAN_VERSIONS + "/generate")
+    @Operation(summary = "Generate the next Daily Plan draft using AI (US-PLN-AI)")
+    public ApiResponse<DailyPlanVersionResponse> generateAiDraftVersion(
+            @PathVariable UUID planId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(
+                dailyPlanService.generateAiDraftVersion(planId, idempotencyKey, actorJwt));
     }
 
     @PostMapping(ApiConstant.DAILY_PLAN_VERSION_ITEMS)

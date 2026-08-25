@@ -24,6 +24,9 @@ public interface DailyPlanVersionRepository extends JpaRepository<DailyPlanVersi
     Optional<DailyPlanVersion> findByDailyPlanIdAndStatus(
             UUID dailyPlanId, DailyPlanVersionStatus status);
 
+    Optional<DailyPlanVersion> findByDailyPlanIdAndGenerationRequestKey(
+            UUID dailyPlanId, String generationRequestKey);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select version from DailyPlanVersion version "
             + "where version.id = :versionId and version.dailyPlanId = :dailyPlanId")

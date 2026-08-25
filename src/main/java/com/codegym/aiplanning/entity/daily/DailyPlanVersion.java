@@ -48,6 +48,15 @@ public class DailyPlanVersion extends BaseEntity {
     @Column(name = "superseded_at")
     private Instant supersededAt;
 
+    @Column(name = "ai_explanation", columnDefinition = "TEXT")
+    private String aiExplanation;
+
+    @Column(name = "requires_user_decision", nullable = false)
+    private Boolean requiresUserDecision = false;
+
+    @Column(name = "generation_request_key", length = 100)
+    private String generationRequestKey;
+
     protected DailyPlanVersion() {}
 
     public static DailyPlanVersion create(
@@ -64,12 +73,24 @@ public class DailyPlanVersion extends BaseEntity {
         version.availableMinutes = availableMinutes != null ? availableMinutes : 60;
         version.totalPlannedMinutes = totalPlannedMinutes != null ? totalPlannedMinutes : 0;
         version.draftSlotDailyPlanId = dailyPlanId;
+        version.requiresUserDecision = false;
         return version;
     }
 
     public void updateTotalPlannedMinutes(Integer minutes) {
         requireDraft();
         this.totalPlannedMinutes = minutes != null ? minutes : 0;
+    }
+
+    public void updateAiMetadata(String aiExplanation, Boolean requiresUserDecision) {
+        requireDraft();
+        this.aiExplanation = aiExplanation;
+        this.requiresUserDecision = requiresUserDecision != null ? requiresUserDecision : false;
+    }
+
+    public void assignGenerationRequestKey(String generationRequestKey) {
+        requireDraft();
+        this.generationRequestKey = generationRequestKey;
     }
 
     public void activate(Instant activatedAt) {
@@ -81,11 +102,12 @@ public class DailyPlanVersion extends BaseEntity {
     }
 
     public void supersede(Instant supersededAt) {
-        if (status != DailyPlanVersionStatus.ACTIVE) {
-            throw new IllegalStateException("Only an active Daily Plan version can be superseded.");
+        if (status != DailyPlanVersionStatus.ACTIVE && status != DailyPlanVersionStatus.DRAFT) {
+            throw new IllegalStateException("Only an active or draft Daily Plan version can be superseded.");
         }
         status = DailyPlanVersionStatus.SUPERSEDED;
         activeSlotDailyPlanId = null;
+        draftSlotDailyPlanId = null;
         this.supersededAt = supersededAt;
     }
 
@@ -133,5 +155,17 @@ public class DailyPlanVersion extends BaseEntity {
 
     public Instant getSupersededAt() {
         return supersededAt;
+    }
+
+    public String getAiExplanation() {
+        return aiExplanation;
+    }
+
+    public Boolean getRequiresUserDecision() {
+        return requiresUserDecision;
+    }
+
+    public String getGenerationRequestKey() {
+        return generationRequestKey;
     }
 }

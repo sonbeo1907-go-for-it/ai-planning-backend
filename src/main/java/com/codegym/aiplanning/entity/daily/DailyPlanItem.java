@@ -42,6 +42,13 @@ public class DailyPlanItem extends BaseEntity {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ai_adjustment_action", length = 30)
+    private AiAdjustmentAction aiAdjustmentAction;
+
+    @Column(name = "ai_adjustment_reason", columnDefinition = "TEXT")
+    private String aiAdjustmentReason;
+
     protected DailyPlanItem() {}
 
     public static DailyPlanItem create(
@@ -85,6 +92,11 @@ public class DailyPlanItem extends BaseEntity {
         this.status = newStatus;
     }
 
+    public void setAiAdjustment(AiAdjustmentAction action, String reason) {
+        this.aiAdjustmentAction = action;
+        this.aiAdjustmentReason = reason;
+    }
+
     public UUID getDailyPlanVersionId() {
         return dailyPlanVersionId;
     }
@@ -119,5 +131,13 @@ public class DailyPlanItem extends BaseEntity {
 
     public UUID getRoadmapItemId() {
         return roadmapItemId;
+    }
+
+    public AiAdjustmentAction getAiAdjustmentAction() {
+        return aiAdjustmentAction;
+    }
+
+    public String getAiAdjustmentReason() {
+        return aiAdjustmentReason;
     }
 }

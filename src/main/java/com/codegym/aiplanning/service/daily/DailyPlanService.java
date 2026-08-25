@@ -26,6 +26,10 @@ public interface DailyPlanService {
 
     DailyPlanVersionResponse createDraftVersion(UUID planId, Jwt actorJwt);
 
+    DailyPlanVersionResponse generateAiDraftVersion(
+            UUID planId, String idempotencyKey, Jwt actorJwt);
+
+
     DailyPlanItemResponse addTaskToPlan(
             UUID planId, UUID versionId, CreateDailyTaskRequest request, Jwt actorJwt);
 

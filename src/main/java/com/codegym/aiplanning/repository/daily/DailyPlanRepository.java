@@ -24,4 +24,7 @@ public interface DailyPlanRepository extends JpaRepository<DailyPlan, UUID> {
             @Param("planId") UUID planId, @Param("userId") UUID userId);
 
     List<DailyPlan> findByUserIdOrderByPlanDateDesc(UUID userId);
+
+    Optional<DailyPlan> findFirstByUserIdAndRoadmapIdAndPlanDateBeforeOrderByPlanDateDesc(
+            UUID userId, UUID roadmapId, LocalDate planDate);
 }
