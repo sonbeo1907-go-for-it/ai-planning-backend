@@ -5,12 +5,15 @@ import com.codegym.aiplanning.common.api.ApiResponse;
 import com.codegym.aiplanning.common.constant.ApiConstant;
 import com.codegym.aiplanning.controller.daily.dto.CreateDailyPlanRequest;
 import com.codegym.aiplanning.controller.daily.dto.CreateDailyTaskRequest;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanItemAiSuggestionResponse;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanItemDetailResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanItemResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
 import com.codegym.aiplanning.service.daily.DailyPlanService;
+import com.codegym.aiplanning.service.daily.TaskAiSuggestionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -27,6 +30,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -36,9 +40,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class DailyPlanController {
 
     private final DailyPlanService dailyPlanService;
+    private final TaskAiSuggestionService taskAiSuggestionService;
 
-    public DailyPlanController(DailyPlanService dailyPlanService) {
+    public DailyPlanController(
+            DailyPlanService dailyPlanService,
+            TaskAiSuggestionService taskAiSuggestionService) {
         this.dailyPlanService = dailyPlanService;
+        this.taskAiSuggestionService = taskAiSuggestionService;
     }
 
     @PostMapping
@@ -108,6 +116,16 @@ public class DailyPlanController {
         return ApiResponse.of(dailyPlanService.createDraftVersion(planId, actorJwt));
     }
 
+    @PostMapping(ApiConstant.DAILY_PLAN_VERSIONS + "/generate")
+    @Operation(summary = "Generate the next Daily Plan draft using AI (US-PLN-AI)")
+    public ApiResponse<DailyPlanVersionResponse> generateAiDraftVersion(
+            @PathVariable UUID planId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(
+                dailyPlanService.generateAiDraftVersion(planId, idempotencyKey, actorJwt));
+    }
+
     @PostMapping(ApiConstant.DAILY_PLAN_VERSION_ITEMS)
     @Operation(
             summary = "Add a manual task to daily plan (US-TSK-01-MANUAL)",
@@ -167,5 +185,42 @@ public class DailyPlanController {
             @AuthenticationPrincipal Jwt actorJwt) {
         return ApiResponse.of(
                 dailyPlanService.deleteTask(planId, versionId, itemId, actorJwt));
+    }
+
+    @GetMapping(ApiConstant.DAILY_PLAN_ITEM_BY_ID)
+    @Operation(
+            summary = "Get one task detail with optional AI suggestion (US-TSK-AI)",
+            description = "Returns one daily plan task with its short description, checklist and reference documents/links when an AI suggestion exists.")
+    public ApiResponse<DailyPlanItemDetailResponse> getTaskDetail(
+            @PathVariable UUID planId,
+            @PathVariable UUID itemId,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(
+                taskAiSuggestionService.getTaskDetail(planId, itemId, actorJwt));
+    }
+
+    @PostMapping(ApiConstant.DAILY_PLAN_ITEM_AI_SUGGESTION)
+    @Operation(
+            summary = "Generate AI task suggestion (US-TSK-AI)",
+            description = "Generates the detailed execution steps and reference documents/links for one task. Idempotent: an existing suggestion is returned instead of regenerated.")
+    public ApiResponse<DailyPlanItemAiSuggestionResponse> generateAiSuggestion(
+            @PathVariable UUID planId,
+            @PathVariable UUID itemId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(taskAiSuggestionService.generateSuggestion(
+                planId, itemId, idempotencyKey, actorJwt));
+    }
+
+    @PostMapping(ApiConstant.DAILY_PLAN_ITEM_AI_SUGGESTION_REGENERATE)
+    @Operation(
+            summary = "Regenerate AI task suggestion (US-TSK-AI)",
+            description = "Replaces an existing AI suggestion for one task with a freshly generated one.")
+    public ApiResponse<DailyPlanItemAiSuggestionResponse> regenerateAiSuggestion(
+            @PathVariable UUID planId,
+            @PathVariable UUID itemId,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(taskAiSuggestionService.regenerateSuggestion(
+                planId, itemId, actorJwt));
     }
 }

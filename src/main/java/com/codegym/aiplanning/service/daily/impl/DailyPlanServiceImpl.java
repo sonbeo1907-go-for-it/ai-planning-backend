@@ -41,6 +41,11 @@ import java.util.UUID;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanAiResponse;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanAiGenerator;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext;
+import com.codegym.aiplanning.service.daily.ai.PlanningContextBuilder;
+import com.codegym.aiplanning.service.daily.DailyPlanPersistenceService;
 
 @Service
 public class DailyPlanServiceImpl implements DailyPlanService {
@@ -53,6 +58,9 @@ public class DailyPlanServiceImpl implements DailyPlanService {
     private final RoadmapRepository roadmapRepository;
     private final RoadmapItemRepository roadmapItemRepository;
     private final AuditLogService auditLogService;
+    private final PlanningContextBuilder contextBuilder;
+    private final DailyPlanAiGenerator aiGenerator;
+    private final DailyPlanPersistenceService persistenceService;
 
     public DailyPlanServiceImpl(
             DailyPlanRepository dailyPlanRepository,
@@ -62,7 +70,10 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             UserProfileRepository userProfileRepository,
             RoadmapRepository roadmapRepository,
             RoadmapItemRepository roadmapItemRepository,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            PlanningContextBuilder contextBuilder,
+            DailyPlanAiGenerator aiGenerator,
+            DailyPlanPersistenceService persistenceService) {
         this.dailyPlanRepository = dailyPlanRepository;
         this.dailyPlanVersionRepository = dailyPlanVersionRepository;
         this.dailyPlanItemRepository = dailyPlanItemRepository;
@@ -71,6 +82,9 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         this.roadmapRepository = roadmapRepository;
         this.roadmapItemRepository = roadmapItemRepository;
         this.auditLogService = auditLogService;
+        this.contextBuilder = contextBuilder;
+        this.aiGenerator = aiGenerator;
+        this.persistenceService = persistenceService;
     }
 
     @Override
@@ -286,6 +300,76 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 "DailyPlanVersion",
                 draft.getId().toString());
         return DailyPlanVersionResponse.from(draft, savedCopies);
+    }
+
+    @Override
+    public DailyPlanVersionResponse generateAiDraftVersion(
+            UUID planId, String idempotencyKey, Jwt actorJwt) {
+        UUID userId = extractUserId(actorJwt);
+        String username = extractUsername(actorJwt);
+        String normalizedRequestKey = normalizeIdempotencyKey(idempotencyKey);
+
+        DailyPlan plan = requirePlanForUser(planId, userId);
+        if (plan.getStatus() != DailyPlanStatus.READY && plan.getStatus() != DailyPlanStatus.DRAFT) {
+            throw new BusinessException(
+                    ErrorCode.DAILY_PLAN_LOCKED,
+                    "Cannot generate AI plan for a Daily Plan that is already in progress or completed.");
+        }
+
+        if (normalizedRequestKey != null) {
+            DailyPlanVersion existing = dailyPlanVersionRepository
+                    .findByDailyPlanIdAndGenerationRequestKey(planId, normalizedRequestKey)
+                    .orElse(null);
+            if (existing != null) {
+                return versionResponse(existing);
+            }
+        }
+
+        DailyPlanningContext context = contextBuilder.buildContext(planId, userId);
+        DailyPlanAiGenerator.GeneratedDailyPlan generated = aiGenerator.generate(context);
+        DailyPlanAiResponse response = generated.response();
+        int totalPlannedMinutes = response.items().stream()
+                .mapToInt(DailyPlanAiResponse.AiPlanItemDto::plannedMinutes)
+                .sum();
+
+        DailyPlanVersion savedDraft = persistenceService.persistAiGeneratedDraft(
+                planId,
+                userId,
+                username,
+                totalPlannedMinutes,
+                buildAiExplanation(response),
+                generated.requiresUserDecision(),
+                normalizedRequestKey,
+                response.items());
+
+        return versionResponse(savedDraft);
+    }
+
+    private String buildAiExplanation(DailyPlanAiResponse response) {
+        if (response.adjustments().isEmpty()) {
+            return response.summary().trim();
+        }
+        String adjustmentSummary = response.adjustments().stream()
+                .map(adjustment -> adjustment.action()
+                        + ": "
+                        + adjustment.title().trim()
+                        + " — "
+                        + adjustment.reason().trim())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        return response.summary().trim() + "\n\nĐề xuất cần người dùng xem xét:\n" + adjustmentSummary;
+    }
+
+    private String normalizeIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return null;
+        }
+        String normalized = idempotencyKey.trim();
+        if (normalized.length() > 100) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Idempotency-Key must not exceed 100 characters.");
+        }
+        return normalized;
     }
 
     @Override

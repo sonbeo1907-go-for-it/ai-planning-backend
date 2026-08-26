@@ -36,7 +36,14 @@ public class OpenAiCompatibleAiClient implements AiClientService {
     public String generateContent(
             AiPurpose purpose, String systemPrompt, String userPrompt) {
         AiProviderConfig config = providerSelector.requireDefault(purpose);
+        return generateContent(config, systemPrompt, userPrompt);
+    }
+
+    @Override
+    public String generateContent(
+            AiProviderConfig config, String systemPrompt, String userPrompt) {
         AiProvider provider = config.getProvider();
+        requireUsableConfiguration(config, provider);
         requireSupportedProtocol(provider);
         requireWithinInputBudget(config, systemPrompt, userPrompt);
 
@@ -68,6 +75,18 @@ public class OpenAiCompatibleAiClient implements AiClientService {
             throw new BusinessException(
                     ErrorCode.AI_GENERATION_FAILED,
                     "The AI provider response could not be processed.");
+        }
+    }
+
+    private void requireUsableConfiguration(
+            AiProviderConfig config, AiProvider provider) {
+        if (!config.isEnabled()
+                || config.isArchived()
+                || !provider.isEnabled()
+                || provider.isArchived()) {
+            throw new BusinessException(
+                    ErrorCode.AI_PROVIDER_UNAVAILABLE,
+                    "The AI provider configuration selected for this execution is unavailable.");
         }
     }
 

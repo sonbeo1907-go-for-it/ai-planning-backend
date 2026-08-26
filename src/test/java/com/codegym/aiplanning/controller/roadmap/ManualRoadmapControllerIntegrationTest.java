@@ -174,6 +174,16 @@ class ManualRoadmapControllerIntegrationTest {
                         .header("Authorization", bearer(adminToken)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+        mockMvc.perform(post(roadmapPath(created.roadmapId()) + "/generate-ai")
+                        .header("Authorization", bearer(adminToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+        mockMvc.perform(get(ApiConstant.AI_EXECUTIONS + "/" + UUID.randomUUID())
+                        .header("Authorization", bearer(adminToken)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
     }
 
     @Test
@@ -260,7 +270,16 @@ class ManualRoadmapControllerIntegrationTest {
         assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}~1generate-ai/post")
                         .isMissingNode())
                 .isFalse();
+        assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}~1generate-ai/post/responses/202")
+                        .isMissingNode())
+                .isFalse();
         assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}~1regenerate-ai/post")
+                        .isMissingNode())
+                .isFalse();
+        assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}~1ai-executions~1current/get")
+                        .isMissingNode())
+                .isFalse();
+        assertThat(document.at("/paths/~1api~1v1~1ai-executions~1{executionId}/get")
                         .isMissingNode())
                 .isFalse();
     }

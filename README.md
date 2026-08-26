@@ -7,9 +7,10 @@ audit logging, email, migrations, documentation, and testing infrastructure.
 The first personal-learning slice now provides profile setup and resumable,
 Roadmap-scoped onboarding backed by a GOAL LearningSource and Roadmap draft.
 The current Sprint 1 code also provides versioned manual Roadmaps, versioned
-Daily Plans, progress recording, personal learning materials, and ADMIN-only
-AI provider registry, credential references, and purpose configuration. AI-generated Roadmaps,
-Daily Plans, and AI Review remain later V2 phases.
+Daily Plans, progress recording, personal learning materials, ADMIN-only
+AI provider registry, credential references and purpose configuration, plus
+AI-generated Roadmaps and Daily Plans. AI Review and institution-owned
+curriculum modules remain later V2 phases.
 The retired coding-center APIs and tables are absent from the active V2
 baseline. Their code and migrations remain available through Git history.
 

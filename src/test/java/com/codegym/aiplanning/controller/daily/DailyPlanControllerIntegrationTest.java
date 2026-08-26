@@ -2,6 +2,11 @@ package com.codegym.aiplanning.controller.daily;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -9,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.codegym.aiplanning.common.constant.ApiConstant;
+import com.codegym.aiplanning.entity.ai.AiPurpose;
 import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
@@ -22,6 +28,7 @@ import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
+import com.codegym.aiplanning.service.ai.AiClientService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.util.List;
@@ -67,6 +74,9 @@ class DailyPlanControllerIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    private AiClientService aiClientService;
 
     @Test
     void createDailyPlan_and_addTask_and_checklistCompletion_flow() throws Exception {
@@ -394,6 +404,31 @@ class DailyPlanControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"title\":\"Attacker Task\", \"plannedMinutes\": 30}"))
                 .andExpect(status().isNotFound());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
+                        + "/versions/generate")
+                        .header("Authorization", "Bearer " + attackerToken)
+                        .header("Idempotency-Key", "attacker-request"))
+                .andExpect(status().isNotFound());
+
+        MvcResult ownerTaskResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
+                        + "/versions/" + ownerVersionId + "/items")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Owner Task\", \"plannedMinutes\": 30}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        String ownerItemId = objectMapper.readTree(ownerTaskResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + ownerPlanId + "/items/" + ownerItemId)
+                        .header("Authorization", "Bearer " + attackerToken))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
+                        + "/items/" + ownerItemId + "/ai-suggestion")
+                        .header("Authorization", "Bearer " + attackerToken))
+                .andExpect(status().isNotFound());
     }
 
     @Test
@@ -402,6 +437,13 @@ class DailyPlanControllerIntegrationTest {
         String adminToken = login("daily-admin");
 
         mockMvc.perform(get(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/"
+                        + java.util.UUID.randomUUID()
+                        + "/versions/generate")
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
@@ -438,6 +480,100 @@ class DailyPlanControllerIntegrationTest {
                 .path("data")
                 .path("accessToken")
                 .asText();
+    }
+
+    @Test
+    void taskAiSuggestion_generateReadRegenerateFlow() throws Exception {
+        createUser("daily-ai-user", "Ai User");
+        String token = login("daily-ai-user");
+
+        LocalDate today = LocalDate.now();
+        MvcResult createResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(String.format("{\"planDate\": \"%s\", \"availableMinutes\": 60}", today)))
+                .andExpect(status().isOk())
+                .andReturn();
+        String planId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+        String versionId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("latestVersionId").asText();
+
+        MvcResult addTaskResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId + "/items")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Học REST Controller\",\"plannedMinutes\":30}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        String itemId = objectMapper.readTree(addTaskResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+
+        // Before generation, task detail contains no suggestion.
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + itemId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(itemId))
+                .andExpect(jsonPath("$.data.aiSuggestion").doesNotExist());
+
+        when(aiClientService.generateContent(
+                        eq(AiPurpose.DAILY_PLAN_REVIEW), anyString(), anyString()))
+                .thenReturn("""
+                        {
+                          "shortDescription": "Đọc tài liệu rồi thực hành.",
+                          "steps": [
+                            {"content": "Đọc tài liệu REST"},
+                            {"content": "Chạy ví dụ CRUD"}
+                          ],
+                          "references": [
+                            {"title": "Baeldung", "referenceType": "LINK", "documentId": null, "url": "https://baeldung.com/spring-boot"}
+                          ]
+                        }
+                        """);
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + itemId + "/ai-suggestion")
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", "suggestion-request-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.shortDescription").value("Đọc tài liệu rồi thực hành."))
+                .andExpect(jsonPath("$.data.steps.length()").value(2))
+                .andExpect(jsonPath("$.data.steps[1].orderIndex").value(1))
+                .andExpect(jsonPath("$.data.references[0].referenceType").value("LINK"))
+                .andExpect(jsonPath("$.data.references[0].verified").value(false));
+
+        // A second generate call is idempotent and must not call the AI again.
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + itemId + "/ai-suggestion")
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", "suggestion-request-2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.shortDescription").value("Đọc tài liệu rồi thực hành."));
+        verify(aiClientService, times(1))
+                .generateContent(eq(AiPurpose.DAILY_PLAN_REVIEW), anyString(), anyString());
+
+        // Task detail now embeds the generated suggestion.
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + itemId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.aiSuggestion.shortDescription").value("Đọc tài liệu rồi thực hành."))
+                .andExpect(jsonPath("$.data.aiSuggestion.references[0].referenceType").value("LINK"))
+                .andExpect(jsonPath("$.data.aiSuggestion.references[0].verified").value(false));
+
+        // Regenerate replaces the previous content.
+        when(aiClientService.generateContent(
+                        eq(AiPurpose.DAILY_PLAN_REVIEW), anyString(), anyString()))
+                .thenReturn("""
+                        {
+                          "shortDescription": "Gợi ý thực hành mới hơn.",
+                          "steps": [{"content": "Viết test trước"}],
+                          "references": []
+                        }
+                        """);
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/items/" + itemId + "/ai-suggestion/regenerate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.shortDescription").value("Gợi ý thực hành mới hơn."))
+                .andExpect(jsonPath("$.data.steps.length()").value(1));
     }
 
     @Test

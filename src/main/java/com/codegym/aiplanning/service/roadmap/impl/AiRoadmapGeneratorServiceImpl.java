@@ -4,6 +4,7 @@ import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapVersionResponse;
 import com.codegym.aiplanning.entity.ai.AiPurpose;
+import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
 import com.codegym.aiplanning.service.ai.AiClientService;
 import com.codegym.aiplanning.service.roadmap.AiRoadmapGeneratorService;
@@ -47,7 +48,7 @@ public class AiRoadmapGeneratorServiceImpl implements AiRoadmapGeneratorService 
             UUID userId, UUID roadmapId, List<UUID> materialIds) {
         RoadmapGenerationContext context =
                 persistenceService.prepare(userId, roadmapId, materialIds);
-        GeneratedRoadmapPlan plan = generateAndValidate(context, null);
+        GeneratedRoadmapPlan plan = generateAndValidate(context, null, null);
         return persistenceService.saveGeneratedVersion(
                 userId, roadmapId, plan, RoadmapVersionOrigin.AI_GENERATED);
     }
@@ -57,21 +58,52 @@ public class AiRoadmapGeneratorServiceImpl implements AiRoadmapGeneratorService 
             UUID userId, UUID roadmapId, String adjustmentPrompt) {
         RoadmapGenerationContext context =
                 persistenceService.prepare(userId, roadmapId, List.of());
-        GeneratedRoadmapPlan plan = generateAndValidate(context, adjustmentPrompt);
+        GeneratedRoadmapPlan plan = generateAndValidate(context, adjustmentPrompt, null);
+        return persistenceService.saveGeneratedVersion(
+                userId, roadmapId, plan, RoadmapVersionOrigin.AI_REGENERATED);
+    }
+
+    @Override
+    public RoadmapVersionResponse generateWithProviderConfig(
+            UUID userId, UUID roadmapId, AiProviderConfig providerConfig) {
+        RoadmapGenerationContext context =
+                persistenceService.prepare(userId, roadmapId, List.of());
+        GeneratedRoadmapPlan plan = generateAndValidate(context, null, providerConfig);
+        return persistenceService.saveGeneratedVersion(
+                userId, roadmapId, plan, RoadmapVersionOrigin.AI_GENERATED);
+    }
+
+    @Override
+    public RoadmapVersionResponse regenerateWithProviderConfig(
+            UUID userId,
+            UUID roadmapId,
+            String adjustmentPrompt,
+            AiProviderConfig providerConfig) {
+        RoadmapGenerationContext context =
+                persistenceService.prepare(userId, roadmapId, List.of());
+        GeneratedRoadmapPlan plan =
+                generateAndValidate(context, adjustmentPrompt, providerConfig);
         return persistenceService.saveGeneratedVersion(
                 userId, roadmapId, plan, RoadmapVersionOrigin.AI_REGENERATED);
     }
 
     private GeneratedRoadmapPlan generateAndValidate(
-            RoadmapGenerationContext context, String adjustmentPrompt) {
+            RoadmapGenerationContext context,
+            String adjustmentPrompt,
+            AiProviderConfig providerConfig) {
         String systemPrompt = buildSystemPrompt();
         String userPrompt = buildUserPrompt(context, adjustmentPrompt);
 
         for (int attempt = 0; attempt <= MAX_SCHEMA_RETRIES; attempt++) {
-            String response = aiClientService.generateContent(
-                    AiPurpose.ROADMAP_GENERATION,
-                    systemPrompt,
-                    retryPrompt(userPrompt, attempt));
+            String response = providerConfig == null
+                    ? aiClientService.generateContent(
+                            AiPurpose.ROADMAP_GENERATION,
+                            systemPrompt,
+                            retryPrompt(userPrompt, attempt))
+                    : aiClientService.generateContent(
+                            providerConfig,
+                            systemPrompt,
+                            retryPrompt(userPrompt, attempt));
             try {
                 return schemaValidator.validate(response);
             } catch (InvalidAiRoadmapResponseException exception) {
