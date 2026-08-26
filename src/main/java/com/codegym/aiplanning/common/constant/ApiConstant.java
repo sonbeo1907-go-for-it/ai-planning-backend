@@ -83,6 +83,17 @@ public final class ApiConstant {
     public static final String ROADMAP_REGENERATE_AI = ROADMAP_BY_ID + "/regenerate-ai";
     public static final String ROADMAP_CURRENT_AI_EXECUTION =
             ROADMAP_BY_ID + "/ai-executions/current";
+    public static final String ROADMAP_WEAK_TOPICS = ROADMAP_BY_ID + "/weak-topics";
+    public static final String DAILY_PLAN_EVALUATION = DAILY_PLAN_BY_ID + "/evaluation";
+    public static final String DAILY_PLAN_QUIZ_GENERATE = DAILY_PLAN_BY_ID + "/quiz/generate";
+    public static final String DAILY_PLAN_QUIZ_BY_ID = DAILY_PLAN_BY_ID + "/quiz/{quizId}";
+    public static final String DAILY_PLAN_QUIZ_SUBMIT = DAILY_PLAN_QUIZ_BY_ID + "/submit";
+    public static final String WEAK_TOPICS = API_V1 + "/weak-topics";
+    public static final String WEAK_TOPIC_BY_ID = "/{weakTopicId}";
+    public static final String WEAK_TOPIC_MASTERY_CHECK_GENERATE =
+            WEAK_TOPIC_BY_ID + "/mastery-check/generate";
+    public static final String WEAK_TOPIC_MASTERY_CHECK_SUBMIT =
+            WEAK_TOPIC_BY_ID + "/mastery-check/{quizId}/submit";
     public static final String AI_EXECUTIONS = API_V1 + "/ai-executions";
     public static final String AI_EXECUTION_BY_ID = "/{executionId}";
     public static final String MATERIALS = API_V1 + "/materials";
