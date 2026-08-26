@@ -86,8 +86,9 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
             String query,
             RoadmapStatus status,
             Pageable pageable) {
-        Page<Roadmap> roadmaps = roadmapRepository.searchOwned(
-                userId, normalizeSearchQuery(query), status, pageable);
+        String normalizedQuery = normalizeSearchQuery(query);
+        Page<Roadmap> roadmaps = findOwnedRoadmaps(
+                userId, normalizedQuery, status, pageable);
         if (roadmaps.isEmpty()) {
             return Page.empty(pageable);
         }
@@ -104,6 +105,22 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
         return roadmaps.map(roadmap -> RoadmapSummaryResponse.from(
                 roadmap,
                 versionsByRoadmapId.getOrDefault(roadmap.getId(), List.of())));
+    }
+
+    private Page<Roadmap> findOwnedRoadmaps(
+            UUID userId,
+            String query,
+            RoadmapStatus status,
+            Pageable pageable) {
+        if (query == null) {
+            return status == null
+                    ? roadmapRepository.findByOwnerId(userId, pageable)
+                    : roadmapRepository.findByOwnerIdAndStatus(userId, status, pageable);
+        }
+
+        return status == null
+                ? roadmapRepository.searchOwnedByQuery(userId, query, pageable)
+                : roadmapRepository.searchOwnedByQueryAndStatus(userId, query, status, pageable);
     }
 
     @Override

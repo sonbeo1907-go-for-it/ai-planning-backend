@@ -188,8 +188,10 @@ public class MaterialServiceImpl implements MaterialService {
             MaterialStatus status,
             Pageable pageable) {
         String normalizedQuery = query == null || query.isBlank() ? null : query.trim();
-        Page<Material> materials = materialRepository.searchOwnedActive(
-                userId, normalizedQuery, type, status, pageable);
+        Page<Material> materials = normalizedQuery == null
+                ? materialRepository.listOwnedActive(userId, type, status, pageable)
+                : materialRepository.searchOwnedActive(
+                        userId, normalizedQuery, type, status, pageable);
         return materials.map(MaterialListResponse::from);
     }
 

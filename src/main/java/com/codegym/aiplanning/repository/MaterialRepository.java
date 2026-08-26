@@ -22,9 +22,19 @@ public interface MaterialRepository extends JpaRepository<Material, UUID> {
             + "where material.user.id = :userId "
             + "and material.archivedAt is null "
             + "and (:type is null or material.type = :type) "
+            + "and (:status is null or material.status = :status)")
+    Page<Material> listOwnedActive(
+            @Param("userId") UUID userId,
+            @Param("type") MaterialType type,
+            @Param("status") MaterialStatus status,
+            Pageable pageable);
+
+    @Query("select material from Material material "
+            + "where material.user.id = :userId "
+            + "and material.archivedAt is null "
+            + "and (:type is null or material.type = :type) "
             + "and (:status is null or material.status = :status) "
-            + "and (:query is null "
-            + "or lower(coalesce(material.originalFileName, '')) "
+            + "and (lower(coalesce(material.originalFileName, '')) "
             + "like lower(concat('%', :query, '%')) "
             + "or lower(coalesce(material.content, '')) "
             + "like lower(concat('%', :query, '%'))) ")

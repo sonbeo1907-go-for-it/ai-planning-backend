@@ -10,6 +10,7 @@ import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
+import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
@@ -84,7 +85,7 @@ class ManualRoadmapServiceTest {
         List<UUID> roadmapIds = roadmaps.stream().map(Roadmap::getId).toList();
         PageRequest pageable = PageRequest.of(0, 20);
 
-        when(roadmapRepository.searchOwned(userId, null, null, pageable))
+        when(roadmapRepository.findByOwnerId(userId, pageable))
                 .thenReturn(new PageImpl<>(roadmaps, pageable, roadmaps.size()));
         when(roadmapVersionRepository.findAllByRoadmapIds(roadmapIds))
                 .thenReturn(versions);
@@ -101,6 +102,7 @@ class ManualRoadmapServiceTest {
                 .containsExactly(1, 1);
 
         verify(roadmapVersionRepository).findAllByRoadmapIds(roadmapIds);
+        verify(roadmapRepository).findByOwnerId(userId, pageable);
         verify(roadmapItemRepository, never())
                 .findAllByRoadmapVersionIds(org.mockito.ArgumentMatchers.any());
         verify(roadmapVersionRepository, never())
@@ -118,7 +120,7 @@ class ManualRoadmapServiceTest {
     void listDoesNotRunBulkChildQueriesWhenUserHasNoRoadmaps() {
         UUID userId = UUID.randomUUID();
         PageRequest pageable = PageRequest.of(0, 20);
-        when(roadmapRepository.searchOwned(userId, null, null, pageable))
+        when(roadmapRepository.findByOwnerId(userId, pageable))
                 .thenReturn(Page.empty(pageable));
 
         assertThat(service.list(userId, null, null, pageable)).isEmpty();
@@ -127,6 +129,24 @@ class ManualRoadmapServiceTest {
                 .findAllByRoadmapIds(org.mockito.ArgumentMatchers.any());
         verify(roadmapItemRepository, never())
                 .findAllByRoadmapVersionIds(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void listUsesSearchQueryOnlyWhenTheUserProvidedOne() {
+        UUID userId = UUID.randomUUID();
+        PageRequest pageable = PageRequest.of(0, 20);
+
+        when(roadmapRepository.searchOwnedByQueryAndStatus(
+                userId, "react", RoadmapStatus.ACTIVE, pageable))
+                .thenReturn(Page.empty(pageable));
+
+        assertThat(service.list(userId, "  react  ", RoadmapStatus.ACTIVE, pageable)).isEmpty();
+
+        verify(roadmapRepository).searchOwnedByQueryAndStatus(
+                userId, "react", RoadmapStatus.ACTIVE, pageable);
+        verify(roadmapRepository, never()).findByOwnerId(userId, pageable);
+        verify(roadmapRepository, never()).findByOwnerIdAndStatus(
+                userId, RoadmapStatus.ACTIVE, pageable);
     }
 
     private void setId(Object entity, UUID id) {
