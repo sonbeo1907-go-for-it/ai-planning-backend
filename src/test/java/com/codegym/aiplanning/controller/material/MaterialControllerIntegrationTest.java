@@ -328,6 +328,30 @@ class MaterialControllerIntegrationTest {
     }
 
     @Test
+    void materialSearchIsServerSideAndOwnerScoped() throws Exception {
+        UserAccount owner = createUser("material-search-owner", "Material Search Owner");
+        UserAccount other = createUser("material-search-other", "Material Search Other");
+        String ownerToken = login(owner.getEmail());
+        String otherToken = login(other.getEmail());
+
+        UUID matchingId = createTextMaterial(
+                ownerToken,
+                "Spring Boot persistence practice " + "a".repeat(50));
+        createTextMaterial(ownerToken, "React component composition " + "b".repeat(50));
+        createTextMaterial(otherToken, "Spring Boot private material " + "c".repeat(50));
+
+        mockMvc.perform(get(ApiConstant.MATERIALS)
+                        .queryParam("q", "spring boot")
+                        .queryParam("type", "TEXT")
+                        .queryParam("status", "READY")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content[0].id")
+                        .value(matchingId.toString()));
+    }
+
+    @Test
     void userCannotArchiveAnotherUsersMaterial() throws Exception {
         UserAccount owner = createUser("archive-owner", "Archive Owner");
         UserAccount other = createUser("archive-other", "Archive Other");

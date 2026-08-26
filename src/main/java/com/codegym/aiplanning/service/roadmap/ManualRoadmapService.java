@@ -9,14 +9,23 @@ import com.codegym.aiplanning.controller.roadmap.dto.RoadmapVersionResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.UpdateRoadmapItemRequest;
 import java.util.List;
 import java.util.UUID;
+import com.codegym.aiplanning.controller.roadmap.dto.RoadmapSummaryResponse;
+import com.codegym.aiplanning.controller.roadmap.dto.UpdateRoadmapRequest;
+import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 public interface ManualRoadmapService {
 
     RoadmapResponse create(UUID userId, CreateRoadmapRequest request);
 
-    List<RoadmapResponse> list(UUID userId);
+    Page<RoadmapSummaryResponse> list(
+            UUID userId, String query, RoadmapStatus status, Pageable pageable);
 
     RoadmapResponse get(UUID userId, UUID roadmapId);
+
+    RoadmapResponse update(
+            UUID userId, UUID roadmapId, UpdateRoadmapRequest request);
 
     RoadmapVersionResponse createDraftVersion(UUID userId, UUID roadmapId);
 

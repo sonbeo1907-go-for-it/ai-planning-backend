@@ -110,6 +110,15 @@ public class Roadmap extends BaseEntity {
         return onboardingCompletedAt != null;
     }
 
+    public void updateMetadata(String title, String description) {
+        if (status == RoadmapStatus.ONBOARDING || status == RoadmapStatus.ARCHIVED) {
+            throw new IllegalStateException(
+                    "Roadmap metadata cannot be edited in its current state.");
+        }
+        this.title = title;
+        this.description = description;
+    }
+
     public void updateOnboarding(
             ProficiencyLevel proficiencyLevel,
             Integer dailyCommitmentMinutes,

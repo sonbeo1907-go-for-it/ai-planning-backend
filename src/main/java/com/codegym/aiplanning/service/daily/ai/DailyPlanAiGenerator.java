@@ -3,6 +3,7 @@ package com.codegym.aiplanning.service.daily.ai;
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.entity.ai.AiPurpose;
+import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.service.ai.AiClientService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,14 +37,25 @@ public class DailyPlanAiGenerator {
     }
 
     public GeneratedDailyPlan generate(DailyPlanningContext context) {
+        return generate(context, null);
+    }
+
+    public GeneratedDailyPlan generate(
+            DailyPlanningContext context, AiProviderConfig providerConfig) {
         String systemPrompt = buildSystemPrompt(context.availableMinutes());
         String userPrompt = buildUserPrompt(context);
 
         for (int attempt = 0; attempt <= MAX_SCHEMA_RETRIES; attempt++) {
-            String rawResponse = aiClientService.generateContent(
-                    AiPurpose.DAILY_PLAN_GENERATION,
-                    systemPrompt,
-                    retryPrompt(userPrompt, attempt));
+            String retryUserPrompt = retryPrompt(userPrompt, attempt);
+            String rawResponse = providerConfig == null
+                    ? aiClientService.generateContent(
+                            AiPurpose.DAILY_PLAN_GENERATION,
+                            systemPrompt,
+                            retryUserPrompt)
+                    : aiClientService.generateContent(
+                            providerConfig,
+                            systemPrompt,
+                            retryUserPrompt);
             try {
                 DailyPlanAiResponse response = parser.parse(rawResponse);
                 validator.validateResponse(response, context);

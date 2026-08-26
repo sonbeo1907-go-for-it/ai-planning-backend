@@ -19,9 +19,12 @@ import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.entity.ai.AiPurpose;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.auth.UserAccount;
+import com.codegym.aiplanning.entity.daily.DailyPlan;
+import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
 import com.codegym.aiplanning.repository.ai.AiExecutionInputRepository;
 import com.codegym.aiplanning.repository.ai.AiExecutionRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
 import com.codegym.aiplanning.service.ai.AiProviderSelector;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.roadmap.impl.AiRoadmapPersistenceService;
@@ -56,6 +59,9 @@ class AiExecutionServiceImplTest {
     private AiRoadmapPersistenceService roadmapPersistenceService;
 
     @Mock
+    private DailyPlanRepository dailyPlanRepository;
+
+    @Mock
     private AuditLogService auditLogService;
 
     private AiExecutionServiceImpl service;
@@ -72,6 +78,7 @@ class AiExecutionServiceImplTest {
                 userAccountRepository,
                 providerSelector,
                 roadmapPersistenceService,
+                dailyPlanRepository,
                 auditLogService);
         ownerId = UUID.randomUUID();
         roadmapId = UUID.randomUUID();
@@ -180,6 +187,40 @@ class AiExecutionServiceImplTest {
                 () -> service.getOwnedExecution(ownerId, executionId));
 
         assertEquals(ErrorCode.AI_EXECUTION_NOT_FOUND, exception.errorCode());
+    }
+
+    @Test
+    void dailyPlanGenerationQueuesAnOwnerScopedExecutionForTheDailyPurpose() {
+        UUID dailyPlanId = UUID.randomUUID();
+        UUID executionId = UUID.randomUUID();
+        DailyPlan dailyPlan = org.mockito.Mockito.mock(DailyPlan.class);
+        when(dailyPlan.getStatus()).thenReturn(DailyPlanStatus.DRAFT);
+        when(dailyPlanRepository.findByIdAndUserId(dailyPlanId, ownerId))
+                .thenReturn(Optional.of(dailyPlan));
+        when(executionRepository
+                        .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                                ownerId,
+                                AiExecutionTargetType.DAILY_PLAN,
+                                dailyPlanId,
+                                AiPurpose.DAILY_PLAN_GENERATION,
+                                List.of(AiExecutionStatus.QUEUED, AiExecutionStatus.RUNNING)))
+                .thenReturn(Optional.empty());
+        when(userAccountRepository.findById(ownerId)).thenReturn(Optional.of(owner));
+        when(owner.getEmail()).thenReturn("user@example.com");
+        when(providerSelector.requireDefault(AiPurpose.DAILY_PLAN_GENERATION))
+                .thenReturn(providerConfig);
+        when(executionRepository.saveAndFlush(any(AiExecution.class)))
+                .thenAnswer(invocation -> persistedExecution(
+                        invocation.getArgument(0), executionId));
+
+        AiExecutionResponse response = service.submitDailyPlanGeneration(
+                ownerId, dailyPlanId, "daily-plan-request-1");
+
+        assertEquals(AiPurpose.DAILY_PLAN_GENERATION, response.purpose());
+        assertEquals(AiExecutionTargetType.DAILY_PLAN, response.targetType());
+        assertEquals(dailyPlanId, response.targetId());
+        assertEquals(AiExecutionStatus.QUEUED, response.status());
+        verify(roadmapPersistenceService, never()).prepare(any(), any(), any());
     }
 
     private AiExecution persistedExecution(AiExecution execution, UUID executionId) {

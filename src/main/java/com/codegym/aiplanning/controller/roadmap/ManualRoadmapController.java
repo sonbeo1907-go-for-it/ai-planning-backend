@@ -7,14 +7,20 @@ import com.codegym.aiplanning.controller.roadmap.dto.CreateRoadmapRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.CreateTopicRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapItemResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapResponse;
+import com.codegym.aiplanning.controller.roadmap.dto.RoadmapSummaryResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapVersionResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.UpdateRoadmapItemRequest;
+import com.codegym.aiplanning.controller.roadmap.dto.UpdateRoadmapRequest;
+import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
 import com.codegym.aiplanning.service.roadmap.ManualRoadmapService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import java.util.List;
 import java.util.UUID;
+import org.springdoc.core.annotations.ParameterObject;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -26,6 +32,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -51,8 +58,18 @@ public class ManualRoadmapController {
 
     @GetMapping
     @Operation(summary = "List the authenticated USER's Roadmaps")
-    public ApiResponse<List<RoadmapResponse>> list(@AuthenticationPrincipal Jwt jwt) {
-        return ApiResponse.of(manualRoadmapService.list(userId(jwt)));
+    public ApiResponse<Page<RoadmapSummaryResponse>> list(
+            @RequestParam(required = false, name = "q") String query,
+            @RequestParam(required = false) RoadmapStatus status,
+            @ParameterObject
+                    @PageableDefault(
+                            size = 20,
+                            sort = "updatedAt",
+                            direction = org.springframework.data.domain.Sort.Direction.DESC)
+                    Pageable pageable,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ApiResponse.of(
+                manualRoadmapService.list(userId(jwt), query, status, pageable));
     }
 
     @GetMapping(ApiConstant.ROADMAP_BY_ID)
@@ -60,6 +77,16 @@ public class ManualRoadmapController {
     public ApiResponse<RoadmapResponse> get(
             @PathVariable UUID roadmapId, @AuthenticationPrincipal Jwt jwt) {
         return ApiResponse.of(manualRoadmapService.get(userId(jwt), roadmapId));
+    }
+
+    @PatchMapping(ApiConstant.ROADMAP_BY_ID)
+    @Operation(summary = "Update owner-controlled Roadmap title and description")
+    public ApiResponse<RoadmapResponse> update(
+            @PathVariable UUID roadmapId,
+            @Valid @RequestBody UpdateRoadmapRequest request,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ApiResponse.of(
+                manualRoadmapService.update(userId(jwt), roadmapId, request));
     }
 
     @PostMapping(ApiConstant.ROADMAP_VERSIONS)

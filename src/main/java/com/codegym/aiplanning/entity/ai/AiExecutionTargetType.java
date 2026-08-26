@@ -1,5 +1,6 @@
 package com.codegym.aiplanning.entity.ai;
 
 public enum AiExecutionTargetType {
-    ROADMAP
+    ROADMAP,
+    DAILY_PLAN
 }

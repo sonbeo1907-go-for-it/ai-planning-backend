@@ -97,6 +97,19 @@ public class DailyPlanItem extends BaseEntity {
         this.aiAdjustmentReason = reason;
     }
 
+    public void updateDraftDetails(
+            DailyTaskCategory category,
+            String title,
+            String description,
+            Integer plannedMinutes,
+            Integer orderIndex) {
+        this.category = category;
+        this.title = title;
+        this.description = description;
+        this.plannedMinutes = plannedMinutes;
+        this.orderIndex = orderIndex;
+    }
+
     public UUID getDailyPlanVersionId() {
         return dailyPlanVersionId;
     }

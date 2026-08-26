@@ -12,6 +12,7 @@ import com.codegym.aiplanning.controller.daily.dto.CreateDailyPlanRequest;
 import com.codegym.aiplanning.controller.daily.dto.CreateDailyTaskRequest;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanItemResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanResponse;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanSummaryResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
 import com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest;
 import com.codegym.aiplanning.entity.daily.DailyPlan;
@@ -58,6 +59,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
@@ -192,24 +196,26 @@ class DailyPlanServiceTest {
         List<DailyPlanItem> items = List.of(firstItem, secondItem);
         List<UUID> planIds = plans.stream().map(DailyPlan::getId).toList();
         List<UUID> versionIds = versions.stream().map(DailyPlanVersion::getId).toList();
+        PageRequest pageable = PageRequest.of(0, 20);
 
-        when(dailyPlanRepository.findByUserIdOrderByPlanDateDesc(userId))
-                .thenReturn(plans);
+        when(dailyPlanRepository.searchOwned(
+                        userId, null, null, null, null, pageable))
+                .thenReturn(new PageImpl<>(plans, pageable, plans.size()));
         when(dailyPlanVersionRepository.findCurrentVersionsByDailyPlanIds(planIds))
                 .thenReturn(versions);
         when(dailyPlanItemRepository.findByDailyPlanVersionIds(versionIds))
                 .thenReturn(items);
 
-        List<DailyPlanResponse> response = dailyPlanService.getUserDailyPlans(userJwt);
+        Page<DailyPlanSummaryResponse> response = dailyPlanService.getUserDailyPlans(
+                null, null, null, null, pageable, userJwt);
 
         assertThat(response).hasSize(2);
-        assertThat(response.get(0).items())
-                .extracting(DailyPlanItemResponse::title)
-                .containsExactly("Backend task");
-        assertThat(response.get(1).latestVersionId()).isEqualTo(secondVersionId);
-        assertThat(response.get(1).items())
-                .extracting(DailyPlanItemResponse::title)
-                .containsExactly("Frontend task");
+        assertThat(response.getContent())
+                .extracting(DailyPlanSummaryResponse::latestVersionId)
+                .containsExactly(firstVersionId, secondVersionId);
+        assertThat(response.getContent())
+                .extracting(DailyPlanSummaryResponse::totalItemsCount)
+                .containsExactly(1, 1);
 
         verify(dailyPlanVersionRepository).findCurrentVersionsByDailyPlanIds(planIds);
         verify(dailyPlanItemRepository).findByDailyPlanVersionIds(versionIds);

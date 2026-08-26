@@ -21,4 +21,13 @@ public interface AiExecutionService {
     AiExecutionResponse getOwnedExecution(UUID ownerId, UUID executionId);
 
     AiExecutionResponse getLatestRoadmapExecution(UUID ownerId, UUID roadmapId);
+
+    AiExecutionResponse submitDailyPlanGeneration(
+            UUID ownerId, UUID dailyPlanId, String idempotencyKey);
+
+    AiExecutionResponse submitDailyPlanRegeneration(
+            UUID ownerId, UUID dailyPlanId, String idempotencyKey);
+
+    AiExecutionResponse getLatestDailyPlanExecution(
+            UUID ownerId, UUID dailyPlanId);
 }
