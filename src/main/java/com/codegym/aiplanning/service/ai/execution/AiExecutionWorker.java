@@ -6,12 +6,14 @@ import com.codegym.aiplanning.controller.roadmap.dto.RoadmapVersionResponse;
 import com.codegym.aiplanning.entity.ai.AiExecution;
 import com.codegym.aiplanning.entity.ai.AiExecutionOperation;
 import com.codegym.aiplanning.entity.ai.AiExecutionResultType;
+import com.codegym.aiplanning.entity.ai.AiExecutionTargetType;
 import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.repository.ai.AiExecutionInputRepository;
 import com.codegym.aiplanning.repository.ai.AiExecutionRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.roadmap.AiRoadmapGeneratorService;
+import com.codegym.aiplanning.service.daily.DailyPlanService;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -30,6 +32,7 @@ public class AiExecutionWorker {
     private final AiExecutionRepository executionRepository;
     private final AiExecutionInputRepository inputRepository;
     private final AiRoadmapGeneratorService roadmapGeneratorService;
+    private final DailyPlanService dailyPlanService;
     private final AuditLogService auditLogService;
     private final TransactionTemplate transactionTemplate;
 
@@ -37,11 +40,13 @@ public class AiExecutionWorker {
             AiExecutionRepository executionRepository,
             AiExecutionInputRepository inputRepository,
             AiRoadmapGeneratorService roadmapGeneratorService,
+            DailyPlanService dailyPlanService,
             AuditLogService auditLogService,
             TransactionTemplate transactionTemplate) {
         this.executionRepository = executionRepository;
         this.inputRepository = inputRepository;
         this.roadmapGeneratorService = roadmapGeneratorService;
+        this.dailyPlanService = dailyPlanService;
         this.auditLogService = auditLogService;
         this.transactionTemplate = transactionTemplate;
     }
@@ -54,15 +59,8 @@ public class AiExecutionWorker {
         }
 
         try {
-            RoadmapVersionResponse version = context.operation() == AiExecutionOperation.GENERATE
-                    ? roadmapGeneratorService.generateWithProviderConfig(
-                            context.ownerId(), context.roadmapId(), context.providerConfig())
-                    : roadmapGeneratorService.regenerateWithProviderConfig(
-                            context.ownerId(),
-                            context.roadmapId(),
-                            context.adjustmentPrompt(),
-                            context.providerConfig());
-            completeSuccessfully(context, version.id());
+            GenerationResult result = execute(context);
+            completeSuccessfully(context, result.resultType(), result.resultId());
         } catch (BusinessException exception) {
             completeWithFailure(
                     context,
@@ -74,6 +72,30 @@ public class AiExecutionWorker {
                     ErrorCode.AI_GENERATION_FAILED.name(),
                     "AI execution failed unexpectedly.");
         }
+    }
+
+    private GenerationResult execute(JobContext context) {
+        if (context.targetType() == AiExecutionTargetType.DAILY_PLAN) {
+            UUID versionId = dailyPlanService.generateAiDraftVersionWithProviderConfig(
+                    context.targetId(),
+                    context.ownerId(),
+                    context.ownerEmail(),
+                    context.executionId().toString(),
+                    context.providerConfig()).id();
+            return new GenerationResult(
+                    AiExecutionResultType.DAILY_PLAN_VERSION, versionId);
+        }
+
+        RoadmapVersionResponse version = context.operation() == AiExecutionOperation.GENERATE
+                ? roadmapGeneratorService.generateWithProviderConfig(
+                        context.ownerId(), context.targetId(), context.providerConfig())
+                : roadmapGeneratorService.regenerateWithProviderConfig(
+                        context.ownerId(),
+                        context.targetId(),
+                        context.adjustmentPrompt(),
+                        context.providerConfig());
+        return new GenerationResult(
+                AiExecutionResultType.ROADMAP_VERSION, version.id());
     }
 
     private JobContext claim(UUID executionId) {
@@ -98,13 +120,17 @@ public class AiExecutionWorker {
                     execution.getOwner().getId(),
                     execution.getOwner().getEmail(),
                     execution.getTargetId(),
+                    execution.getTargetType(),
                     execution.getOperation(),
                     execution.getProviderConfig(),
                     prompt);
         });
     }
 
-    private void completeSuccessfully(JobContext context, UUID resultId) {
+    private void completeSuccessfully(
+            JobContext context,
+            AiExecutionResultType resultType,
+            UUID resultId) {
         transactionTemplate.executeWithoutResult(status -> {
             AiExecution execution = executionRepository
                     .findByIdForUpdate(context.executionId())
@@ -112,8 +138,7 @@ public class AiExecutionWorker {
             if (execution == null || !execution.isRunning()) {
                 return;
             }
-            execution.markSucceeded(
-                    AiExecutionResultType.ROADMAP_VERSION, resultId, Instant.now());
+            execution.markSucceeded(resultType, resultId, Instant.now());
             executionRepository.save(execution);
             inputRepository.deleteByExecutionId(context.executionId());
             auditLogService.logAction(
@@ -162,8 +187,12 @@ public class AiExecutionWorker {
             UUID executionId,
             UUID ownerId,
             String ownerEmail,
-            UUID roadmapId,
+            UUID targetId,
+            AiExecutionTargetType targetType,
             AiExecutionOperation operation,
             AiProviderConfig providerConfig,
             String adjustmentPrompt) {}
+
+    private record GenerationResult(
+            AiExecutionResultType resultType, UUID resultId) {}
 }

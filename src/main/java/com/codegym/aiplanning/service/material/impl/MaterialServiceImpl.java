@@ -6,6 +6,7 @@ import com.codegym.aiplanning.controller.material.dto.CreateTextMaterialRequest;
 import com.codegym.aiplanning.controller.material.dto.MaterialResponse;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.material.Material;
+import com.codegym.aiplanning.entity.material.MaterialStatus;
 import com.codegym.aiplanning.entity.material.MaterialType;
 import com.codegym.aiplanning.repository.MaterialRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
@@ -180,8 +181,17 @@ public class MaterialServiceImpl implements MaterialService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<MaterialListResponse> getMyMaterials(UUID userId, Pageable pageable) {
-        Page<Material> materials = materialRepository.findByUserIdAndArchivedAtIsNull(userId, pageable);
+    public Page<MaterialListResponse> getMyMaterials(
+            UUID userId,
+            String query,
+            MaterialType type,
+            MaterialStatus status,
+            Pageable pageable) {
+        String normalizedQuery = query == null || query.isBlank() ? null : query.trim();
+        Page<Material> materials = normalizedQuery == null
+                ? materialRepository.listOwnedActive(userId, type, status, pageable)
+                : materialRepository.searchOwnedActive(
+                        userId, normalizedQuery, type, status, pageable);
         return materials.map(MaterialListResponse::from);
     }
 

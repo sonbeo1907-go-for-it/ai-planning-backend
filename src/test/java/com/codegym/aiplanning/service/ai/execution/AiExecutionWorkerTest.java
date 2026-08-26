@@ -10,15 +10,18 @@ import static org.mockito.Mockito.when;
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapVersionResponse;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
 import com.codegym.aiplanning.entity.ai.AiExecution;
 import com.codegym.aiplanning.entity.ai.AiExecutionOperation;
 import com.codegym.aiplanning.entity.ai.AiExecutionResultType;
+import com.codegym.aiplanning.entity.ai.AiExecutionTargetType;
 import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.repository.ai.AiExecutionInputRepository;
 import com.codegym.aiplanning.repository.ai.AiExecutionRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
+import com.codegym.aiplanning.service.daily.DailyPlanService;
 import com.codegym.aiplanning.service.roadmap.AiRoadmapGeneratorService;
 import java.time.Instant;
 import java.util.Optional;
@@ -45,6 +48,9 @@ class AiExecutionWorkerTest {
     private AiRoadmapGeneratorService roadmapGeneratorService;
 
     @Mock
+    private DailyPlanService dailyPlanService;
+
+    @Mock
     private AuditLogService auditLogService;
 
     @Mock
@@ -63,6 +69,7 @@ class AiExecutionWorkerTest {
                 executionRepository,
                 inputRepository,
                 roadmapGeneratorService,
+                dailyPlanService,
                 auditLogService,
                 transactionTemplate);
         executionId = UUID.randomUUID();
@@ -77,6 +84,7 @@ class AiExecutionWorkerTest {
         when(execution.getId()).thenReturn(executionId);
         when(execution.getOwner()).thenReturn(owner);
         when(execution.getTargetId()).thenReturn(roadmapId);
+        when(execution.getTargetType()).thenReturn(AiExecutionTargetType.ROADMAP);
         when(execution.getOperation()).thenReturn(AiExecutionOperation.GENERATE);
         when(execution.getProviderConfig()).thenReturn(providerConfig);
 
@@ -157,5 +165,43 @@ class AiExecutionWorkerTest {
                 "AiExecution",
                 executionId.toString());
         verify(execution, never()).markSucceeded(any(), any(), any());
+    }
+
+    @Test
+    void dailyPlanExecutionPublishesAnExactDailyPlanVersionResult() {
+        UUID versionId = UUID.randomUUID();
+        DailyPlanVersionResponse version = mock(DailyPlanVersionResponse.class);
+        when(version.id()).thenReturn(versionId);
+        when(execution.getTargetType()).thenReturn(AiExecutionTargetType.DAILY_PLAN);
+        when(executionRepository.claimQueued(eq(executionId), any(Instant.class), any(Instant.class)))
+                .thenReturn(1);
+        when(executionRepository.findJobContextById(executionId))
+                .thenReturn(Optional.of(execution));
+        when(inputRepository.findById(executionId)).thenReturn(Optional.empty());
+        when(dailyPlanService.generateAiDraftVersionWithProviderConfig(
+                        roadmapId,
+                        ownerId,
+                        "user@example.com",
+                        executionId.toString(),
+                        providerConfig))
+                .thenReturn(version);
+        when(executionRepository.findByIdForUpdate(executionId))
+                .thenReturn(Optional.of(execution));
+        when(execution.isRunning()).thenReturn(true);
+
+        worker.executeAsync(executionId);
+
+        verify(dailyPlanService).generateAiDraftVersionWithProviderConfig(
+                roadmapId,
+                ownerId,
+                "user@example.com",
+                executionId.toString(),
+                providerConfig);
+        verify(execution).markSucceeded(
+                eq(AiExecutionResultType.DAILY_PLAN_VERSION),
+                eq(versionId),
+                any(Instant.class));
+        verify(roadmapGeneratorService, never())
+                .generateWithProviderConfig(any(), any(), any());
     }
 }

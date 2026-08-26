@@ -9,10 +9,17 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 import java.util.UUID;
+import com.codegym.aiplanning.entity.material.MaterialStatus;
+import com.codegym.aiplanning.entity.material.MaterialType;
 
 public interface MaterialService {
     MaterialResponse uploadMaterial(UUID userId, MultipartFile file);
     MaterialResponse createFromText(UUID userId, CreateTextMaterialRequest request);
-    Page<MaterialListResponse> getMyMaterials(UUID userId, Pageable pageable);
+    Page<MaterialListResponse> getMyMaterials(
+            UUID userId,
+            String query,
+            MaterialType type,
+            MaterialStatus status,
+            Pageable pageable);
     void archiveMaterial(UUID userId, UUID materialId);
 }

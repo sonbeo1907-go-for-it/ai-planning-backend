@@ -141,6 +141,52 @@ class ManualRoadmapControllerIntegrationTest {
     }
 
     @Test
+    void ownerCanUpdateRoadmapMetadataWithOptimisticLocking() throws Exception {
+        String ownerToken = login(createAccount(UserRole.USER));
+        String otherToken = login(createAccount(UserRole.USER));
+        CreatedRoadmap created = createRoadmap(ownerToken, "Lộ trình từ khảo sát");
+
+        mockMvc.perform(patch(roadmapPath(created.roadmapId()))
+                        .header("Authorization", bearer(ownerToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "Backend with Java",
+                                  "description": "A renamed personal roadmap",
+                                  "entityVersion": 0
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.title").value("Backend with Java"))
+                .andExpect(jsonPath("$.data.description")
+                        .value("A renamed personal roadmap"))
+                .andExpect(jsonPath("$.data.entityVersion").value(1));
+
+        mockMvc.perform(patch(roadmapPath(created.roadmapId()))
+                        .header("Authorization", bearer(otherToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "Unauthorized rename",
+                                  "entityVersion": 1
+                                }
+                                """))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(patch(roadmapPath(created.roadmapId()))
+                        .header("Authorization", bearer(ownerToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "Stale rename",
+                                  "entityVersion": 0
+                                }
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CONCURRENT_MODIFICATION"));
+    }
+
+    @Test
     void draftTopicsAndMilestonesCanBeDeletedWithoutChangingDailyPlanCode() throws Exception {
         String token = login(createAccount(UserRole.USER));
         CreatedRoadmap created = createRoadmap(token, "Delete draft structure");
@@ -227,7 +273,7 @@ class ManualRoadmapControllerIntegrationTest {
     }
 
     @Test
-    void listReturnsNestedContentForMultipleRoadmaps() throws Exception {
+    void listReturnsPaginatedSummariesAndSupportsOwnerScopedSearch() throws Exception {
         String token = login(createAccount(UserRole.USER));
         CreatedRoadmap backend = createRoadmap(token, "Backend with Java");
         CreatedRoadmap frontend = createRoadmap(token, "Frontend with React");
@@ -239,17 +285,20 @@ class ManualRoadmapControllerIntegrationTest {
         MvcResult result = mockMvc.perform(get(ApiConstant.ROADMAPS)
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data.totalElements").value(2))
+                .andExpect(jsonPath("$.data.content.length()").value(2))
                 .andReturn();
 
-        assertThat(data(result).findValuesAsText("title"))
-                .contains(
-                        "Backend with Java",
-                        "Backend Week 1",
-                        "Spring Boot",
-                        "Frontend with React",
-                        "Frontend Week 1",
-                        "React");
+        assertThat(data(result).path("content").findValuesAsText("title"))
+                .containsExactlyInAnyOrder("Backend with Java", "Frontend with React");
+
+        mockMvc.perform(get(ApiConstant.ROADMAPS)
+                        .queryParam("q", "react")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content[0].title")
+                        .value("Frontend with React"));
     }
 
     @Test
@@ -261,6 +310,9 @@ class ManualRoadmapControllerIntegrationTest {
                 .getContentAsString());
 
         assertThat(document.at("/paths/~1api~1v1~1roadmaps/post").isMissingNode()).isFalse();
+        assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}/patch")
+                        .isMissingNode())
+                .isFalse();
         assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}~1versions~1{versionId}~1milestones/post")
                         .isMissingNode())
                 .isFalse();

@@ -2,38 +2,45 @@ package com.codegym.aiplanning.controller.roadmap.dto;
 
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
+import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-public record RoadmapResponse(
+public record RoadmapSummaryResponse(
         UUID id,
         long entityVersion,
         String title,
         String description,
         RoadmapStatus status,
         UUID activeVersionId,
-        List<RoadmapVersionResponse> versions,
+        int versionCount,
+        Integer latestVersionNumber,
         Instant createdAt,
         Instant updatedAt) {
 
-    public static RoadmapResponse from(
-            Roadmap roadmap, List<RoadmapVersionResponse> versions) {
-        return new RoadmapResponse(
+    public static RoadmapSummaryResponse from(
+            Roadmap roadmap, List<RoadmapVersion> versions) {
+        Integer latestVersionNumber = versions.stream()
+                .map(RoadmapVersion::getVersionNumber)
+                .max(Integer::compareTo)
+                .orElse(null);
+        return new RoadmapSummaryResponse(
                 roadmap.getId(),
                 roadmap.getVersion(),
                 roadmap.getTitle(),
                 roadmap.getDescription(),
                 roadmap.getStatus(),
                 roadmap.getActiveVersionId(),
-                versions == null ? List.of() : versions,
+                versions.size(),
+                latestVersionNumber,
                 roadmap.getCreatedAt(),
                 roadmap.getUpdatedAt());
     }
 
     @Override
     public String toString() {
-        return "RoadmapResponse[id=" + id
+        return "RoadmapSummaryResponse[id=" + id
                 + ", status=" + status
                 + ", personalLearningData=<redacted>]";
     }

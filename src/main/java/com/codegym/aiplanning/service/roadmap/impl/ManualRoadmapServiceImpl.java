@@ -7,8 +7,10 @@ import com.codegym.aiplanning.controller.roadmap.dto.CreateRoadmapRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.CreateTopicRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapItemResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapResponse;
+import com.codegym.aiplanning.controller.roadmap.dto.RoadmapSummaryResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapVersionResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.UpdateRoadmapItemRequest;
+import com.codegym.aiplanning.controller.roadmap.dto.UpdateRoadmapRequest;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
@@ -34,6 +36,8 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Service
 public class ManualRoadmapServiceImpl implements ManualRoadmapService {
@@ -77,15 +81,20 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<RoadmapResponse> list(UUID userId) {
-        List<Roadmap> roadmaps =
-                roadmapRepository.findAllByOwnerIdOrderByUpdatedAtDesc(userId);
+    public Page<RoadmapSummaryResponse> list(
+            UUID userId,
+            String query,
+            RoadmapStatus status,
+            Pageable pageable) {
+        String normalizedQuery = normalizeSearchQuery(query);
+        Page<Roadmap> roadmaps = findOwnedRoadmaps(
+                userId, normalizedQuery, status, pageable);
         if (roadmaps.isEmpty()) {
-            return List.of();
+            return Page.empty(pageable);
         }
 
         List<RoadmapVersion> versions = roadmapVersionRepository.findAllByRoadmapIds(
-                roadmaps.stream().map(Roadmap::getId).toList());
+                roadmaps.getContent().stream().map(Roadmap::getId).toList());
         Map<UUID, List<RoadmapVersion>> versionsByRoadmapId = new HashMap<>();
         for (RoadmapVersion version : versions) {
             versionsByRoadmapId
@@ -93,30 +102,58 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
                     .add(version);
         }
 
-        Map<UUID, List<RoadmapItem>> itemsByVersionId = new HashMap<>();
-        if (!versions.isEmpty()) {
-            List<RoadmapItem> items = roadmapItemRepository.findAllByRoadmapVersionIds(
-                    versions.stream().map(RoadmapVersion::getId).toList());
-            for (RoadmapItem item : items) {
-                itemsByVersionId
-                        .computeIfAbsent(
-                                item.getRoadmapVersion().getId(), ignored -> new ArrayList<>())
-                        .add(item);
-            }
+        return roadmaps.map(roadmap -> RoadmapSummaryResponse.from(
+                roadmap,
+                versionsByRoadmapId.getOrDefault(roadmap.getId(), List.of())));
+    }
+
+    private Page<Roadmap> findOwnedRoadmaps(
+            UUID userId,
+            String query,
+            RoadmapStatus status,
+            Pageable pageable) {
+        if (query == null) {
+            return status == null
+                    ? roadmapRepository.findByOwnerId(userId, pageable)
+                    : roadmapRepository.findByOwnerIdAndStatus(userId, status, pageable);
         }
 
-        return roadmaps.stream()
-                .map(roadmap -> roadmapListResponse(
-                        roadmap,
-                        versionsByRoadmapId.getOrDefault(roadmap.getId(), List.of()),
-                        itemsByVersionId))
-                .toList();
+        return status == null
+                ? roadmapRepository.searchOwnedByQuery(userId, query, pageable)
+                : roadmapRepository.searchOwnedByQueryAndStatus(userId, query, status, pageable);
     }
 
     @Override
     @Transactional(readOnly = true)
     public RoadmapResponse get(UUID userId, UUID roadmapId) {
         return roadmapResponse(requireOwned(userId, roadmapId));
+    }
+
+    @Override
+    @Transactional
+    public RoadmapResponse update(
+            UUID userId, UUID roadmapId, UpdateRoadmapRequest request) {
+        Roadmap roadmap = requireOwnedForUpdate(userId, roadmapId);
+        if (roadmap.getVersion() != request.entityVersion()) {
+            throw new BusinessException(
+                    ErrorCode.CONCURRENT_MODIFICATION,
+                    "Roadmap was changed by another request. Reload it before saving again.");
+        }
+        try {
+            roadmap.updateMetadata(
+                    normalizeRequired(request.title()),
+                    normalizeOptional(request.description()));
+        } catch (IllegalStateException exception) {
+            throw invalidTransition(exception.getMessage());
+        }
+        Roadmap saved = roadmapRepository.saveAndFlush(roadmap);
+        auditLogService.logAction(
+                userId,
+                saved.getOwner().getEmail(),
+                AuditEventAction.ROADMAP_UPDATED,
+                "Roadmap",
+                saved.getId().toString());
+        return roadmapResponse(saved);
     }
 
     @Override
@@ -492,6 +529,10 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
     }
 
     private String normalizeOptional(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private String normalizeSearchQuery(String value) {
         return value == null || value.isBlank() ? null : value.trim();
     }
 

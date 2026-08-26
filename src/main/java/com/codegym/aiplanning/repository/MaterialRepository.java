@@ -12,11 +12,38 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import java.util.Optional;
 import java.util.List;
+import com.codegym.aiplanning.entity.material.MaterialStatus;
+import com.codegym.aiplanning.entity.material.MaterialType;
 
 @Repository
 public interface MaterialRepository extends JpaRepository<Material, UUID> {
 
-    Page<Material> findByUserIdAndArchivedAtIsNull(UUID userId, Pageable pageable);
+    @Query("select material from Material material "
+            + "where material.user.id = :userId "
+            + "and material.archivedAt is null "
+            + "and (:type is null or material.type = :type) "
+            + "and (:status is null or material.status = :status)")
+    Page<Material> listOwnedActive(
+            @Param("userId") UUID userId,
+            @Param("type") MaterialType type,
+            @Param("status") MaterialStatus status,
+            Pageable pageable);
+
+    @Query("select material from Material material "
+            + "where material.user.id = :userId "
+            + "and material.archivedAt is null "
+            + "and (:type is null or material.type = :type) "
+            + "and (:status is null or material.status = :status) "
+            + "and (lower(coalesce(material.originalFileName, '')) "
+            + "like lower(concat('%', :query, '%')) "
+            + "or lower(coalesce(material.content, '')) "
+            + "like lower(concat('%', :query, '%'))) ")
+    Page<Material> searchOwnedActive(
+            @Param("userId") UUID userId,
+            @Param("query") String query,
+            @Param("type") MaterialType type,
+            @Param("status") MaterialStatus status,
+            Pageable pageable);
 
     Optional<Material> findByIdAndUserId(UUID id, UUID userId);
 

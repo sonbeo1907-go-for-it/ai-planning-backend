@@ -6,6 +6,8 @@ import com.codegym.aiplanning.common.constant.ApiConstant;
 import com.codegym.aiplanning.controller.material.dto.CreateTextMaterialRequest;
 import com.codegym.aiplanning.controller.material.dto.MaterialResponse;
 import com.codegym.aiplanning.service.material.MaterialService;
+import com.codegym.aiplanning.entity.material.MaterialStatus;
+import com.codegym.aiplanning.entity.material.MaterialType;
 import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -96,10 +98,14 @@ public class MaterialController {
             summary = "Get my learning materials",
             description = "Returns a paginated list of learning materials owned by the current user. Archived materials are excluded.")
     public ApiResponse<Page<MaterialListResponse>> getMyMaterials(
+            @RequestParam(required = false, name = "q") String query,
+            @RequestParam(required = false) MaterialType type,
+            @RequestParam(required = false) MaterialStatus status,
             @ParameterObject @PageableDefault(size = 20, sort = "createdAt", direction = org.springframework.data.domain.Sort.Direction.DESC) Pageable pageable,
             @AuthenticationPrincipal Jwt jwt) {
         UUID userId = UUID.fromString(jwt.getSubject());
-        Page<MaterialListResponse> response = materialService.getMyMaterials(userId, pageable);
+        Page<MaterialListResponse> response = materialService.getMyMaterials(
+                userId, query, type, status, pageable);
         return ApiResponse.of(response);
     }
 

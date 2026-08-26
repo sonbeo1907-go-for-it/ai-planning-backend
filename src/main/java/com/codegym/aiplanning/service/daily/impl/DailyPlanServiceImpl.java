@@ -6,9 +6,12 @@ import com.codegym.aiplanning.controller.daily.dto.CreateDailyPlanRequest;
 import com.codegym.aiplanning.controller.daily.dto.CreateDailyTaskRequest;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanItemResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanResponse;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanSummaryResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
+import com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
+import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.entity.daily.DailyPlan;
 import com.codegym.aiplanning.entity.daily.DailyPlanItem;
 import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
@@ -41,6 +44,8 @@ import java.util.UUID;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanAiResponse;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanAiGenerator;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext;
@@ -172,16 +177,28 @@ public class DailyPlanServiceImpl implements DailyPlanService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<DailyPlanResponse> getUserDailyPlans(Jwt actorJwt) {
+    public Page<DailyPlanSummaryResponse> getUserDailyPlans(
+            DailyPlanStatus status,
+            UUID roadmapId,
+            LocalDate fromDate,
+            LocalDate toDate,
+            Pageable pageable,
+            Jwt actorJwt) {
         UUID userId = extractUserId(actorJwt);
-        List<DailyPlan> plans = dailyPlanRepository.findByUserIdOrderByPlanDateDesc(userId);
+        if (fromDate != null && toDate != null && fromDate.isAfter(toDate)) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "The from date must not be after the to date.");
+        }
+        Page<DailyPlan> plans = dailyPlanRepository.searchOwned(
+                userId, status, roadmapId, fromDate, toDate, pageable);
         if (plans.isEmpty()) {
-            return List.of();
+            return Page.empty(pageable);
         }
 
         List<DailyPlanVersion> versions = dailyPlanVersionRepository
                 .findCurrentVersionsByDailyPlanIds(
-                        plans.stream().map(DailyPlan::getId).toList());
+                        plans.getContent().stream().map(DailyPlan::getId).toList());
         Map<UUID, DailyPlanVersion> versionByPlanId = new HashMap<>();
         for (DailyPlanVersion version : versions) {
             versionByPlanId.put(version.getDailyPlanId(), version);
@@ -199,15 +216,13 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             }
         }
 
-        return plans.stream()
-                .map(plan -> {
-                    DailyPlanVersion version = versionByPlanId.get(plan.getId());
-                    List<DailyPlanItem> items = version == null
-                            ? List.of()
-                            : itemsByVersionId.getOrDefault(version.getId(), List.of());
-                    return buildDailyPlanResponse(plan, version, items);
-                })
-                .toList();
+        return plans.map(plan -> {
+            DailyPlanVersion version = versionByPlanId.get(plan.getId());
+            List<DailyPlanItem> items = version == null
+                    ? List.of()
+                    : itemsByVersionId.getOrDefault(version.getId(), List.of());
+            return DailyPlanSummaryResponse.from(plan, version, items);
+        });
     }
 
     @Override
@@ -308,6 +323,36 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         UUID userId = extractUserId(actorJwt);
         String username = extractUsername(actorJwt);
         String normalizedRequestKey = normalizeIdempotencyKey(idempotencyKey);
+        return generateAiDraft(
+                planId, userId, username, normalizedRequestKey, null);
+    }
+
+    @Override
+    public DailyPlanVersionResponse generateAiDraftVersionWithProviderConfig(
+            UUID planId,
+            UUID ownerId,
+            String ownerEmail,
+            String generationRequestKey,
+            AiProviderConfig providerConfig) {
+        if (providerConfig == null) {
+            throw new BusinessException(
+                    ErrorCode.AI_PROVIDER_INVALID_CONFIGURATION,
+                    "AI provider configuration is required.");
+        }
+        return generateAiDraft(
+                planId,
+                ownerId,
+                ownerEmail,
+                normalizeIdempotencyKey(generationRequestKey),
+                providerConfig);
+    }
+
+    private DailyPlanVersionResponse generateAiDraft(
+            UUID planId,
+            UUID userId,
+            String username,
+            String normalizedRequestKey,
+            AiProviderConfig providerConfig) {
 
         DailyPlan plan = requirePlanForUser(planId, userId);
         if (plan.getStatus() != DailyPlanStatus.READY && plan.getStatus() != DailyPlanStatus.DRAFT) {
@@ -326,7 +371,9 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         }
 
         DailyPlanningContext context = contextBuilder.buildContext(planId, userId);
-        DailyPlanAiGenerator.GeneratedDailyPlan generated = aiGenerator.generate(context);
+        DailyPlanAiGenerator.GeneratedDailyPlan generated = providerConfig == null
+                ? aiGenerator.generate(context)
+                : aiGenerator.generate(context, providerConfig);
         DailyPlanAiResponse response = generated.response();
         int totalPlannedMinutes = response.items().stream()
                 .mapToInt(DailyPlanAiResponse.AiPlanItemDto::plannedMinutes)
@@ -428,6 +475,61 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 savedItem.getId().toString());
 
         return DailyPlanItemResponse.from(savedItem);
+    }
+
+    @Override
+    @Transactional
+    public DailyPlanVersionResponse updateTask(
+            UUID planId,
+            UUID versionId,
+            UUID itemId,
+            UpdateDailyTaskRequest request,
+            Jwt actorJwt) {
+        UUID userId = extractUserId(actorJwt);
+        String username = extractUsername(actorJwt);
+        DailyPlan plan = requirePlanForUserForUpdate(planId, userId);
+        DailyPlanVersion version = requireEditableDraftVersion(plan, versionId);
+        List<DailyPlanItem> items = new ArrayList<>(dailyPlanItemRepository
+                .findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId));
+        DailyPlanItem item = items.stream()
+                .filter(candidate -> candidate.getId().equals(itemId))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.DAILY_PLAN_ITEM_NOT_FOUND,
+                        "Daily plan item not found."));
+
+        items.remove(item);
+        int targetIndex = Math.min(request.orderIndex(), items.size());
+        item.updateDraftDetails(
+                request.category(),
+                request.title().trim(),
+                normalizeOptional(request.description()),
+                request.plannedMinutes(),
+                targetIndex);
+        items.add(targetIndex, item);
+
+        int totalPlannedMinutes = 0;
+        for (int index = 0; index < items.size(); index++) {
+            DailyPlanItem current = items.get(index);
+            current.updateDraftDetails(
+                    current.getCategory(),
+                    current.getTitle(),
+                    current.getDescription(),
+                    current.getPlannedMinutes(),
+                    index);
+            totalPlannedMinutes += current.getPlannedMinutes();
+        }
+        dailyPlanItemRepository.saveAll(items);
+        version.updateTotalPlannedMinutes(totalPlannedMinutes);
+        dailyPlanVersionRepository.saveAndFlush(version);
+
+        auditLogService.logAction(
+                userId,
+                username,
+                AuditEventAction.DAILY_PLAN_UPDATED,
+                "DailyPlanItem",
+                itemId.toString());
+        return DailyPlanVersionResponse.from(version, items);
     }
 
     @Override
@@ -780,6 +882,10 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 .findByUserId(userId)
                 .map(UserProfile::getTimeZone)
                 .orElse("UTC");
+    }
+
+    private String normalizeOptional(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private UUID extractUserId(Jwt jwt) {

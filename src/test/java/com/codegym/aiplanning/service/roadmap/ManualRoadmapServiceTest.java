@@ -5,12 +5,12 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.codegym.aiplanning.controller.roadmap.dto.RoadmapResponse;
+import com.codegym.aiplanning.controller.roadmap.dto.RoadmapSummaryResponse;
 import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
-import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
+import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
@@ -26,6 +26,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
@@ -59,7 +62,7 @@ class ManualRoadmapServiceTest {
     }
 
     @Test
-    void listLoadsAllNestedRoadmapContentUsingBulkRepositoryCalls() {
+    void listReturnsLightweightSummariesUsingBulkVersionLookup() {
         UUID userId = UUID.randomUUID();
         UserAccount owner = UserAccount.create(
                 "owner@example.com", "Password1", UserRole.USER, AccountStatus.ACTIVE);
@@ -77,47 +80,31 @@ class ManualRoadmapServiceTest {
         setId(backendVersion, UUID.randomUUID());
         setId(frontendVersion, UUID.randomUUID());
 
-        RoadmapItem backendMilestone =
-                RoadmapItem.milestone(backendVersion, "Week 1", null, 0);
-        RoadmapItem backendTopic =
-                RoadmapItem.topic(backendVersion, backendMilestone, "Spring", null, 0, 60);
-        RoadmapItem frontendMilestone =
-                RoadmapItem.milestone(frontendVersion, "Week 1", null, 0);
-        RoadmapItem frontendTopic =
-                RoadmapItem.topic(frontendVersion, frontendMilestone, "React", null, 0, 45);
-        setId(backendMilestone, UUID.randomUUID());
-        setId(backendTopic, UUID.randomUUID());
-        setId(frontendMilestone, UUID.randomUUID());
-        setId(frontendTopic, UUID.randomUUID());
-
         List<Roadmap> roadmaps = List.of(backend, frontend);
         List<RoadmapVersion> versions = List.of(backendVersion, frontendVersion);
-        List<RoadmapItem> items = List.of(
-                backendMilestone, backendTopic, frontendMilestone, frontendTopic);
         List<UUID> roadmapIds = roadmaps.stream().map(Roadmap::getId).toList();
-        List<UUID> versionIds = versions.stream().map(RoadmapVersion::getId).toList();
+        PageRequest pageable = PageRequest.of(0, 20);
 
-        when(roadmapRepository.findAllByOwnerIdOrderByUpdatedAtDesc(userId))
-                .thenReturn(roadmaps);
+        when(roadmapRepository.findByOwnerId(userId, pageable))
+                .thenReturn(new PageImpl<>(roadmaps, pageable, roadmaps.size()));
         when(roadmapVersionRepository.findAllByRoadmapIds(roadmapIds))
                 .thenReturn(versions);
-        when(roadmapItemRepository.findAllByRoadmapVersionIds(versionIds))
-                .thenReturn(items);
 
-        List<RoadmapResponse> response = service.list(userId);
+        Page<RoadmapSummaryResponse> response =
+                service.list(userId, null, null, pageable);
 
         assertThat(response).hasSize(2);
-        assertThat(response.get(0).versions()).hasSize(1);
-        assertThat(response.get(0).versions().get(0).milestones()).hasSize(1);
-        assertThat(response.get(0).versions().get(0).milestones().get(0).topics())
-                .extracting(topic -> topic.title())
-                .containsExactly("Spring");
-        assertThat(response.get(1).versions().get(0).milestones().get(0).topics())
-                .extracting(topic -> topic.title())
-                .containsExactly("React");
+        assertThat(response.getContent())
+                .extracting(RoadmapSummaryResponse::title)
+                .containsExactly("Backend", "Frontend");
+        assertThat(response.getContent())
+                .extracting(RoadmapSummaryResponse::versionCount)
+                .containsExactly(1, 1);
 
         verify(roadmapVersionRepository).findAllByRoadmapIds(roadmapIds);
-        verify(roadmapItemRepository).findAllByRoadmapVersionIds(versionIds);
+        verify(roadmapRepository).findByOwnerId(userId, pageable);
+        verify(roadmapItemRepository, never())
+                .findAllByRoadmapVersionIds(org.mockito.ArgumentMatchers.any());
         verify(roadmapVersionRepository, never())
                 .findAllByRoadmapIdOrderByVersionNumberDesc(
                         org.mockito.ArgumentMatchers.any());
@@ -132,15 +119,34 @@ class ManualRoadmapServiceTest {
     @Test
     void listDoesNotRunBulkChildQueriesWhenUserHasNoRoadmaps() {
         UUID userId = UUID.randomUUID();
-        when(roadmapRepository.findAllByOwnerIdOrderByUpdatedAtDesc(userId))
-                .thenReturn(List.of());
+        PageRequest pageable = PageRequest.of(0, 20);
+        when(roadmapRepository.findByOwnerId(userId, pageable))
+                .thenReturn(Page.empty(pageable));
 
-        assertThat(service.list(userId)).isEmpty();
+        assertThat(service.list(userId, null, null, pageable)).isEmpty();
 
         verify(roadmapVersionRepository, never())
                 .findAllByRoadmapIds(org.mockito.ArgumentMatchers.any());
         verify(roadmapItemRepository, never())
                 .findAllByRoadmapVersionIds(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void listUsesSearchQueryOnlyWhenTheUserProvidedOne() {
+        UUID userId = UUID.randomUUID();
+        PageRequest pageable = PageRequest.of(0, 20);
+
+        when(roadmapRepository.searchOwnedByQueryAndStatus(
+                userId, "react", RoadmapStatus.ACTIVE, pageable))
+                .thenReturn(Page.empty(pageable));
+
+        assertThat(service.list(userId, "  react  ", RoadmapStatus.ACTIVE, pageable)).isEmpty();
+
+        verify(roadmapRepository).searchOwnedByQueryAndStatus(
+                userId, "react", RoadmapStatus.ACTIVE, pageable);
+        verify(roadmapRepository, never()).findByOwnerId(userId, pageable);
+        verify(roadmapRepository, never()).findByOwnerIdAndStatus(
+                userId, RoadmapStatus.ACTIVE, pageable);
     }
 
     private void setId(Object entity, UUID id) {

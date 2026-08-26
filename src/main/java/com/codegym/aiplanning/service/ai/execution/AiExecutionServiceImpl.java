@@ -12,9 +12,12 @@ import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.entity.ai.AiPurpose;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.auth.UserAccount;
+import com.codegym.aiplanning.entity.daily.DailyPlan;
+import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
 import com.codegym.aiplanning.repository.ai.AiExecutionInputRepository;
 import com.codegym.aiplanning.repository.ai.AiExecutionRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
 import com.codegym.aiplanning.service.ai.AiProviderSelector;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.roadmap.impl.AiRoadmapPersistenceService;
@@ -35,6 +38,7 @@ public class AiExecutionServiceImpl implements AiExecutionService {
     private final UserAccountRepository userAccountRepository;
     private final AiProviderSelector providerSelector;
     private final AiRoadmapPersistenceService roadmapPersistenceService;
+    private final DailyPlanRepository dailyPlanRepository;
     private final AuditLogService auditLogService;
 
     public AiExecutionServiceImpl(
@@ -43,12 +47,14 @@ public class AiExecutionServiceImpl implements AiExecutionService {
             UserAccountRepository userAccountRepository,
             AiProviderSelector providerSelector,
             AiRoadmapPersistenceService roadmapPersistenceService,
+            DailyPlanRepository dailyPlanRepository,
             AuditLogService auditLogService) {
         this.executionRepository = executionRepository;
         this.inputRepository = inputRepository;
         this.userAccountRepository = userAccountRepository;
         this.providerSelector = providerSelector;
         this.roadmapPersistenceService = roadmapPersistenceService;
+        this.dailyPlanRepository = dailyPlanRepository;
         this.auditLogService = auditLogService;
     }
 
@@ -105,6 +111,41 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                 .orElseThrow(this::notFound));
     }
 
+    @Override
+    @Transactional
+    public AiExecutionResponse submitDailyPlanGeneration(
+            UUID ownerId, UUID dailyPlanId, String idempotencyKey) {
+        return submitDailyPlan(
+                ownerId,
+                dailyPlanId,
+                AiExecutionOperation.GENERATE,
+                idempotencyKey);
+    }
+
+    @Override
+    @Transactional
+    public AiExecutionResponse submitDailyPlanRegeneration(
+            UUID ownerId, UUID dailyPlanId, String idempotencyKey) {
+        return submitDailyPlan(
+                ownerId,
+                dailyPlanId,
+                AiExecutionOperation.REGENERATE,
+                idempotencyKey);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AiExecutionResponse getLatestDailyPlanExecution(
+            UUID ownerId, UUID dailyPlanId) {
+        return AiExecutionResponse.from(executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.DAILY_PLAN,
+                        dailyPlanId,
+                        AiPurpose.DAILY_PLAN_GENERATION)
+                .orElseThrow(this::notFound));
+    }
+
     private AiExecutionResponse submit(
             UUID ownerId,
             UUID roadmapId,
@@ -114,9 +155,13 @@ public class AiExecutionServiceImpl implements AiExecutionService {
             String idempotencyKey) {
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
         if (normalizedKey != null) {
-            AiExecution existing = executionRepository
-                    .findByOwnerIdAndIdempotencyKey(ownerId, normalizedKey)
-                    .orElse(null);
+            AiExecution existing = findMatchingIdempotentExecution(
+                    ownerId,
+                    normalizedKey,
+                    AiExecutionTargetType.ROADMAP,
+                    roadmapId,
+                    AiPurpose.ROADMAP_GENERATION,
+                    operation);
             if (existing != null) {
                 return AiExecutionResponse.from(existing);
             }
@@ -163,6 +208,97 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                 "AiExecution",
                 execution.getId().toString());
         return AiExecutionResponse.from(execution);
+    }
+
+    private AiExecutionResponse submitDailyPlan(
+            UUID ownerId,
+            UUID dailyPlanId,
+            AiExecutionOperation operation,
+            String idempotencyKey) {
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        if (normalizedKey != null) {
+            AiExecution existing = findMatchingIdempotentExecution(
+                    ownerId,
+                    normalizedKey,
+                    AiExecutionTargetType.DAILY_PLAN,
+                    dailyPlanId,
+                    AiPurpose.DAILY_PLAN_GENERATION,
+                    operation);
+            if (existing != null) {
+                return AiExecutionResponse.from(existing);
+            }
+        }
+
+        DailyPlan plan = dailyPlanRepository
+                .findByIdAndUserId(dailyPlanId, ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.DAILY_PLAN_NOT_FOUND,
+                        "Daily plan not found."));
+        if (plan.getStatus() != DailyPlanStatus.DRAFT
+                && plan.getStatus() != DailyPlanStatus.READY) {
+            throw new BusinessException(
+                    ErrorCode.DAILY_PLAN_LOCKED,
+                    "Cannot generate AI content after Daily Plan execution starts.");
+        }
+
+        AiExecution active = executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.DAILY_PLAN,
+                        dailyPlanId,
+                        AiPurpose.DAILY_PLAN_GENERATION,
+                        ACTIVE_STATUSES)
+                .orElse(null);
+        if (active != null) {
+            return AiExecutionResponse.from(active);
+        }
+
+        UserAccount owner = userAccountRepository.findById(ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.AUTHENTICATION_REQUIRED,
+                        "The authenticated account is unavailable."));
+        AiProviderConfig providerConfig =
+                providerSelector.requireDefault(AiPurpose.DAILY_PLAN_GENERATION);
+        AiExecution execution = executionRepository.saveAndFlush(AiExecution.queue(
+                owner,
+                providerConfig,
+                AiPurpose.DAILY_PLAN_GENERATION,
+                operation,
+                AiExecutionTargetType.DAILY_PLAN,
+                dailyPlanId,
+                normalizedKey));
+
+        auditLogService.logAction(
+                ownerId,
+                owner.getEmail(),
+                AuditEventAction.AI_EXECUTION_QUEUED,
+                "AiExecution",
+                execution.getId().toString());
+        return AiExecutionResponse.from(execution);
+    }
+
+    private AiExecution findMatchingIdempotentExecution(
+            UUID ownerId,
+            String idempotencyKey,
+            AiExecutionTargetType targetType,
+            UUID targetId,
+            AiPurpose purpose,
+            AiExecutionOperation operation) {
+        AiExecution existing = executionRepository
+                .findByOwnerIdAndIdempotencyKey(ownerId, idempotencyKey)
+                .orElse(null);
+        if (existing == null) {
+            return null;
+        }
+        if (existing.getTargetType() != targetType
+                || !existing.getTargetId().equals(targetId)
+                || existing.getPurpose() != purpose
+                || existing.getOperation() != operation) {
+            throw new BusinessException(
+                    ErrorCode.CONFLICT,
+                    "Idempotency-Key was already used for another AI operation.");
+        }
+        return existing;
     }
 
     private String normalizeIdempotencyKey(String idempotencyKey) {
