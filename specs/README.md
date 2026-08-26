@@ -27,7 +27,6 @@ progress.md
 ai-review.md
 ai-provider.md
 ```
-
 Instructor, StudyClass, Enrollment, WeeklyPlan, and institution-owned
 course/curriculum modules are outside the V2 MVP. The project uses a clean V2
 Flyway baseline because all pre-V2 databases were declared disposable; the old

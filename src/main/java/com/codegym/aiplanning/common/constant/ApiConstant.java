@@ -66,6 +66,12 @@ public final class ApiConstant {
             DAILY_PLAN_BY_ID + "/items/{itemId}/progress";
     public static final String DAILY_PLAN_ITEM_POMODORO =
             DAILY_PLAN_BY_ID + "/items/{itemId}/pomodoro";
+    public static final String DAILY_PLAN_ITEM_BY_ID =
+            DAILY_PLAN_BY_ID + "/items/{itemId}";
+    public static final String DAILY_PLAN_ITEM_AI_SUGGESTION =
+            DAILY_PLAN_BY_ID + "/items/{itemId}/ai-suggestion";
+    public static final String DAILY_PLAN_ITEM_AI_SUGGESTION_REGENERATE =
+            DAILY_PLAN_ITEM_AI_SUGGESTION + "/regenerate";
     public static final String ROADMAPS = API_V1 + "/roadmaps";
     public static final String ROADMAP_BY_ID = "/{roadmapId}";
     public static final String ROADMAP_VERSIONS = ROADMAP_BY_ID + "/versions";
