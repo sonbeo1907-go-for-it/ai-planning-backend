@@ -21,6 +21,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
@@ -162,6 +163,14 @@ public class GlobalExceptionHandler {
                 "The requested resource was not found.",
                 request,
                 List.of());
+    }
+
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    void handleDisconnectedClient(
+            AsyncRequestNotUsableException exception, HttpServletRequest request) {
+        log.debug(
+                "Client disconnected before the response could be written for {}.",
+                request.getRequestURI());
     }
 
     @ExceptionHandler(Exception.class)

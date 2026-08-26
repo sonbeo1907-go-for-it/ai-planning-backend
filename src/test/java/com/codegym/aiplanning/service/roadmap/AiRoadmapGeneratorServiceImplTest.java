@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapVersionResponse;
+import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.entity.ai.AiPurpose;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
 import com.codegym.aiplanning.service.ai.AiClientService;
@@ -178,6 +179,29 @@ class AiRoadmapGeneratorServiceImplTest {
         assertSame(expected, result);
         verify(persistenceService).saveGeneratedVersion(
                 userId, roadmapId, plan, RoadmapVersionOrigin.AI_REGENERATED);
+    }
+
+    @Test
+    void asynchronousGenerationUsesTheProviderConfigurationSelectedAtQueueTime() {
+        AiProviderConfig providerConfig = org.mockito.Mockito.mock(AiProviderConfig.class);
+        RoadmapVersionResponse expected = org.mockito.Mockito.mock(RoadmapVersionResponse.class);
+        when(persistenceService.prepare(userId, roadmapId, List.of())).thenReturn(context);
+        when(aiClientService.generateContent(
+                        eq(providerConfig), anyString(), anyString()))
+                .thenReturn("provider-json");
+        when(schemaValidator.validate("provider-json")).thenReturn(plan);
+        when(persistenceService.saveGeneratedVersion(
+                        userId, roadmapId, plan, RoadmapVersionOrigin.AI_GENERATED))
+                .thenReturn(expected);
+
+        RoadmapVersionResponse result = service.generateWithProviderConfig(
+                userId, roadmapId, providerConfig);
+
+        assertSame(expected, result);
+        verify(aiClientService).generateContent(
+                eq(providerConfig), anyString(), anyString());
+        verify(aiClientService, never()).generateContent(
+                eq(AiPurpose.ROADMAP_GENERATION), anyString(), anyString());
     }
 
     private GeneratedRoadmapPlan validPlan() {

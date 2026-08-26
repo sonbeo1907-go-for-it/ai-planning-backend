@@ -81,6 +81,10 @@ public final class ApiConstant {
             ROADMAP_VERSION_BY_ID + "/items/{itemId}";
     public static final String ROADMAP_GENERATE_AI = ROADMAP_BY_ID + "/generate-ai";
     public static final String ROADMAP_REGENERATE_AI = ROADMAP_BY_ID + "/regenerate-ai";
+    public static final String ROADMAP_CURRENT_AI_EXECUTION =
+            ROADMAP_BY_ID + "/ai-executions/current";
+    public static final String AI_EXECUTIONS = API_V1 + "/ai-executions";
+    public static final String AI_EXECUTION_BY_ID = "/{executionId}";
     public static final String MATERIALS = API_V1 + "/materials";
 
     private ApiConstant() {}

@@ -41,6 +41,8 @@ class OpenAiCompatibleAiClientTest {
     @BeforeEach
     void setUp() {
         client = new OpenAiCompatibleAiClient(providerSelector, credentialSelector);
+        when(config.isEnabled()).thenReturn(true);
+        when(provider.isEnabled()).thenReturn(true);
     }
 
     @Test
