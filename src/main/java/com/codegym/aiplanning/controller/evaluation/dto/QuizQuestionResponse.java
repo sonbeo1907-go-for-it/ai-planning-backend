@@ -10,6 +10,7 @@ public record QuizQuestionResponse(
         UUID roadmapItemId,
         String questionText,
         List<QuizOptionDto> options,
+        String correctOption,
         String userAnswer,
         Boolean isCorrect,
         String explanation

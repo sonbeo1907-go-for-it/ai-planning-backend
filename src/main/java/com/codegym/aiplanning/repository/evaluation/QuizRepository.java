@@ -18,6 +18,9 @@ public interface QuizRepository extends JpaRepository<Quiz, UUID> {
     Optional<Quiz> findByUserIdAndDailyPlanIdAndQuizType(
             UUID userId, UUID dailyPlanId, QuizType quizType);
 
+    Optional<Quiz> findFirstByUserIdAndDailyPlanIdAndQuizTypeOrderByCreatedAtDesc(
+            UUID userId, UUID dailyPlanId, QuizType quizType);
+
     List<Quiz> findByUserIdAndDailyPlanIdOrderByCreatedAtDesc(UUID userId, UUID dailyPlanId);
 
     @Query("""
@@ -27,4 +30,15 @@ public interface QuizRepository extends JpaRepository<Quiz, UUID> {
             """)
     Optional<Quiz> findWithQuestionsByIdAndUserId(
             @Param("id") UUID id, @Param("userId") UUID userId);
+
+    @Query("""
+            SELECT q FROM Quiz q
+            LEFT JOIN FETCH q.questions qn
+            WHERE q.user.id = :userId AND q.dailyPlan.id = :dailyPlanId AND q.quizType = :quizType
+            ORDER BY q.createdAt DESC
+            """)
+    List<Quiz> findWithQuestionsByUserIdAndDailyPlanIdAndQuizType(
+            @Param("userId") UUID userId,
+            @Param("dailyPlanId") UUID dailyPlanId,
+            @Param("quizType") QuizType quizType);
 }
