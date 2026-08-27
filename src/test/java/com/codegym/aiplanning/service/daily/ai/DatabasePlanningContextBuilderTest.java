@@ -30,6 +30,8 @@ import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapVersionRepository;
+import com.codegym.aiplanning.service.evaluation.WeakTopicContextResolver;
+import com.codegym.aiplanning.service.evaluation.WeakTopicContextResolver.WeakTopicPromptContext;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -60,6 +62,8 @@ class DatabasePlanningContextBuilderTest {
     private RoadmapVersionRepository roadmapVersionRepository;
     @Mock
     private RoadmapItemRepository roadmapItemRepository;
+    @Mock
+    private WeakTopicContextResolver weakTopicContextResolver;
 
     private DatabasePlanningContextBuilder builder;
 
@@ -72,7 +76,8 @@ class DatabasePlanningContextBuilderTest {
                 progressEntryRepository,
                 roadmapRepository,
                 roadmapVersionRepository,
-                roadmapItemRepository);
+                roadmapItemRepository,
+                weakTopicContextResolver);
     }
 
     @Test
@@ -206,6 +211,15 @@ class DatabasePlanningContextBuilderTest {
                 .thenReturn(Optional.of(priorVersion));
         when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(priorVersionId))
                 .thenReturn(List.of(priorItem));
+        WeakTopicPromptContext weakTopicContext = new WeakTopicPromptContext(
+                UUID.randomUUID(),
+                topic.getId(),
+                "Spring Security",
+                "Week 1",
+                2,
+                75.0);
+        when(weakTopicContextResolver.resolveUnresolvedWeakTopics(userId, roadmapId))
+                .thenReturn(List.of(weakTopicContext));
 
         DailyPlanningContext context = builder.buildContext(targetPlanId, userId);
 
@@ -219,6 +233,8 @@ class DatabasePlanningContextBuilderTest {
         assertThat(context.weaknessSignals()).hasSize(1);
         assertThat(context.weaknessSignals().get(0).reason())
                 .contains("difficulty", "understanding", "partially completed");
+        assertThat(context.unresolvedWeakTopics()).hasSize(1);
+        assertThat(context.unresolvedWeakTopics().get(0).topicTitle()).isEqualTo("Spring Security");
     }
 
     @Test
@@ -233,5 +249,94 @@ class DatabasePlanningContextBuilderTest {
                 .hasMessageContaining("not found");
 
         verify(dailyPlanRepository).findByIdAndUserId(dailyPlanId, userId);
+    }
+
+    @Test
+    void buildContext_whenWeakTopicResolverReturnsEmpty_setsEmptyWeakTopicsListInContext() {
+        UUID userId = UUID.randomUUID();
+        UUID targetPlanId = UUID.randomUUID();
+        UUID roadmapId = UUID.randomUUID();
+        UUID activeRoadmapVersionId = UUID.randomUUID();
+        UUID targetVersionId = UUID.randomUUID();
+        LocalDate targetDate = LocalDate.of(2026, 8, 25);
+
+        UserAccount user = UserAccount.create("owner@example.com", "hash", UserRole.USER, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(user, "id", userId);
+        Roadmap roadmap = Roadmap.manualDraft(user, "Java Backend", null);
+        ReflectionTestUtils.setField(roadmap, "id", roadmapId);
+        RoadmapVersion activeRoadmapVersion = RoadmapVersion.draft(roadmap, 2, RoadmapVersionOrigin.USER_EDITED);
+        ReflectionTestUtils.setField(activeRoadmapVersion, "id", activeRoadmapVersionId);
+        activeRoadmapVersion.activate(Instant.now());
+        roadmap.activateVersion(activeRoadmapVersionId);
+
+        RoadmapItem milestone = RoadmapItem.milestone(activeRoadmapVersion, "Week 1", null, 0);
+        ReflectionTestUtils.setField(milestone, "id", UUID.randomUUID());
+        RoadmapItem topic = RoadmapItem.topic(activeRoadmapVersion, milestone, "Spring Security", null, 0, 120);
+        ReflectionTestUtils.setField(topic, "id", UUID.randomUUID());
+
+        DailyPlan targetPlan = DailyPlan.create(userId, targetDate, "Asia/Ho_Chi_Minh", roadmapId);
+        ReflectionTestUtils.setField(targetPlan, "id", targetPlanId);
+        DailyPlanVersion targetVersion = DailyPlanVersion.create(targetPlanId, 1, DailyPlanVersionOrigin.MANUAL, 90, 0);
+        ReflectionTestUtils.setField(targetVersion, "id", targetVersionId);
+
+        when(dailyPlanRepository.findByIdAndUserId(targetPlanId, userId)).thenReturn(Optional.of(targetPlan));
+        when(roadmapRepository.findByIdAndOwnerId(roadmapId, userId)).thenReturn(Optional.of(roadmap));
+        when(roadmapVersionRepository.findByIdAndRoadmapId(activeRoadmapVersionId, roadmapId)).thenReturn(Optional.of(activeRoadmapVersion));
+        when(dailyPlanVersionRepository.findByDailyPlanIdAndStatus(targetPlanId, DailyPlanVersionStatus.DRAFT)).thenReturn(Optional.of(targetVersion));
+        when(roadmapItemRepository.findAllByRoadmapVersionIdOrderByOrderIndexAsc(activeRoadmapVersionId)).thenReturn(List.of(milestone, topic));
+        when(progressEntryRepository.findByUserIdOrderByRecordedAtDesc(org.mockito.ArgumentMatchers.eq(userId), any(Pageable.class))).thenReturn(List.of());
+        when(dailyPlanRepository.findFirstByUserIdAndRoadmapIdAndPlanDateBeforeOrderByPlanDateDesc(userId, roadmapId, targetDate)).thenReturn(Optional.empty());
+        when(weakTopicContextResolver.resolveUnresolvedWeakTopics(userId, roadmapId)).thenReturn(List.of());
+
+        DailyPlanningContext context = builder.buildContext(targetPlanId, userId);
+
+        assertThat(context.unresolvedWeakTopics()).isEmpty();
+    }
+
+    @Test
+    void buildContext_whenWeakTopicResolverReturnsMultiple_setsAllInContext() {
+        UUID userId = UUID.randomUUID();
+        UUID targetPlanId = UUID.randomUUID();
+        UUID roadmapId = UUID.randomUUID();
+        UUID activeRoadmapVersionId = UUID.randomUUID();
+        UUID targetVersionId = UUID.randomUUID();
+        LocalDate targetDate = LocalDate.of(2026, 8, 25);
+
+        UserAccount user = UserAccount.create("owner@example.com", "hash", UserRole.USER, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(user, "id", userId);
+        Roadmap roadmap = Roadmap.manualDraft(user, "Java Backend", null);
+        ReflectionTestUtils.setField(roadmap, "id", roadmapId);
+        RoadmapVersion activeRoadmapVersion = RoadmapVersion.draft(roadmap, 2, RoadmapVersionOrigin.USER_EDITED);
+        ReflectionTestUtils.setField(activeRoadmapVersion, "id", activeRoadmapVersionId);
+        activeRoadmapVersion.activate(Instant.now());
+        roadmap.activateVersion(activeRoadmapVersionId);
+
+        RoadmapItem milestone = RoadmapItem.milestone(activeRoadmapVersion, "Week 1", null, 0);
+        ReflectionTestUtils.setField(milestone, "id", UUID.randomUUID());
+        RoadmapItem topic = RoadmapItem.topic(activeRoadmapVersion, milestone, "Spring Security", null, 0, 120);
+        ReflectionTestUtils.setField(topic, "id", UUID.randomUUID());
+
+        DailyPlan targetPlan = DailyPlan.create(userId, targetDate, "Asia/Ho_Chi_Minh", roadmapId);
+        ReflectionTestUtils.setField(targetPlan, "id", targetPlanId);
+        DailyPlanVersion targetVersion = DailyPlanVersion.create(targetPlanId, 1, DailyPlanVersionOrigin.MANUAL, 90, 0);
+        ReflectionTestUtils.setField(targetVersion, "id", targetVersionId);
+
+        when(dailyPlanRepository.findByIdAndUserId(targetPlanId, userId)).thenReturn(Optional.of(targetPlan));
+        when(roadmapRepository.findByIdAndOwnerId(roadmapId, userId)).thenReturn(Optional.of(roadmap));
+        when(roadmapVersionRepository.findByIdAndRoadmapId(activeRoadmapVersionId, roadmapId)).thenReturn(Optional.of(activeRoadmapVersion));
+        when(dailyPlanVersionRepository.findByDailyPlanIdAndStatus(targetPlanId, DailyPlanVersionStatus.DRAFT)).thenReturn(Optional.of(targetVersion));
+        when(roadmapItemRepository.findAllByRoadmapVersionIdOrderByOrderIndexAsc(activeRoadmapVersionId)).thenReturn(List.of(milestone, topic));
+        when(progressEntryRepository.findByUserIdOrderByRecordedAtDesc(org.mockito.ArgumentMatchers.eq(userId), any(Pageable.class))).thenReturn(List.of());
+        when(dailyPlanRepository.findFirstByUserIdAndRoadmapIdAndPlanDateBeforeOrderByPlanDateDesc(userId, roadmapId, targetDate)).thenReturn(Optional.empty());
+
+        WeakTopicPromptContext wt1 = new WeakTopicPromptContext(UUID.randomUUID(), topic.getId(), "Spring Security", "Week 1", 2, 70.0);
+        WeakTopicPromptContext wt2 = new WeakTopicPromptContext(UUID.randomUUID(), UUID.randomUUID(), "JPA Relationships", "Week 1", 1, 50.0);
+        when(weakTopicContextResolver.resolveUnresolvedWeakTopics(userId, roadmapId)).thenReturn(List.of(wt1, wt2));
+
+        DailyPlanningContext context = builder.buildContext(targetPlanId, userId);
+
+        assertThat(context.unresolvedWeakTopics()).hasSize(2);
+        assertThat(context.unresolvedWeakTopics()).extracting(WeakTopicPromptContext::topicTitle)
+                .containsExactly("Spring Security", "JPA Relationships");
     }
 }
