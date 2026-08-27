@@ -13,6 +13,7 @@ import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.entity.ai.AiPurpose;
 import com.codegym.aiplanning.entity.daily.DailyTaskStatus;
 import com.codegym.aiplanning.service.ai.AiClientService;
+import com.codegym.aiplanning.service.evaluation.WeakTopicContextResolver.WeakTopicPromptContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.util.List;
@@ -92,6 +93,182 @@ class DailyPlanAiGeneratorTest {
                 eq(AiPurpose.DAILY_PLAN_GENERATION),
                 anyString(),
                 anyString());
+    }
+
+    @Test
+    void generate_includesWeakTopicPromptInstructionsAndContext() {
+        UUID weakTopicId = UUID.randomUUID();
+        WeakTopicPromptContext weakTopic = new WeakTopicPromptContext(
+                weakTopicId,
+                roadmapItemId,
+                "Spring Security",
+                "Week 1",
+                2,
+                70.0);
+        DailyPlanningContext baseContext = context(120);
+        DailyPlanningContext contextWithWeakTopics = new DailyPlanningContext(
+                baseContext.dailyPlanId(),
+                baseContext.userId(),
+                baseContext.targetDate(),
+                baseContext.timeZone(),
+                baseContext.availableMinutes(),
+                baseContext.roadmap(),
+                baseContext.recentProgress(),
+                baseContext.unfinishedTasks(),
+                baseContext.weaknessSignals(),
+                List.of(weakTopic),
+                baseContext.previousPlan());
+
+        when(aiClientService.generateContent(
+                        eq(AiPurpose.DAILY_PLAN_GENERATION),
+                        anyString(),
+                        anyString()))
+                .thenReturn(responseJson(60));
+
+        generator.generate(contextWithWeakTopics);
+
+        ArgumentCaptor<String> systemPromptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(aiClientService).generateContent(
+                eq(AiPurpose.DAILY_PLAN_GENERATION),
+                systemPromptCaptor.capture(),
+                userPromptCaptor.capture());
+
+        assertThat(systemPromptCaptor.getValue())
+                .contains("unresolvedWeakTopics")
+                .contains("20%")
+                .contains("40%")
+                .contains("REVIEW")
+                .contains("very beginning of the 'items' array");
+
+        assertThat(userPromptCaptor.getValue())
+                .contains("unresolvedWeakTopics")
+                .contains("Spring Security");
+    }
+
+    @Test
+    void generate_whenMultipleWeakTopics_serializesAllInUserPrompt() {
+        WeakTopicPromptContext wt1 = new WeakTopicPromptContext(
+                UUID.randomUUID(),
+                roadmapItemId,
+                "Spring Security",
+                "Week 1",
+                2,
+                70.0);
+        WeakTopicPromptContext wt2 = new WeakTopicPromptContext(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                "JPA Auditing",
+                "Week 2",
+                1,
+                45.0);
+
+        DailyPlanningContext baseContext = context(120);
+        DailyPlanningContext contextWithWeakTopics = new DailyPlanningContext(
+                baseContext.dailyPlanId(),
+                baseContext.userId(),
+                baseContext.targetDate(),
+                baseContext.timeZone(),
+                baseContext.availableMinutes(),
+                baseContext.roadmap(),
+                baseContext.recentProgress(),
+                baseContext.unfinishedTasks(),
+                baseContext.weaknessSignals(),
+                List.of(wt1, wt2),
+                baseContext.previousPlan());
+
+        when(aiClientService.generateContent(
+                        eq(AiPurpose.DAILY_PLAN_GENERATION),
+                        anyString(),
+                        anyString()))
+                .thenReturn(responseJson(60));
+
+        generator.generate(contextWithWeakTopics);
+
+        ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(aiClientService).generateContent(
+                eq(AiPurpose.DAILY_PLAN_GENERATION),
+                anyString(),
+                userPromptCaptor.capture());
+
+        assertThat(userPromptCaptor.getValue())
+                .contains("Spring Security")
+                .contains("JPA Auditing");
+    }
+
+    @Test
+    void generate_whenNullWeakTopicsInContext_defaultsToEmptyListWithoutError() {
+        DailyPlanningContext baseContext = context(60);
+        DailyPlanningContext contextWithNullWeakTopics = new DailyPlanningContext(
+                baseContext.dailyPlanId(),
+                baseContext.userId(),
+                baseContext.targetDate(),
+                baseContext.timeZone(),
+                baseContext.availableMinutes(),
+                baseContext.roadmap(),
+                baseContext.recentProgress(),
+                baseContext.unfinishedTasks(),
+                baseContext.weaknessSignals(),
+                null,
+                baseContext.previousPlan());
+
+        assertThat(contextWithNullWeakTopics.unresolvedWeakTopics()).isNotNull().isEmpty();
+
+        when(aiClientService.generateContent(
+                        eq(AiPurpose.DAILY_PLAN_GENERATION),
+                        anyString(),
+                        anyString()))
+                .thenReturn(responseJson(60));
+
+        DailyPlanAiGenerator.GeneratedDailyPlan plan = generator.generate(contextWithNullWeakTopics);
+        assertThat(plan.response().items()).hasSize(1);
+    }
+
+    @Test
+    void generate_parsesValidReviewTaskTargetingWeakTopicAtBeginningWithinBudget() {
+        // availableMinutes = 120, review task = 30 mins (25% -> in 20-40% range), new material = 60 mins -> total 90 mins <= 120 mins
+        String responseWithReviewFirst = """
+                {
+                  "summary": "Kế hoạch ngày mới ưu tiên ôn tập kiến thức yếu",
+                  "items": [
+                    {
+                      "roadmapItemId": "%s",
+                      "title": "Ôn tập Spring Security",
+                      "description": "Củng cố lỗ hổng kiến thức",
+                      "category": "REVIEW",
+                      "plannedMinutes": 30,
+                      "aiAdjustmentAction": null,
+                      "aiAdjustmentReason": null
+                    },
+                    {
+                      "roadmapItemId": "%s",
+                      "title": "Học bài mới Spring Data JPA",
+                      "description": "Kiến thức bài mới",
+                      "category": "NEW_MATERIAL",
+                      "plannedMinutes": 60,
+                      "aiAdjustmentAction": null,
+                      "aiAdjustmentReason": null
+                    }
+                  ],
+                  "adjustments": []
+                }
+                """.formatted(roadmapItemId, roadmapItemId);
+
+        when(aiClientService.generateContent(
+                        eq(AiPurpose.DAILY_PLAN_GENERATION),
+                        anyString(),
+                        anyString()))
+                .thenReturn(responseWithReviewFirst);
+
+        DailyPlanAiGenerator.GeneratedDailyPlan result = generator.generate(context(120));
+
+        assertThat(result.response().items()).hasSize(2);
+        // Verify REVIEW task is first
+        assertThat(result.response().items().get(0).category().name()).isEqualTo("REVIEW");
+        assertThat(result.response().items().get(0).plannedMinutes()).isEqualTo(30);
+        // Verify 30 mins is 25% of 120 mins (within 20%-40%)
+        double reviewPercentage = (double) result.response().items().get(0).plannedMinutes() / 120.0 * 100.0;
+        assertThat(reviewPercentage).isBetween(20.0, 40.0);
     }
 
     private DailyPlanningContext context(int availableMinutes) {

@@ -1,6 +1,7 @@
 package com.codegym.aiplanning.service.daily.ai;
 
 import com.codegym.aiplanning.entity.daily.DailyTaskStatus;
+import com.codegym.aiplanning.service.evaluation.WeakTopicContextResolver.WeakTopicPromptContext;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -16,7 +17,39 @@ public record DailyPlanningContext(
         List<ProgressSignal> recentProgress,
         List<UnfinishedTask> unfinishedTasks,
         List<WeaknessSignal> weaknessSignals,
+        List<WeakTopicPromptContext> unresolvedWeakTopics,
         PreviousPlan previousPlan) {
+
+    public DailyPlanningContext {
+        if (unresolvedWeakTopics == null) {
+            unresolvedWeakTopics = List.of();
+        }
+    }
+
+    public DailyPlanningContext(
+            UUID dailyPlanId,
+            UUID userId,
+            LocalDate targetDate,
+            String timeZone,
+            int availableMinutes,
+            RoadmapContext roadmap,
+            List<ProgressSignal> recentProgress,
+            List<UnfinishedTask> unfinishedTasks,
+            List<WeaknessSignal> weaknessSignals,
+            PreviousPlan previousPlan) {
+        this(
+                dailyPlanId,
+                userId,
+                targetDate,
+                timeZone,
+                availableMinutes,
+                roadmap,
+                recentProgress,
+                unfinishedTasks,
+                weaknessSignals,
+                List.of(),
+                previousPlan);
+    }
 
     public record RoadmapContext(
             UUID roadmapId,
