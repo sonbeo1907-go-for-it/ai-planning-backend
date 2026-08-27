@@ -13,17 +13,25 @@ import static org.mockito.Mockito.when;
 
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
+import com.codegym.aiplanning.controller.evaluation.dto.AnswerSubmissionDto;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.evaluation.WeakTopic;
 import com.codegym.aiplanning.entity.evaluation.WeakTopicStatus;
 import com.codegym.aiplanning.entity.evaluation.WeakTopicTrigger;
+import com.codegym.aiplanning.entity.evaluation.Quiz;
+import com.codegym.aiplanning.entity.evaluation.QuizQuestion;
+import com.codegym.aiplanning.entity.evaluation.QuizStatus;
+import com.codegym.aiplanning.entity.evaluation.QuizType;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
+import com.codegym.aiplanning.repository.evaluation.QuizRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.service.evaluation.WeakTopicContextResolver.WeakTopicPromptContext;
+import com.codegym.aiplanning.service.evaluation.QuizGeneratorService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collections;
@@ -49,6 +57,12 @@ class WeakTopicServiceImplTest {
     private RoadmapRepository roadmapRepository;
     @Mock
     private RoadmapItemRepository roadmapItemRepository;
+    @Mock
+    private QuizRepository quizRepository;
+    @Mock
+    private QuizGeneratorService quizGeneratorService;
+    @Mock
+    private ObjectMapper objectMapper;
 
     @InjectMocks
     private WeakTopicServiceImpl weakTopicService;
@@ -213,6 +227,85 @@ class WeakTopicServiceImplTest {
         assertNull(result.get(0).milestoneTitle());
         assertNull(result.get(0).lastScore());
         assertNull(result.get(0).lastRating());
+    }
+
+    @Test
+    void submitMasteryCheck_allQuestionsCorrect_marksTopicMastered() {
+        WeakTopic weakTopic = mock(WeakTopic.class);
+        Quiz quiz = mock(Quiz.class);
+        QuizQuestion question = mock(QuizQuestion.class);
+        UUID quizId = UUID.randomUUID();
+        UUID questionId = UUID.randomUUID();
+
+        when(weakTopicRepository.findByIdAndUserId(roadmapItemId, userId)).thenReturn(Optional.of(weakTopic));
+        when(quizRepository.findWithQuestionsByIdAndUserId(quizId, userId)).thenReturn(Optional.of(quiz));
+        when(quiz.getQuizType()).thenReturn(QuizType.MASTERY_CHECK);
+        when(quiz.getTargetWeakTopic()).thenReturn(weakTopic);
+        when(weakTopic.getId()).thenReturn(roadmapItemId);
+        when(quiz.getStatus()).thenReturn(QuizStatus.GENERATED);
+        when(quiz.getQuestions()).thenReturn(List.of(question));
+        when(question.getId()).thenReturn(questionId);
+        when(question.getIsCorrect()).thenReturn(true);
+        when(weakTopic.getStatus()).thenReturn(WeakTopicStatus.MASTERED);
+
+        MasteryCheckResultResponse result = weakTopicService.submitMasteryCheck(
+                userId,
+                roadmapItemId,
+                quizId,
+                new SubmitQuizRequest(List.of(new AnswerSubmissionDto(questionId, "A"))));
+
+        assertEquals(new BigDecimal("100.00"), result.quizScore());
+        assertEquals(true, result.isMastered());
+        verify(question).answer("A");
+        verify(weakTopic).markMastered(any(Instant.class));
+        verify(weakTopicRepository).save(weakTopic);
+    }
+
+    @Test
+    void submitMasteryCheck_withWrongAnswer_doesNotMarkTopicMastered() {
+        WeakTopic weakTopic = mock(WeakTopic.class);
+        Quiz quiz = mock(Quiz.class);
+        QuizQuestion question = mock(QuizQuestion.class);
+        UUID quizId = UUID.randomUUID();
+        UUID questionId = UUID.randomUUID();
+
+        when(weakTopicRepository.findByIdAndUserId(roadmapItemId, userId)).thenReturn(Optional.of(weakTopic));
+        when(quizRepository.findWithQuestionsByIdAndUserId(quizId, userId)).thenReturn(Optional.of(quiz));
+        when(quiz.getQuizType()).thenReturn(QuizType.MASTERY_CHECK);
+        when(quiz.getTargetWeakTopic()).thenReturn(weakTopic);
+        when(weakTopic.getId()).thenReturn(roadmapItemId);
+        when(quiz.getStatus()).thenReturn(QuizStatus.GENERATED);
+        when(quiz.getQuestions()).thenReturn(List.of(question));
+        when(question.getId()).thenReturn(questionId);
+        when(question.getIsCorrect()).thenReturn(false);
+        when(weakTopic.getStatus()).thenReturn(WeakTopicStatus.UNRESOLVED);
+
+        MasteryCheckResultResponse result = weakTopicService.submitMasteryCheck(
+                userId,
+                roadmapItemId,
+                quizId,
+                new SubmitQuizRequest(List.of(new AnswerSubmissionDto(questionId, "B"))));
+
+        assertEquals(new BigDecimal("0.00"), result.quizScore());
+        assertEquals(false, result.isMastered());
+        verify(weakTopic, never()).markMastered(any(Instant.class));
+        verify(weakTopicRepository, never()).save(weakTopic);
+    }
+
+    @Test
+    void submitMasteryCheck_withDailyQuiz_rejectsQuiz() {
+        WeakTopic weakTopic = mock(WeakTopic.class);
+        Quiz quiz = mock(Quiz.class);
+        UUID quizId = UUID.randomUUID();
+
+        when(weakTopicRepository.findByIdAndUserId(roadmapItemId, userId)).thenReturn(Optional.of(weakTopic));
+        when(quizRepository.findWithQuestionsByIdAndUserId(quizId, userId)).thenReturn(Optional.of(quiz));
+        when(quiz.getQuizType()).thenReturn(QuizType.DAILY_MICRO_QUIZ);
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> weakTopicService.submitMasteryCheck(
+                userId, roadmapItemId, quizId, new SubmitQuizRequest(Collections.emptyList())));
+
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, exception.errorCode());
     }
 
     private void setupMockEntities() {

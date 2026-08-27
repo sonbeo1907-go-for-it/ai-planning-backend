@@ -15,6 +15,19 @@ public interface QuizRepository extends JpaRepository<Quiz, UUID> {
 
     Optional<Quiz> findByIdAndUserId(UUID id, UUID userId);
 
+    @Query("""
+            SELECT q FROM Quiz q
+            LEFT JOIN FETCH q.questions qn
+            WHERE q.user.id = :userId
+              AND q.targetWeakTopic.id = :weakTopicId
+              AND q.quizType = :quizType
+            ORDER BY q.createdAt DESC
+            """)
+    List<Quiz> findWithQuestionsByUserIdAndTargetWeakTopicIdAndQuizType(
+            @Param("userId") UUID userId,
+            @Param("weakTopicId") UUID weakTopicId,
+            @Param("quizType") QuizType quizType);
+
     Optional<Quiz> findByUserIdAndDailyPlanIdAndQuizType(
             UUID userId, UUID dailyPlanId, QuizType quizType);
 
