@@ -10,7 +10,60 @@ import org.springframework.stereotype.Component;
 @Component
 public class DailyPlanValidator {
 
+    static final int MAX_REVIEW_PERCENT = 30;
+
     public void validateResponse(DailyPlanAiResponse response, DailyPlanningContext context) {
+        Set<UUID> activeRoadmapItemIds = context.roadmap().topics().stream()
+                .map(DailyPlanningContext.RoadmapTopic::roadmapItemId)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<UUID> unfinishedIds = context.unfinishedTasks().stream()
+                .map(DailyPlanningContext.UnfinishedTask::dailyPlanItemId)
+                .collect(java.util.stream.Collectors.toSet());
+        validateResponse(
+                response,
+                context.availableMinutes(),
+                activeRoadmapItemIds,
+                unfinishedIds);
+    }
+
+    public void validateResponse(DailyPlanAiResponse response, DailyPlanPromptContext context) {
+        Set<UUID> suppliedRoadmapItemIds = context.relevantTopics().stream()
+                .map(DailyPlanPromptContext.RelevantTopic::roadmapItemId)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<UUID> suppliedUnfinishedIds = context.unresolvedTasks().stream()
+                .map(DailyPlanPromptContext.UnresolvedTask::dailyPlanItemId)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<UUID> completedReviewIds = context.relevantTopics().stream()
+                .filter(DailyPlanPromptContext.RelevantTopic::completed)
+                .map(DailyPlanPromptContext.RelevantTopic::roadmapItemId)
+                .collect(java.util.stream.Collectors.toSet());
+        validateResponse(
+                response,
+                context.availableMinutes(),
+                suppliedRoadmapItemIds,
+                suppliedUnfinishedIds,
+                completedReviewIds);
+    }
+
+    private void validateResponse(
+            DailyPlanAiResponse response,
+            int availableMinutes,
+            Set<UUID> allowedRoadmapItemIds,
+            Set<UUID> allowedUnfinishedIds) {
+        validateResponse(
+                response,
+                availableMinutes,
+                allowedRoadmapItemIds,
+                allowedUnfinishedIds,
+                Set.of());
+    }
+
+    private void validateResponse(
+            DailyPlanAiResponse response,
+            int availableMinutes,
+            Set<UUID> allowedRoadmapItemIds,
+            Set<UUID> allowedUnfinishedIds,
+            Set<UUID> completedReviewIds) {
         if (response == null
                 || response.summary() == null
                 || response.summary().isBlank()
@@ -21,11 +74,10 @@ public class DailyPlanValidator {
             throw invalid("AI response must contain between 1 and 50 planned items.");
         }
 
-        Set<UUID> activeRoadmapItemIds = context.roadmap().topics().stream()
-                .map(DailyPlanningContext.RoadmapTopic::roadmapItemId)
-                .collect(java.util.stream.Collectors.toSet());
         Set<String> itemKeys = new HashSet<>();
         int totalMinutes = 0;
+        int reviewCount = 0;
+        int reviewMinutes = 0;
         for (DailyPlanAiResponse.AiPlanItemDto item : response.items()) {
             requireText(item.title(), 255, "item.title");
             requireOptionalText(item.description(), 4000, "item.description");
@@ -38,8 +90,18 @@ public class DailyPlanValidator {
                 throw invalid("AI items must use REVIEW, NEW_MATERIAL, or PRACTICE.");
             }
             if (item.roadmapItemId() != null
-                    && !activeRoadmapItemIds.contains(item.roadmapItemId())) {
-                throw invalid("An AI item references a Roadmap Item outside the ACTIVE RoadmapVersion.");
+                    && !allowedRoadmapItemIds.contains(item.roadmapItemId())) {
+                throw invalid(
+                        "An AI item references a Roadmap Item outside the supplied ACTIVE RoadmapVersion context.");
+            }
+            if (item.roadmapItemId() != null
+                    && completedReviewIds.contains(item.roadmapItemId())
+                    && item.category() != DailyTaskCategory.REVIEW) {
+                throw invalid("A completed Roadmap Item may return only as REVIEW work.");
+            }
+            if (item.category() == DailyTaskCategory.REVIEW) {
+                reviewCount++;
+                reviewMinutes += item.plannedMinutes();
             }
             if (item.aiAdjustmentAction() != null) {
                 if (item.aiAdjustmentAction() != AiAdjustmentAction.CARRY_OVER
@@ -59,16 +121,20 @@ public class DailyPlanValidator {
             totalMinutes += item.plannedMinutes();
         }
 
-        if (totalMinutes > context.availableMinutes()) {
+        if (totalMinutes > availableMinutes) {
             throw invalid("AI planned minutes exceed the user's available-time budget.");
+        }
+        if (reviewCount > 1) {
+            throw invalid("AI response may contain at most one REVIEW item.");
+        }
+        int maxReviewMinutes = availableMinutes * MAX_REVIEW_PERCENT / 100;
+        if (reviewMinutes > maxReviewMinutes) {
+            throw invalid("AI REVIEW work exceeds 30% of the user's available-time budget.");
         }
 
         if (response.adjustments() == null || response.adjustments().size() > 50) {
             throw invalid("AI response adjustments are missing or too numerous.");
         }
-        Set<UUID> unfinishedIds = context.unfinishedTasks().stream()
-                .map(DailyPlanningContext.UnfinishedTask::dailyPlanItemId)
-                .collect(java.util.stream.Collectors.toSet());
         for (DailyPlanAiResponse.AiAdjustmentProposalDto adjustment : response.adjustments()) {
             requireText(adjustment.title(), 255, "adjustment.title");
             requireText(adjustment.reason(), 1000, "adjustment.reason");
@@ -77,8 +143,8 @@ public class DailyPlanValidator {
                 throw invalid("A separate adjustment must use SPLIT, RESCHEDULE, or DROP.");
             }
             if (adjustment.sourceDailyPlanItemId() != null
-                    && !unfinishedIds.contains(adjustment.sourceDailyPlanItemId())) {
-                throw invalid("An adjustment references a task outside the previous unfinished set.");
+                    && !allowedUnfinishedIds.contains(adjustment.sourceDailyPlanItemId())) {
+                throw invalid("An adjustment references a task outside the supplied unresolved set.");
             }
             if (adjustment.proposedMinutes() != null
                     && (adjustment.proposedMinutes() <= 0

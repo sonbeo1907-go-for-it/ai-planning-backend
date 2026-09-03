@@ -83,6 +83,7 @@ class DailyPlanConstraintEvaluatorTest {
                 List.of(),
                 List.of(),
                 List.of(),
+                List.of(),
                 null);
     }
 }

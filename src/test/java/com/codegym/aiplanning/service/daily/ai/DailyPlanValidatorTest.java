@@ -60,6 +60,58 @@ class DailyPlanValidatorTest {
                 .hasMessageContaining("REVIEW, NEW_MATERIAL, or PRACTICE");
     }
 
+    @Test
+    void validateResponse_rejectsMoreThanOneReviewTask() {
+        DailyPlanAiResponse response = new DailyPlanAiResponse(
+                "Plan",
+                List.of(
+                        item("Review one", DailyTaskCategory.REVIEW, 10),
+                        item("Review two", DailyTaskCategory.REVIEW, 5)),
+                List.of());
+
+        assertThatThrownBy(() -> validator.validateResponse(response, context))
+                .isInstanceOf(InvalidAiDailyPlanResponseException.class)
+                .hasMessageContaining("at most one REVIEW");
+    }
+
+    @Test
+    void validateResponse_rejectsReviewAboveThirtyPercentOfAvailableTime() {
+        DailyPlanAiResponse response = new DailyPlanAiResponse(
+                "Plan",
+                List.of(item("Long review", DailyTaskCategory.REVIEW, 19)),
+                List.of());
+
+        assertThatThrownBy(() -> validator.validateResponse(response, context))
+                .isInstanceOf(InvalidAiDailyPlanResponseException.class)
+                .hasMessageContaining("exceeds 30%");
+    }
+
+    @Test
+    void validateResponse_rejectsCompletedTopicAsNewMaterial() {
+        DailyPlanPromptContext promptContext = new DailyPlanPromptContext(
+                LocalDate.now(),
+                "UTC",
+                60,
+                "Roadmap",
+                List.of(new DailyPlanPromptContext.RelevantTopic(
+                        roadmapItemId,
+                        "Completed topic",
+                        60,
+                        DailyPlanPromptContext.TopicPriority.REVIEW_DUE,
+                        true)),
+                null,
+                List.of(),
+                List.of());
+        DailyPlanAiResponse response = new DailyPlanAiResponse(
+                "Plan",
+                List.of(item("Repeat as new", DailyTaskCategory.NEW_MATERIAL, 15)),
+                List.of());
+
+        assertThatThrownBy(() -> validator.validateResponse(response, promptContext))
+                .isInstanceOf(InvalidAiDailyPlanResponseException.class)
+                .hasMessageContaining("only as REVIEW");
+    }
+
     private DailyPlanAiResponse response(int plannedMinutes, UUID itemId) {
         return new DailyPlanAiResponse(
                 "Plan",
@@ -72,6 +124,20 @@ class DailyPlanValidatorTest {
                         null,
                         null)),
                 List.of());
+    }
+
+    private DailyPlanAiResponse.AiPlanItemDto item(
+            String title,
+            DailyTaskCategory category,
+            int plannedMinutes) {
+        return new DailyPlanAiResponse.AiPlanItemDto(
+                roadmapItemId,
+                title,
+                null,
+                category,
+                plannedMinutes,
+                null,
+                null);
     }
 
     private DailyPlanningContext context(int availableMinutes) {
@@ -95,6 +161,7 @@ class DailyPlanValidatorTest {
                                 null,
                                 60,
                                 0))),
+                List.of(),
                 List.of(),
                 List.of(),
                 List.of(),

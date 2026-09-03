@@ -40,7 +40,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
@@ -189,13 +188,21 @@ class DatabasePlanningContextBuilderTest {
         when(roadmapItemRepository.findAllByRoadmapVersionIdOrderByOrderIndexAsc(
                         activeRoadmapVersionId))
                 .thenReturn(List.of(milestone, topic));
-        when(progressEntryRepository.findByUserIdOrderByRecordedAtDesc(
-                        org.mockito.ArgumentMatchers.eq(userId),
-                        any(Pageable.class)))
+        when(dailyPlanRepository
+                        .findByUserIdAndRoadmapIdAndPlanDateBeforeOrderByPlanDateDesc(
+                                userId,
+                                roadmapId,
+                                targetDate))
+                .thenReturn(List.of(priorPlan));
+        when(dailyPlanVersionRepository.findByDailyPlanIdIn(List.of(priorPlanId)))
+                .thenReturn(List.of(priorVersion));
+        when(dailyPlanItemRepository.findByDailyPlanVersionIds(List.of(priorVersionId)))
+                .thenReturn(List.of(priorItem));
+        when(progressEntryRepository
+                        .findByUserIdAndDailyPlanItemIdInOrderByRecordedAtDesc(
+                                userId,
+                                List.of(priorItemId)))
                 .thenReturn(List.of(progress));
-        when(dailyPlanItemRepository.findAllById(any())).thenReturn(List.of(priorItem));
-        when(dailyPlanVersionRepository.findAllById(any())).thenReturn(List.of(priorVersion));
-        when(dailyPlanRepository.findAllById(any())).thenReturn(List.of(priorPlan));
         when(dailyPlanRepository
                         .findFirstByUserIdAndRoadmapIdAndPlanDateBeforeOrderByPlanDateDesc(
                                 userId,
@@ -214,6 +221,10 @@ class DatabasePlanningContextBuilderTest {
         assertThat(context.roadmap().topics()).extracting(DailyPlanningContext.RoadmapTopic::roadmapItemId)
                 .containsExactly(topic.getId());
         assertThat(context.recentProgress()).hasSize(1);
+        assertThat(context.latestTopicOutcomes()).singleElement().satisfies(outcome -> {
+            assertThat(outcome.roadmapItemId()).isEqualTo(topic.getId());
+            assertThat(outcome.planDate()).isEqualTo(targetDate.minusDays(1));
+        });
         assertThat(context.recentProgress().get(0).actualMinutes()).isEqualTo(35);
         assertThat(context.unfinishedTasks()).hasSize(1);
         assertThat(context.weaknessSignals()).hasSize(1);
@@ -233,5 +244,48 @@ class DatabasePlanningContextBuilderTest {
                 .hasMessageContaining("not found");
 
         verify(dailyPlanRepository).findByIdAndUserId(dailyPlanId, userId);
+    }
+
+    @Test
+    void deriveWeaknessSignals_usesLatestOutcomeInsteadOfOlderWeakAttempt() {
+        UUID roadmapItemId = UUID.randomUUID();
+        DailyPlanningContext.ProgressSignal olderWeakAttempt = progressSignal(
+                roadmapItemId,
+                DailyTaskStatus.PARTIALLY_COMPLETED,
+                4,
+                2,
+                Instant.parse("2026-08-26T08:00:00Z"));
+        DailyPlanningContext.ProgressSignal laterSuccessfulAttempt = progressSignal(
+                roadmapItemId,
+                DailyTaskStatus.COMPLETED,
+                2,
+                5,
+                Instant.parse("2026-08-27T08:00:00Z"));
+
+        List<DailyPlanningContext.WeaknessSignal> result = builder.deriveWeaknessSignals(
+                List.of(olderWeakAttempt, laterSuccessfulAttempt));
+
+        assertThat(result).isEmpty();
+    }
+
+    private DailyPlanningContext.ProgressSignal progressSignal(
+            UUID roadmapItemId,
+            DailyTaskStatus status,
+            Integer difficulty,
+            Integer understandingRating,
+            Instant recordedAt) {
+        return new DailyPlanningContext.ProgressSignal(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                roadmapItemId,
+                "Roadmap topic",
+                status,
+                30,
+                30,
+                status.completionPercentage(),
+                difficulty,
+                understandingRating,
+                null,
+                recordedAt);
     }
 }

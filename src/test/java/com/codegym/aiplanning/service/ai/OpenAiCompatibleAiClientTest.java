@@ -1,5 +1,6 @@
 package com.codegym.aiplanning.service.ai;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
@@ -13,8 +14,18 @@ import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.entity.ai.AiProviderProtocol;
 import com.codegym.aiplanning.entity.ai.AiPurpose;
 import com.codegym.aiplanning.service.ai.provider.OpenAiCompatibleAiClient;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,17 +48,19 @@ class OpenAiCompatibleAiClientTest {
     private AiProvider provider;
 
     private OpenAiCompatibleAiClient client;
+    private HttpServer server;
+    private final AtomicReference<String> requestBody = new AtomicReference<>();
 
     @BeforeEach
     void setUp() {
         client = new OpenAiCompatibleAiClient(providerSelector, credentialSelector);
-        when(config.isEnabled()).thenReturn(true);
-        when(provider.isEnabled()).thenReturn(true);
     }
 
     @Test
     void selectsTheDefaultConfigurationForRoadmapGeneration() {
         UUID providerId = UUID.randomUUID();
+        when(config.isEnabled()).thenReturn(true);
+        when(provider.isEnabled()).thenReturn(true);
         when(providerSelector.requireDefault(AiPurpose.ROADMAP_GENERATION))
                 .thenReturn(config);
         when(config.getProvider()).thenReturn(provider);
@@ -70,6 +83,8 @@ class OpenAiCompatibleAiClientTest {
 
     @Test
     void rejectsPromptsThatExceedTheConfiguredInputBudget() {
+        when(config.isEnabled()).thenReturn(true);
+        when(provider.isEnabled()).thenReturn(true);
         when(providerSelector.requireDefault(AiPurpose.ROADMAP_GENERATION))
                 .thenReturn(config);
         when(config.getProvider()).thenReturn(provider);
@@ -85,5 +100,85 @@ class OpenAiCompatibleAiClientTest {
 
         assertEquals(ErrorCode.AI_GENERATION_FAILED, exception.errorCode());
         verify(credentialSelector, never()).findFirstAvailable(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void sendsNonThinkingModeForDeepSeekGeneration() throws Exception {
+        String baseUrl = startProviderServer();
+        AiProvider deepSeek = provider("DEEPSEEK", baseUrl);
+        AiProviderConfig deepSeekConfig = config(deepSeek);
+        UUID providerId = UUID.randomUUID();
+
+        when(deepSeek.getId()).thenReturn(providerId);
+        when(credentialSelector.findFirstAvailable(providerId))
+                .thenReturn(Optional.of(new ResolvedAiCredential(null, "test-secret")));
+
+        client.generateContent(deepSeekConfig, "System prompt", "User prompt");
+
+        JsonNode request = new ObjectMapper().readTree(requestBody.get());
+        assertThat(request.path("thinking").path("type").asText()).isEqualTo("disabled");
+    }
+
+    @Test
+    void doesNotAddDeepSeekThinkingOptionForOtherProviders() throws Exception {
+        String baseUrl = startProviderServer();
+        AiProvider openAi = provider("OPENAI", baseUrl);
+        AiProviderConfig openAiConfig = config(openAi);
+        UUID providerId = UUID.randomUUID();
+
+        when(openAi.getId()).thenReturn(providerId);
+        when(credentialSelector.findFirstAvailable(providerId))
+                .thenReturn(Optional.of(new ResolvedAiCredential(null, "test-secret")));
+
+        client.generateContent(openAiConfig, "System prompt", "User prompt");
+
+        JsonNode request = new ObjectMapper().readTree(requestBody.get());
+        assertThat(request.has("thinking")).isFalse();
+    }
+
+    @AfterEach
+    void stopServer() {
+        if (server != null) {
+            server.stop(0);
+        }
+    }
+
+    private String startProviderServer() throws IOException {
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", this::respond);
+        server.start();
+        return "http://127.0.0.1:" + server.getAddress().getPort() + "/v1";
+    }
+
+    private AiProvider provider(String code, String baseUrl) {
+        AiProvider provider = org.mockito.Mockito.mock(AiProvider.class);
+        when(provider.getCode()).thenReturn(code);
+        when(provider.getBaseUrl()).thenReturn(baseUrl);
+        when(provider.getProtocol()).thenReturn(AiProviderProtocol.OPENAI_COMPATIBLE);
+        when(provider.isEnabled()).thenReturn(true);
+        return provider;
+    }
+
+    private AiProviderConfig config(AiProvider aiProvider) {
+        AiProviderConfig providerConfig = org.mockito.Mockito.mock(AiProviderConfig.class);
+        when(providerConfig.getProvider()).thenReturn(aiProvider);
+        when(providerConfig.isEnabled()).thenReturn(true);
+        when(providerConfig.getModel()).thenReturn("deepseek-v4-flash");
+        when(providerConfig.getTimeoutSeconds()).thenReturn(2);
+        when(providerConfig.getMaxInputTokens()).thenReturn(1000);
+        when(providerConfig.getMaxOutputTokens()).thenReturn(200);
+        when(providerConfig.getTemperature()).thenReturn(new BigDecimal("0.20"));
+        return providerConfig;
+    }
+
+    private void respond(HttpExchange exchange) throws IOException {
+        requestBody.set(new String(
+                exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        byte[] response = "{\"choices\":[{\"message\":{\"content\":\"{}\"}}]}"
+                .getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, response.length);
+        exchange.getResponseBody().write(response);
+        exchange.close();
     }
 }
