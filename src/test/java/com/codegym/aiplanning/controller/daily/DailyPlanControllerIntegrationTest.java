@@ -26,6 +26,7 @@ import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -170,7 +171,8 @@ class DailyPlanControllerIntegrationTest {
         UserAccount user = createUser("daily-user2", "Daily User 2");
         String token = login("daily-user2");
 
-        LocalDate today = LocalDate.now();
+        // New profiles default to UTC, and the endpoint resolves "today" from that profile timezone.
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
         String createPlanPayload = String.format("{\"planDate\": \"%s\", \"availableMinutes\": 60}", today);
         mockMvc.perform(post(ApiConstant.DAILY_PLANS)
                         .header("Authorization", "Bearer " + token)
