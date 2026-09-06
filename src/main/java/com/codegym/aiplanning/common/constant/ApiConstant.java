@@ -92,6 +92,8 @@ public final class ApiConstant {
     public static final String ROADMAP_WEAK_TOPICS = ROADMAP_BY_ID + "/weak-topics";
     public static final String DAILY_PLAN_EVALUATION = DAILY_PLAN_BY_ID + "/evaluation";
     public static final String DAILY_PLAN_QUIZ_GENERATE = DAILY_PLAN_BY_ID + "/quiz/generate";
+    public static final String DAILY_PLAN_QUIZ_CURRENT_EXECUTION =
+            DAILY_PLAN_BY_ID + "/quiz/ai-executions/current";
     public static final String DAILY_PLAN_QUIZ_BY_ID = DAILY_PLAN_BY_ID + "/quiz/{quizId}";
     public static final String DAILY_PLAN_QUIZ_SUBMIT = DAILY_PLAN_QUIZ_BY_ID + "/submit";
     public static final String WEAK_TOPICS = API_V1 + "/weak-topics";

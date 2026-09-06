@@ -3,6 +3,7 @@ package com.codegym.aiplanning.entity.evaluation;
 import com.codegym.aiplanning.common.entity.BaseEntity;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.daily.DailyPlan;
+import com.codegym.aiplanning.entity.daily.DailyPlanVersion;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -21,9 +22,13 @@ public class DailyEvaluation extends BaseEntity {
     @JoinColumn(name = "user_id", nullable = false)
     private UserAccount user;
 
-    @OneToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "daily_plan_id", nullable = false, unique = true)
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "daily_plan_id", nullable = false)
     private DailyPlan dailyPlan;
+
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "daily_plan_version_id", nullable = false, unique = true)
+    private DailyPlanVersion dailyPlanVersion;
 
     @Column(name = "evaluation_date", nullable = false)
     private LocalDate evaluationDate;
@@ -45,6 +50,7 @@ public class DailyEvaluation extends BaseEntity {
     public static DailyEvaluation create(
             UserAccount user,
             DailyPlan dailyPlan,
+            DailyPlanVersion dailyPlanVersion,
             LocalDate evaluationDate,
             BigDecimal quizScore,
             Boolean quizPassed,
@@ -53,6 +59,7 @@ public class DailyEvaluation extends BaseEntity {
         DailyEvaluation evaluation = new DailyEvaluation();
         evaluation.user = user;
         evaluation.dailyPlan = dailyPlan;
+        evaluation.dailyPlanVersion = dailyPlanVersion;
         evaluation.evaluationDate = evaluationDate;
         evaluation.quizScore = quizScore;
         evaluation.quizPassed = quizPassed;
@@ -77,6 +84,10 @@ public class DailyEvaluation extends BaseEntity {
 
     public DailyPlan getDailyPlan() {
         return dailyPlan;
+    }
+
+    public DailyPlanVersion getDailyPlanVersion() {
+        return dailyPlanVersion;
     }
 
     public LocalDate getEvaluationDate() {

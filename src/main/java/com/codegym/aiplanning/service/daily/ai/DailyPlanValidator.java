@@ -26,6 +26,8 @@ public class DailyPlanValidator {
                 .collect(java.util.stream.Collectors.toSet());
         Set<String> itemKeys = new HashSet<>();
         int totalMinutes = 0;
+        int reviewMinutes = 0;
+        int reviewCount = 0;
         for (DailyPlanAiResponse.AiPlanItemDto item : response.items()) {
             requireText(item.title(), 255, "item.title");
             requireOptionalText(item.description(), 4000, "item.description");
@@ -57,10 +59,24 @@ public class DailyPlanValidator {
                 throw invalid("AI response contains a duplicate planned item.");
             }
             totalMinutes += item.plannedMinutes();
+            if (item.category() == DailyTaskCategory.REVIEW) {
+                reviewCount++;
+                reviewMinutes += item.plannedMinutes();
+                if (item.roadmapItemId() == null) {
+                    throw invalid("A REVIEW item must reference an active Roadmap topic.");
+                }
+            }
         }
 
         if (totalMinutes > context.availableMinutes()) {
             throw invalid("AI planned minutes exceed the user's available-time budget.");
+        }
+        if (reviewCount > 1) {
+            throw invalid("AI response may contain at most one REVIEW item.");
+        }
+        int maximumReviewMinutes = (int) Math.floor(context.availableMinutes() * 0.30d);
+        if (reviewMinutes > maximumReviewMinutes) {
+            throw invalid("REVIEW work exceeds 30% of the available-time budget.");
         }
 
         if (response.adjustments() == null || response.adjustments().size() > 50) {

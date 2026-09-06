@@ -96,9 +96,10 @@ public class DailyPlanAiGenerator {
                 fit, keep today's items within the limit and add SPLIT, RESCHEDULE, or DROP advisory
                 adjustments. Never silently truncate a task.
 
-                If 'unresolvedWeakTopics' is present and non-empty in the context, you MUST allocate between 20%% and 40%%
-                of the total 'availableMinutes' for 'REVIEW' tasks targeting these topics. These 'REVIEW' tasks
-                targeting weak topics MUST be placed at the very beginning of the 'items' array.
+                If unresolvedWeakTopics is non-empty, you MAY add at most one REVIEW task for one
+                of those topics. All REVIEW work together must use no more than 30%% of availableMinutes.
+                Do not force review when the budget is too small. A weak-topic REVIEW task must be
+                placed first and must reference its active Roadmap Item ID.
 
                 Return only one JSON object with exactly this structure:
                 {

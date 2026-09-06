@@ -14,6 +14,8 @@ import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.daily.DailyPlan;
 import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
+import com.codegym.aiplanning.entity.evaluation.WeakTopic;
+import com.codegym.aiplanning.entity.evaluation.WeakTopicStatus;
 import com.codegym.aiplanning.repository.ai.AiExecutionInputRepository;
 import com.codegym.aiplanning.repository.ai.AiExecutionRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
@@ -21,6 +23,8 @@ import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
 import com.codegym.aiplanning.service.ai.AiProviderSelector;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.roadmap.impl.AiRoadmapPersistenceService;
+import com.codegym.aiplanning.service.evaluation.impl.DailyEvaluationPersistenceService;
+import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -40,6 +44,8 @@ public class AiExecutionServiceImpl implements AiExecutionService {
     private final AiRoadmapPersistenceService roadmapPersistenceService;
     private final DailyPlanRepository dailyPlanRepository;
     private final AuditLogService auditLogService;
+    private final DailyEvaluationPersistenceService evaluationPersistenceService;
+    private final WeakTopicRepository weakTopicRepository;
 
     public AiExecutionServiceImpl(
             AiExecutionRepository executionRepository,
@@ -48,7 +54,9 @@ public class AiExecutionServiceImpl implements AiExecutionService {
             AiProviderSelector providerSelector,
             AiRoadmapPersistenceService roadmapPersistenceService,
             DailyPlanRepository dailyPlanRepository,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            DailyEvaluationPersistenceService evaluationPersistenceService,
+            WeakTopicRepository weakTopicRepository) {
         this.executionRepository = executionRepository;
         this.inputRepository = inputRepository;
         this.userAccountRepository = userAccountRepository;
@@ -56,6 +64,8 @@ public class AiExecutionServiceImpl implements AiExecutionService {
         this.roadmapPersistenceService = roadmapPersistenceService;
         this.dailyPlanRepository = dailyPlanRepository;
         this.auditLogService = auditLogService;
+        this.evaluationPersistenceService = evaluationPersistenceService;
+        this.weakTopicRepository = weakTopicRepository;
     }
 
     @Override
@@ -144,6 +154,144 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                         dailyPlanId,
                         AiPurpose.DAILY_PLAN_GENERATION)
                 .orElseThrow(this::notFound));
+    }
+
+    @Override
+    @Transactional
+    public AiExecutionResponse submitDailyQuizGeneration(
+            UUID ownerId,
+            UUID dailyPlanId,
+            String idempotencyKey) {
+        UUID versionId = evaluationPersistenceService.resolveActiveVersionId(
+                ownerId,
+                dailyPlanId);
+        evaluationPersistenceService.prepareDailyQuizContext(ownerId, versionId);
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        if (normalizedKey != null) {
+            AiExecution existing = findMatchingIdempotentExecution(
+                    ownerId,
+                    normalizedKey,
+                    AiExecutionTargetType.DAILY_PLAN_VERSION,
+                    versionId,
+                    AiPurpose.QUIZ_GENERATION,
+                    AiExecutionOperation.GENERATE);
+            if (existing != null) {
+                return AiExecutionResponse.from(existing);
+            }
+        }
+
+        AiExecution active = executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.DAILY_PLAN_VERSION,
+                        versionId,
+                        AiPurpose.QUIZ_GENERATION,
+                        ACTIVE_STATUSES)
+                .orElse(null);
+        if (active != null) {
+            return AiExecutionResponse.from(active);
+        }
+
+        UserAccount owner = userAccountRepository.findById(ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.AUTHENTICATION_REQUIRED,
+                        "The authenticated account is unavailable."));
+        AiProviderConfig providerConfig = providerSelector.requireDefault(
+                AiPurpose.QUIZ_GENERATION);
+        AiExecution execution = executionRepository.saveAndFlush(AiExecution.queue(
+                owner,
+                providerConfig,
+                AiPurpose.QUIZ_GENERATION,
+                AiExecutionOperation.GENERATE,
+                AiExecutionTargetType.DAILY_PLAN_VERSION,
+                versionId,
+                normalizedKey));
+        auditLogService.logAction(
+                ownerId,
+                owner.getEmail(),
+                AuditEventAction.AI_EXECUTION_QUEUED,
+                "AiExecution",
+                execution.getId().toString());
+        return AiExecutionResponse.from(execution);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AiExecutionResponse getLatestDailyQuizExecution(
+            UUID ownerId,
+            UUID dailyPlanId) {
+        UUID versionId = evaluationPersistenceService.resolveActiveVersionId(
+                ownerId,
+                dailyPlanId);
+        return AiExecutionResponse.from(executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.DAILY_PLAN_VERSION,
+                        versionId,
+                        AiPurpose.QUIZ_GENERATION)
+                .orElseThrow(this::notFound));
+    }
+
+    @Override
+    @Transactional
+    public AiExecutionResponse submitMasteryCheckGeneration(
+            UUID ownerId,
+            UUID weakTopicId,
+            String idempotencyKey) {
+        WeakTopic weakTopic = weakTopicRepository.findByIdAndUserId(weakTopicId, ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.WEAK_TOPIC_NOT_FOUND,
+                        "Weak Topic was not found."));
+        if (weakTopic.getStatus() == WeakTopicStatus.MASTERED) {
+            throw new BusinessException(
+                    ErrorCode.CONFLICT,
+                    "A mastered topic does not require another mastery check.");
+        }
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        if (normalizedKey != null) {
+            AiExecution existing = findMatchingIdempotentExecution(
+                    ownerId,
+                    normalizedKey,
+                    AiExecutionTargetType.WEAK_TOPIC,
+                    weakTopicId,
+                    AiPurpose.QUIZ_GENERATION,
+                    AiExecutionOperation.GENERATE);
+            if (existing != null) {
+                return AiExecutionResponse.from(existing);
+            }
+        }
+        AiExecution active = executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.WEAK_TOPIC,
+                        weakTopicId,
+                        AiPurpose.QUIZ_GENERATION,
+                        ACTIVE_STATUSES)
+                .orElse(null);
+        if (active != null) {
+            return AiExecutionResponse.from(active);
+        }
+        UserAccount owner = userAccountRepository.findById(ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.AUTHENTICATION_REQUIRED,
+                        "The authenticated account is unavailable."));
+        AiProviderConfig providerConfig = providerSelector.requireDefault(
+                AiPurpose.QUIZ_GENERATION);
+        AiExecution execution = executionRepository.saveAndFlush(AiExecution.queue(
+                owner,
+                providerConfig,
+                AiPurpose.QUIZ_GENERATION,
+                AiExecutionOperation.GENERATE,
+                AiExecutionTargetType.WEAK_TOPIC,
+                weakTopicId,
+                normalizedKey));
+        auditLogService.logAction(
+                ownerId,
+                owner.getEmail(),
+                AuditEventAction.AI_EXECUTION_QUEUED,
+                "AiExecution",
+                execution.getId().toString());
+        return AiExecutionResponse.from(execution);
     }
 
     private AiExecutionResponse submit(

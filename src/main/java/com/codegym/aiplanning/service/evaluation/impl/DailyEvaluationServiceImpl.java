@@ -1,12 +1,16 @@
 package com.codegym.aiplanning.service.evaluation.impl;
 
+import com.codegym.aiplanning.common.exception.BusinessException;
+import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.controller.evaluation.dto.DailyEvaluationResponse;
 import com.codegym.aiplanning.controller.evaluation.dto.QuizDetailResponse;
 import com.codegym.aiplanning.controller.evaluation.dto.SelfEvaluationRequest;
 import com.codegym.aiplanning.controller.evaluation.dto.SubmitQuizRequest;
+import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.entity.evaluation.DailyEvaluation;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanVersionRepository;
 import com.codegym.aiplanning.repository.evaluation.DailyEvaluationRepository;
 import com.codegym.aiplanning.service.evaluation.DailyEvaluationService;
 import com.codegym.aiplanning.service.evaluation.QuizGeneratorService;
@@ -26,18 +30,21 @@ public class DailyEvaluationServiceImpl implements DailyEvaluationService {
     private final DailyEvaluationRepository dailyEvaluationRepository;
     private final UserAccountRepository userAccountRepository;
     private final DailyPlanRepository dailyPlanRepository;
+    private final DailyPlanVersionRepository dailyPlanVersionRepository;
 
     public DailyEvaluationServiceImpl(
             DailyEvaluationPersistenceService persistenceService,
             QuizGeneratorService quizGeneratorService,
             DailyEvaluationRepository dailyEvaluationRepository,
             UserAccountRepository userAccountRepository,
-            DailyPlanRepository dailyPlanRepository) {
+            DailyPlanRepository dailyPlanRepository,
+            DailyPlanVersionRepository dailyPlanVersionRepository) {
         this.persistenceService = persistenceService;
         this.quizGeneratorService = quizGeneratorService;
         this.dailyEvaluationRepository = dailyEvaluationRepository;
         this.userAccountRepository = userAccountRepository;
         this.dailyPlanRepository = dailyPlanRepository;
+        this.dailyPlanVersionRepository = dailyPlanVersionRepository;
     }
 
     @Override
@@ -47,8 +54,12 @@ public class DailyEvaluationServiceImpl implements DailyEvaluationService {
 
     @Override
     public QuizDetailResponse generateDailyQuiz(UUID userId, UUID dailyPlanId, boolean forceNew) {
+        UUID dailyPlanVersionId = persistenceService.resolveActiveVersionId(
+                userId,
+                dailyPlanId);
         // Check if there is an unsubmitted GENERATED quiz
-        Optional<QuizDetailResponse> unsubmitted = persistenceService.findExistingGeneratedQuiz(userId, dailyPlanId);
+        Optional<QuizDetailResponse> unsubmitted = persistenceService
+                .findExistingGeneratedQuiz(userId, dailyPlanVersionId);
         if (unsubmitted.isPresent()) {
             return unsubmitted.get();
         }
@@ -62,15 +73,40 @@ public class DailyEvaluationServiceImpl implements DailyEvaluationService {
         }
 
         // Point 2: 3-Phase Execution (Phase 1: Read Tx)
-        DailyQuizContext context = persistenceService.prepareDailyQuizContext(userId, dailyPlanId);
+        DailyQuizContext context = persistenceService.prepareDailyQuizContext(
+                userId,
+                dailyPlanVersionId);
 
         // Point 2: Phase 2 (Non-Tx AI Generation & Schema Validation with retries)
         GeneratedQuizPlan generatedPlan = quizGeneratorService.generateDailyQuizQuestions(
                 userId, dailyPlanId, context.completedTopicItemIds());
 
         // Point 2: Phase 3 (Write Tx Save Quiz)
+        return persistenceService.saveGeneratedDailyQuiz(userId, context, generatedPlan);
+    }
+
+    @Override
+    public QuizDetailResponse generateDailyQuizWithProviderConfig(
+            UUID userId,
+            UUID dailyPlanVersionId,
+            AiProviderConfig providerConfig) {
+        Optional<QuizDetailResponse> existing = persistenceService
+                .findExistingGeneratedQuiz(userId, dailyPlanVersionId);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+        DailyQuizContext context = persistenceService.prepareDailyQuizContext(
+                userId,
+                dailyPlanVersionId);
+        GeneratedQuizPlan generatedPlan = quizGeneratorService.generateDailyQuizQuestions(
+                userId,
+                context.dailyPlan().getId(),
+                context.completedTopicItemIds(),
+                providerConfig);
         return persistenceService.saveGeneratedDailyQuiz(
-                userId, dailyPlanId, context.roadmap().getId(), generatedPlan);
+                userId,
+                context,
+                generatedPlan);
     }
 
     @Override
@@ -99,19 +135,29 @@ public class DailyEvaluationServiceImpl implements DailyEvaluationService {
     public DailyEvaluationResponse recordSelfEvaluation(
             UUID userId, UUID dailyPlanId, SelfEvaluationRequest request) {
         var dailyPlan = dailyPlanRepository.findByIdAndUserId(dailyPlanId, userId)
-                .orElseThrow(() -> new com.codegym.aiplanning.common.exception.BusinessException(
-                        com.codegym.aiplanning.common.exception.ErrorCode.RESOURCE_NOT_FOUND,
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.RESOURCE_NOT_FOUND,
                         "Daily plan not found."));
 
         var user = userAccountRepository.findById(userId)
-                .orElseThrow(() -> new com.codegym.aiplanning.common.exception.BusinessException(
-                        com.codegym.aiplanning.common.exception.ErrorCode.RESOURCE_NOT_FOUND,
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.RESOURCE_NOT_FOUND,
                         "User not found."));
 
-        DailyEvaluation evaluation = dailyEvaluationRepository.findByUserIdAndDailyPlanId(userId, dailyPlanId)
+        UUID versionId = persistenceService.resolveActiveVersionId(userId, dailyPlanId);
+        var dailyPlanVersion = dailyPlanVersionRepository.findByIdAndDailyPlanId(
+                        versionId,
+                        dailyPlanId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.RESOURCE_NOT_FOUND,
+                        "Daily Plan version not found."));
+
+        DailyEvaluation evaluation = dailyEvaluationRepository
+                .findByUserIdAndDailyPlanVersionId(userId, versionId)
                 .orElseGet(() -> DailyEvaluation.create(
                         user,
                         dailyPlan,
+                        dailyPlanVersion,
                         dailyPlan.getPlanDate(),
                         null,
                         null,
@@ -124,6 +170,7 @@ public class DailyEvaluationServiceImpl implements DailyEvaluationService {
         return new DailyEvaluationResponse(
                 saved.getId(),
                 saved.getDailyPlan().getId(),
+                saved.getDailyPlanVersion().getId(),
                 saved.getEvaluationDate(),
                 saved.getQuizScore(),
                 saved.getQuizPassed(),

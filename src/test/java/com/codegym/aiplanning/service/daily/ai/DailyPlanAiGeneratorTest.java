@@ -136,10 +136,10 @@ class DailyPlanAiGeneratorTest {
 
         assertThat(systemPromptCaptor.getValue())
                 .contains("unresolvedWeakTopics")
-                .contains("20%")
-                .contains("40%")
+                .contains("at most one REVIEW task")
+                .contains("30%")
                 .contains("REVIEW")
-                .contains("very beginning of the 'items' array");
+                .contains("placed first");
 
         assertThat(userPromptCaptor.getValue())
                 .contains("unresolvedWeakTopics")
@@ -226,7 +226,8 @@ class DailyPlanAiGeneratorTest {
 
     @Test
     void generate_parsesValidReviewTaskTargetingWeakTopicAtBeginningWithinBudget() {
-        // availableMinutes = 120, review task = 30 mins (25% -> in 20-40% range), new material = 60 mins -> total 90 mins <= 120 mins
+        // availableMinutes = 120, review task = 30 mins (25%, below the 30% cap),
+        // new material = 60 mins, so total planned time is 90 mins.
         String responseWithReviewFirst = """
                 {
                   "summary": "Kế hoạch ngày mới ưu tiên ôn tập kiến thức yếu",
@@ -266,9 +267,9 @@ class DailyPlanAiGeneratorTest {
         // Verify REVIEW task is first
         assertThat(result.response().items().get(0).category().name()).isEqualTo("REVIEW");
         assertThat(result.response().items().get(0).plannedMinutes()).isEqualTo(30);
-        // Verify 30 mins is 25% of 120 mins (within 20%-40%)
+        // Verify 30 minutes is 25% of 120 minutes and remains within the cap.
         double reviewPercentage = (double) result.response().items().get(0).plannedMinutes() / 120.0 * 100.0;
-        assertThat(reviewPercentage).isBetween(20.0, 40.0);
+        assertThat(reviewPercentage).isLessThanOrEqualTo(30.0);
     }
 
     private DailyPlanningContext context(int availableMinutes) {

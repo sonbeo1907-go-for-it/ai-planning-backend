@@ -111,7 +111,7 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
         ProgressContext progressContext = buildProgressContext(plan, userId);
         PreviousPlan previousPlan = buildPreviousPlan(plan, userId).orElse(null);
         List<WeakTopicPromptContext> unresolvedWeakTopics = weakTopicContextResolver
-                .resolveUnresolvedWeakTopics(userId, roadmap.getId());
+                .resolveUnresolvedWeakTopics(userId, activeRoadmapVersion.getId());
 
         List<UnfinishedTask> unfinishedTasks = previousPlan == null
                 ? List.of()

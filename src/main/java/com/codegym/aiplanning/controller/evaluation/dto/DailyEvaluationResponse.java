@@ -10,6 +10,7 @@ import java.util.UUID;
 public record DailyEvaluationResponse(
         UUID id,
         UUID dailyPlanId,
+        UUID dailyPlanVersionId,
         LocalDate evaluationDate,
         BigDecimal quizScore,
         Boolean quizPassed,

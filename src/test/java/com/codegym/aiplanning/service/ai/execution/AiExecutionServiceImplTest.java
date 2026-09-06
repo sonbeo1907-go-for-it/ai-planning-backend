@@ -21,6 +21,8 @@ import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.daily.DailyPlan;
 import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
+import com.codegym.aiplanning.entity.evaluation.WeakTopic;
+import com.codegym.aiplanning.entity.evaluation.WeakTopicStatus;
 import com.codegym.aiplanning.repository.ai.AiExecutionInputRepository;
 import com.codegym.aiplanning.repository.ai.AiExecutionRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
@@ -28,6 +30,8 @@ import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
 import com.codegym.aiplanning.service.ai.AiProviderSelector;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.roadmap.impl.AiRoadmapPersistenceService;
+import com.codegym.aiplanning.service.evaluation.impl.DailyEvaluationPersistenceService;
+import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -64,6 +68,12 @@ class AiExecutionServiceImplTest {
     @Mock
     private AuditLogService auditLogService;
 
+    @Mock
+    private DailyEvaluationPersistenceService evaluationPersistenceService;
+
+    @Mock
+    private WeakTopicRepository weakTopicRepository;
+
     private AiExecutionServiceImpl service;
     private UUID ownerId;
     private UUID roadmapId;
@@ -79,7 +89,9 @@ class AiExecutionServiceImplTest {
                 providerSelector,
                 roadmapPersistenceService,
                 dailyPlanRepository,
-                auditLogService);
+                auditLogService,
+                evaluationPersistenceService,
+                weakTopicRepository);
         ownerId = UUID.randomUUID();
         roadmapId = UUID.randomUUID();
         owner = org.mockito.Mockito.mock(UserAccount.class);
@@ -221,6 +233,113 @@ class AiExecutionServiceImplTest {
         assertEquals(dailyPlanId, response.targetId());
         assertEquals(AiExecutionStatus.QUEUED, response.status());
         verify(roadmapPersistenceService, never()).prepare(any(), any(), any());
+    }
+
+    @Test
+    void dailyQuizGenerationQueuesAgainstTheExactActiveVersion() {
+        UUID dailyPlanId = UUID.randomUUID();
+        UUID dailyPlanVersionId = UUID.randomUUID();
+        UUID executionId = UUID.randomUUID();
+        when(evaluationPersistenceService.resolveActiveVersionId(ownerId, dailyPlanId))
+                .thenReturn(dailyPlanVersionId);
+        when(executionRepository
+                        .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                                ownerId,
+                                AiExecutionTargetType.DAILY_PLAN_VERSION,
+                                dailyPlanVersionId,
+                                AiPurpose.QUIZ_GENERATION,
+                                List.of(AiExecutionStatus.QUEUED, AiExecutionStatus.RUNNING)))
+                .thenReturn(Optional.empty());
+        when(userAccountRepository.findById(ownerId)).thenReturn(Optional.of(owner));
+        when(owner.getEmail()).thenReturn("user@example.com");
+        when(providerSelector.requireDefault(AiPurpose.QUIZ_GENERATION))
+                .thenReturn(providerConfig);
+        when(executionRepository.saveAndFlush(any(AiExecution.class)))
+                .thenAnswer(invocation -> persistedExecution(
+                        invocation.getArgument(0), executionId));
+
+        AiExecutionResponse response = service.submitDailyQuizGeneration(
+                ownerId,
+                dailyPlanId,
+                "daily-quiz-request-1");
+
+        assertEquals(AiPurpose.QUIZ_GENERATION, response.purpose());
+        assertEquals(AiExecutionTargetType.DAILY_PLAN_VERSION, response.targetType());
+        assertEquals(dailyPlanVersionId, response.targetId());
+        verify(evaluationPersistenceService).prepareDailyQuizContext(
+                ownerId,
+                dailyPlanVersionId);
+    }
+
+    @Test
+    void masteryGenerationRejectsAWeakTopicNotOwnedByTheUser() {
+        UUID weakTopicId = UUID.randomUUID();
+        when(weakTopicRepository.findByIdAndUserId(weakTopicId, ownerId))
+                .thenReturn(Optional.empty());
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.submitMasteryCheckGeneration(
+                        ownerId,
+                        weakTopicId,
+                        "mastery-request-1"));
+
+        assertEquals(ErrorCode.WEAK_TOPIC_NOT_FOUND, exception.errorCode());
+        verify(providerSelector, never()).requireDefault(any());
+        verify(executionRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void masteryGenerationQueuesAnOwnerScopedWeakTopicExecution() {
+        UUID weakTopicId = UUID.randomUUID();
+        UUID executionId = UUID.randomUUID();
+        WeakTopic weakTopic = org.mockito.Mockito.mock(WeakTopic.class);
+        when(weakTopicRepository.findByIdAndUserId(weakTopicId, ownerId))
+                .thenReturn(Optional.of(weakTopic));
+        when(executionRepository
+                        .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                                ownerId,
+                                AiExecutionTargetType.WEAK_TOPIC,
+                                weakTopicId,
+                                AiPurpose.QUIZ_GENERATION,
+                                List.of(AiExecutionStatus.QUEUED, AiExecutionStatus.RUNNING)))
+                .thenReturn(Optional.empty());
+        when(userAccountRepository.findById(ownerId)).thenReturn(Optional.of(owner));
+        when(owner.getEmail()).thenReturn("user@example.com");
+        when(providerSelector.requireDefault(AiPurpose.QUIZ_GENERATION))
+                .thenReturn(providerConfig);
+        when(executionRepository.saveAndFlush(any(AiExecution.class)))
+                .thenAnswer(invocation -> persistedExecution(
+                        invocation.getArgument(0), executionId));
+
+        AiExecutionResponse response = service.submitMasteryCheckGeneration(
+                ownerId,
+                weakTopicId,
+                "mastery-request-1");
+
+        assertEquals(AiPurpose.QUIZ_GENERATION, response.purpose());
+        assertEquals(AiExecutionTargetType.WEAK_TOPIC, response.targetType());
+        assertEquals(weakTopicId, response.targetId());
+    }
+
+    @Test
+    void masteryGenerationRejectsAnAlreadyMasteredTopicBeforeQueuing() {
+        UUID weakTopicId = UUID.randomUUID();
+        WeakTopic weakTopic = org.mockito.Mockito.mock(WeakTopic.class);
+        when(weakTopic.getStatus()).thenReturn(WeakTopicStatus.MASTERED);
+        when(weakTopicRepository.findByIdAndUserId(weakTopicId, ownerId))
+                .thenReturn(Optional.of(weakTopic));
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.submitMasteryCheckGeneration(
+                        ownerId,
+                        weakTopicId,
+                        "mastered-topic-request"));
+
+        assertEquals(ErrorCode.CONFLICT, exception.errorCode());
+        verify(providerSelector, never()).requireDefault(any());
+        verify(executionRepository, never()).saveAndFlush(any());
     }
 
     private AiExecution persistedExecution(AiExecution execution, UUID executionId) {

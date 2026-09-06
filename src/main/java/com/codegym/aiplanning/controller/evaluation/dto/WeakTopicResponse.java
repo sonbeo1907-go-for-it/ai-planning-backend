@@ -11,6 +11,7 @@ import java.util.UUID;
 public record WeakTopicResponse(
         UUID id,
         UUID roadmapId,
+        UUID roadmapVersionId,
         UUID roadmapItemId,
         String topicTitle,
         String milestoneTitle,

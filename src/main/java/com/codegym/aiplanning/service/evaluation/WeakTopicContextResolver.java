@@ -14,5 +14,7 @@ public interface WeakTopicContextResolver {
             Double lastScore
     ) {}
 
-    List<WeakTopicPromptContext> resolveUnresolvedWeakTopics(UUID userId, UUID roadmapId);
+    List<WeakTopicPromptContext> resolveUnresolvedWeakTopics(
+            UUID userId,
+            UUID roadmapVersionId);
 }

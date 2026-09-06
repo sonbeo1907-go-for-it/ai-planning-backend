@@ -9,8 +9,9 @@ import static org.mockito.Mockito.when;
 
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
-import com.codegym.aiplanning.controller.roadmap.dto.RoadmapVersionResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
+import com.codegym.aiplanning.controller.evaluation.dto.QuizDetailResponse;
+import com.codegym.aiplanning.controller.roadmap.dto.RoadmapVersionResponse;
 import com.codegym.aiplanning.entity.ai.AiExecution;
 import com.codegym.aiplanning.entity.ai.AiExecutionOperation;
 import com.codegym.aiplanning.entity.ai.AiExecutionResultType;
@@ -23,6 +24,8 @@ import com.codegym.aiplanning.repository.ai.AiExecutionRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.daily.DailyPlanService;
 import com.codegym.aiplanning.service.roadmap.AiRoadmapGeneratorService;
+import com.codegym.aiplanning.service.evaluation.DailyEvaluationService;
+import com.codegym.aiplanning.service.evaluation.WeakTopicService;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -56,6 +59,12 @@ class AiExecutionWorkerTest {
     @Mock
     private TransactionTemplate transactionTemplate;
 
+    @Mock
+    private DailyEvaluationService dailyEvaluationService;
+
+    @Mock
+    private WeakTopicService weakTopicService;
+
     private AiExecutionWorker worker;
     private UUID executionId;
     private UUID ownerId;
@@ -71,7 +80,9 @@ class AiExecutionWorkerTest {
                 roadmapGeneratorService,
                 dailyPlanService,
                 auditLogService,
-                transactionTemplate);
+                transactionTemplate,
+                dailyEvaluationService,
+                weakTopicService);
         executionId = UUID.randomUUID();
         ownerId = UUID.randomUUID();
         roadmapId = UUID.randomUUID();
@@ -203,5 +214,73 @@ class AiExecutionWorkerTest {
                 any(Instant.class));
         verify(roadmapGeneratorService, never())
                 .generateWithProviderConfig(any(), any(), any());
+    }
+
+    @Test
+    void dailyPlanVersionExecutionPublishesAnExactQuizResult() {
+        UUID quizId = UUID.randomUUID();
+        QuizDetailResponse quiz = mock(QuizDetailResponse.class);
+        when(quiz.id()).thenReturn(quizId);
+        when(execution.getTargetType()).thenReturn(AiExecutionTargetType.DAILY_PLAN_VERSION);
+        prepareClaimedExecution();
+        when(dailyEvaluationService.generateDailyQuizWithProviderConfig(
+                        ownerId,
+                        roadmapId,
+                        providerConfig))
+                .thenReturn(quiz);
+
+        worker.executeAsync(executionId);
+
+        verify(dailyEvaluationService).generateDailyQuizWithProviderConfig(
+                ownerId,
+                roadmapId,
+                providerConfig);
+        verify(execution).markSucceeded(
+                eq(AiExecutionResultType.QUIZ),
+                eq(quizId),
+                any(Instant.class));
+        verify(roadmapGeneratorService, never())
+                .generateWithProviderConfig(any(), any(), any());
+    }
+
+    @Test
+    void weakTopicExecutionPublishesAnExactMasteryQuizResult() {
+        UUID quizId = UUID.randomUUID();
+        QuizDetailResponse quiz = mock(QuizDetailResponse.class);
+        when(quiz.id()).thenReturn(quizId);
+        when(execution.getTargetType()).thenReturn(AiExecutionTargetType.WEAK_TOPIC);
+        prepareClaimedExecution();
+        when(weakTopicService.generateMasteryCheckQuizWithProviderConfig(
+                        ownerId,
+                        roadmapId,
+                        providerConfig))
+                .thenReturn(quiz);
+
+        worker.executeAsync(executionId);
+
+        verify(weakTopicService).generateMasteryCheckQuizWithProviderConfig(
+                ownerId,
+                roadmapId,
+                providerConfig);
+        verify(execution).markSucceeded(
+                eq(AiExecutionResultType.QUIZ),
+                eq(quizId),
+                any(Instant.class));
+        verify(dailyEvaluationService, never())
+                .generateDailyQuizWithProviderConfig(any(), any(), any());
+    }
+
+    private void prepareClaimedExecution() {
+        when(executionRepository.claimQueued(
+                        eq(executionId),
+                        any(Instant.class),
+                        any(Instant.class)))
+                .thenReturn(1);
+        when(executionRepository.findJobContextById(executionId))
+                .thenReturn(Optional.of(execution));
+        when(inputRepository.findById(executionId)).thenReturn(Optional.empty());
+        when(executionRepository.findByIdForUpdate(executionId))
+                .thenReturn(Optional.of(execution));
+        when(execution.isRunning()).thenReturn(true);
     }
 }

@@ -3,6 +3,7 @@ package com.codegym.aiplanning.service.evaluation.impl;
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.entity.ai.AiPurpose;
+import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.service.ai.AiClientService;
 import com.codegym.aiplanning.service.evaluation.QuizGeneratorService.GeneratedQuizPlan;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -40,6 +41,12 @@ public class QuizAiGenerator {
     ) {}
 
     public GeneratedQuizPlan generateDailyQuiz(List<CompletedTopicInfo> completedTopics) {
+        return generateDailyQuiz(completedTopics, null);
+    }
+
+    public GeneratedQuizPlan generateDailyQuiz(
+            List<CompletedTopicInfo> completedTopics,
+            AiProviderConfig providerConfig) {
         Set<UUID> validTopicIds = completedTopics.stream()
                 .map(CompletedTopicInfo::topicId)
                 .collect(java.util.stream.Collectors.toSet());
@@ -48,10 +55,15 @@ public class QuizAiGenerator {
         String userPrompt = buildDailyQuizUserPrompt(completedTopics);
 
         for (int attempt = 0; attempt <= MAX_SCHEMA_RETRIES; attempt++) {
-            String rawResponse = aiClientService.generateContent(
-                    AiPurpose.DAILY_PLAN_REVIEW,
-                    systemPrompt,
-                    retryPrompt(userPrompt, attempt));
+            String rawResponse = providerConfig == null
+                    ? aiClientService.generateContent(
+                            AiPurpose.QUIZ_GENERATION,
+                            systemPrompt,
+                            retryPrompt(userPrompt, attempt))
+                    : aiClientService.generateContent(
+                            providerConfig,
+                            systemPrompt,
+                            retryPrompt(userPrompt, attempt));
             try {
                 return schemaValidator.validate(rawResponse, validTopicIds);
             } catch (InvalidAiQuizResponseException exception) {
@@ -66,15 +78,26 @@ public class QuizAiGenerator {
     }
 
     public GeneratedQuizPlan generateMasteryCheck(CompletedTopicInfo topicInfo) {
+        return generateMasteryCheck(topicInfo, null);
+    }
+
+    public GeneratedQuizPlan generateMasteryCheck(
+            CompletedTopicInfo topicInfo,
+            AiProviderConfig providerConfig) {
         Set<UUID> validTopicIds = Set.of(topicInfo.topicId());
         String systemPrompt = buildMasteryCheckSystemPrompt();
         String userPrompt = buildDailyQuizUserPrompt(List.of(topicInfo));
 
         for (int attempt = 0; attempt <= MAX_SCHEMA_RETRIES; attempt++) {
-            String rawResponse = aiClientService.generateContent(
-                    AiPurpose.DAILY_PLAN_REVIEW,
-                    systemPrompt,
-                    retryPrompt(userPrompt, attempt));
+            String rawResponse = providerConfig == null
+                    ? aiClientService.generateContent(
+                            AiPurpose.QUIZ_GENERATION,
+                            systemPrompt,
+                            retryPrompt(userPrompt, attempt))
+                    : aiClientService.generateContent(
+                            providerConfig,
+                            systemPrompt,
+                            retryPrompt(userPrompt, attempt));
             try {
                 return schemaValidator.validate(rawResponse, validTopicIds);
             } catch (InvalidAiQuizResponseException exception) {

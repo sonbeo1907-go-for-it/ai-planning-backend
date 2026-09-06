@@ -179,4 +179,55 @@ class QuizSchemaValidatorTest {
                 .isInstanceOf(InvalidAiQuizResponseException.class)
                 .hasMessageContaining("correctOption must be A, B, C, or D");
     }
+
+    @Test
+    void shouldRejectMissingTopicIdEvenWhenOnlyOneTopicIsAllowed() {
+        String json = validThreeQuestionJson("")
+                .replace("\"topicId\": \"\",", "");
+
+        assertThatThrownBy(() -> validator.validate(json, Set.of(topicId)))
+                .isInstanceOf(InvalidAiQuizResponseException.class)
+                .hasMessageContaining("topicId must be a non-blank UUID string");
+    }
+
+    @Test
+    void shouldRejectTopicOutsideTheAllowedContext() {
+        String json = validThreeQuestionJson(UUID.randomUUID().toString());
+
+        assertThatThrownBy(() -> validator.validate(json, Set.of(topicId)))
+                .isInstanceOf(InvalidAiQuizResponseException.class)
+                .hasMessageContaining("is not in the list of completed topics");
+    }
+
+    @Test
+    void shouldRejectDuplicateOptionKeys() {
+        String json = validThreeQuestionJson(topicId.toString())
+                .replace("{ \"key\": \"D\", \"text\": \"D\" }",
+                        "{ \"key\": \"C\", \"text\": \"D\" }");
+
+        assertThatThrownBy(() -> validator.validate(json, Set.of(topicId)))
+                .isInstanceOf(InvalidAiQuizResponseException.class)
+                .hasMessageContaining("exactly once");
+    }
+
+    private String validThreeQuestionJson(String questionTopicId) {
+        String question = """
+                {
+                  "topicId": "%s",
+                  "questionText": "Question",
+                  "options": [
+                    { "key": "A", "text": "A" },
+                    { "key": "B", "text": "B" },
+                    { "key": "C", "text": "C" },
+                    { "key": "D", "text": "D" }
+                  ],
+                  "correctOption": "A",
+                  "explanation": "Explanation"
+                }
+                """.formatted(questionTopicId);
+        return "{\"questions\":[%s,%s,%s]}".formatted(
+                question,
+                question,
+                question);
+    }
 }

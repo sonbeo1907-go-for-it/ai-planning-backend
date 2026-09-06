@@ -4,6 +4,7 @@ import com.codegym.aiplanning.common.entity.BaseEntity;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
+import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -26,6 +27,10 @@ public class WeakTopic extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "roadmap_id", nullable = false)
     private Roadmap roadmap;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "roadmap_version_id", nullable = false)
+    private RoadmapVersion roadmapVersion;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "roadmap_item_id", nullable = false)
@@ -56,6 +61,7 @@ public class WeakTopic extends BaseEntity {
     public static WeakTopic create(
             UserAccount user,
             Roadmap roadmap,
+            RoadmapVersion roadmapVersion,
             RoadmapItem roadmapItem,
             WeakTopicTrigger triggerSource,
             BigDecimal quizScore,
@@ -64,6 +70,7 @@ public class WeakTopic extends BaseEntity {
         WeakTopic weakTopic = new WeakTopic();
         weakTopic.user = user;
         weakTopic.roadmap = roadmap;
+        weakTopic.roadmapVersion = roadmapVersion;
         weakTopic.roadmapItem = roadmapItem;
         weakTopic.status = WeakTopicStatus.UNRESOLVED;
         weakTopic.triggerSource = triggerSource;
@@ -111,6 +118,10 @@ public class WeakTopic extends BaseEntity {
 
     public RoadmapItem getRoadmapItem() {
         return roadmapItem;
+    }
+
+    public RoadmapVersion getRoadmapVersion() {
+        return roadmapVersion;
     }
 
     public WeakTopicStatus getStatus() {

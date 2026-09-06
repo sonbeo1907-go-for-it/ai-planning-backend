@@ -1,5 +1,8 @@
 package com.codegym.aiplanning.service.evaluation.impl;
 
+import com.codegym.aiplanning.common.exception.BusinessException;
+import com.codegym.aiplanning.common.exception.ErrorCode;
+import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import com.codegym.aiplanning.service.evaluation.QuizGeneratorService;
@@ -23,28 +26,69 @@ public class QuizGeneratorServiceImpl implements QuizGeneratorService {
 
     @Override
     public GeneratedQuizPlan generateDailyQuizQuestions(
-            UUID userId, UUID dailyPlanId, List<UUID> completedTopicItemIds) {
-        List<RoadmapItem> items = roadmapItemRepository.findAllById(completedTopicItemIds);
+            UUID userId,
+            UUID dailyPlanId,
+            List<UUID> completedTopicItemIds) {
+        return generateDailyQuizQuestions(
+                userId,
+                dailyPlanId,
+                completedTopicItemIds,
+                null);
+    }
+
+    @Override
+    public GeneratedQuizPlan generateDailyQuizQuestions(
+            UUID userId,
+            UUID dailyPlanId,
+            List<UUID> completedTopicItemIds,
+            AiProviderConfig providerConfig) {
+        List<RoadmapItem> items = roadmapItemRepository.findAllOwnedByIds(
+                completedTopicItemIds,
+                userId);
+        long requestedTopicCount = completedTopicItemIds.stream()
+                .distinct()
+                .count();
+        if (items.size() != requestedTopicCount) {
+            throw new BusinessException(
+                    ErrorCode.RESOURCE_NOT_FOUND,
+                    "One or more completed Roadmap topics were not found.");
+        }
+
         List<CompletedTopicInfo> topicInfos = items.stream()
                 .map(item -> new CompletedTopicInfo(
                         item.getId(),
                         item.getTitle(),
                         item.getDescription() != null ? item.getDescription() : ""))
                 .toList();
-
-        return quizAiGenerator.generateDailyQuiz(topicInfos);
+        return quizAiGenerator.generateDailyQuiz(topicInfos, providerConfig);
     }
 
     @Override
     public GeneratedQuizPlan generateMasteryCheckQuestions(
-            UUID userId, UUID weakTopicId, UUID roadmapItemId) {
-        RoadmapItem item = roadmapItemRepository.findById(roadmapItemId)
-                .orElse(null);
+            UUID userId,
+            UUID weakTopicId,
+            UUID roadmapItemId) {
+        return generateMasteryCheckQuestions(
+                userId,
+                weakTopicId,
+                roadmapItemId,
+                null);
+    }
+
+    @Override
+    public GeneratedQuizPlan generateMasteryCheckQuestions(
+            UUID userId,
+            UUID weakTopicId,
+            UUID roadmapItemId,
+            AiProviderConfig providerConfig) {
+        RoadmapItem item = roadmapItemRepository.findOwnedById(roadmapItemId, userId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.RESOURCE_NOT_FOUND,
+                        "Roadmap topic was not found."));
         CompletedTopicInfo topicInfo = new CompletedTopicInfo(
                 roadmapItemId,
-                item != null ? item.getTitle() : "Chủ đề ôn tập",
-                item != null && item.getDescription() != null ? item.getDescription() : "");
-
-        return quizAiGenerator.generateMasteryCheck(topicInfo);
+                item.getTitle(),
+                item.getDescription() != null ? item.getDescription() : "");
+        return quizAiGenerator.generateMasteryCheck(topicInfo, providerConfig);
     }
 }

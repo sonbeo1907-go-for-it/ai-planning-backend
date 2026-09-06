@@ -7,6 +7,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -42,6 +43,7 @@ public class QuizSchemaValidator {
             }
 
             List<QuizOptionDto> options = new ArrayList<>();
+            Set<String> optionKeys = new HashSet<>();
             for (int j = 0; j < 4; j++) {
                 JsonNode optNode = optionsNode.get(j);
                 if (!optNode.isObject()) {
@@ -50,6 +52,9 @@ public class QuizSchemaValidator {
                 String key = requireText(optNode, "key", 10, "option.key").toUpperCase();
                 if (!VALID_OPTION_KEYS.contains(key)) {
                     throw invalid("Option key must be A, B, C, or D.");
+                }
+                if (!optionKeys.add(key)) {
+                    throw invalid("Question option keys must contain A, B, C, and D exactly once.");
                 }
                 String text = requireText(optNode, "text", 500, "option.text");
                 options.add(new QuizOptionDto(key, text));
@@ -77,20 +82,12 @@ public class QuizSchemaValidator {
     private UUID extractAndValidateTopicId(JsonNode qNode, Set<UUID> validTopicIds) {
         JsonNode topicIdNode = qNode.get("topicId");
         if (topicIdNode == null || !topicIdNode.isTextual() || topicIdNode.textValue().isBlank()) {
-            // If topicId is omitted or blank, and only 1 validTopicId exists, fallback to it
-            if (validTopicIds != null && validTopicIds.size() == 1) {
-                return validTopicIds.iterator().next();
-            }
             throw invalid("Question topicId must be a non-blank UUID string.");
         }
 
         try {
             UUID topicId = UUID.fromString(topicIdNode.textValue().trim());
             if (validTopicIds != null && !validTopicIds.isEmpty() && !validTopicIds.contains(topicId)) {
-                // If AI picked a topicId not in allowed list, fallback to one of validTopicIds if available
-                if (validTopicIds.size() == 1) {
-                    return validTopicIds.iterator().next();
-                }
                 throw invalid("Question topicId " + topicId + " is not in the list of completed topics.");
             }
             return topicId;

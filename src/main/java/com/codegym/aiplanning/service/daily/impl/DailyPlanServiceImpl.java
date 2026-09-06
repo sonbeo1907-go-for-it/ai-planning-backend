@@ -51,6 +51,7 @@ import com.codegym.aiplanning.service.daily.ai.DailyPlanAiGenerator;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext;
 import com.codegym.aiplanning.service.daily.ai.PlanningContextBuilder;
 import com.codegym.aiplanning.service.daily.DailyPlanPersistenceService;
+import com.codegym.aiplanning.service.evaluation.WeakTopicService;
 
 @Service
 public class DailyPlanServiceImpl implements DailyPlanService {
@@ -66,6 +67,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
     private final PlanningContextBuilder contextBuilder;
     private final DailyPlanAiGenerator aiGenerator;
     private final DailyPlanPersistenceService persistenceService;
+    private final WeakTopicService weakTopicService;
 
     public DailyPlanServiceImpl(
             DailyPlanRepository dailyPlanRepository,
@@ -78,7 +80,8 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             AuditLogService auditLogService,
             PlanningContextBuilder contextBuilder,
             DailyPlanAiGenerator aiGenerator,
-            DailyPlanPersistenceService persistenceService) {
+            DailyPlanPersistenceService persistenceService,
+            WeakTopicService weakTopicService) {
         this.dailyPlanRepository = dailyPlanRepository;
         this.dailyPlanVersionRepository = dailyPlanVersionRepository;
         this.dailyPlanItemRepository = dailyPlanItemRepository;
@@ -90,6 +93,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         this.contextBuilder = contextBuilder;
         this.aiGenerator = aiGenerator;
         this.persistenceService = persistenceService;
+        this.weakTopicService = weakTopicService;
     }
 
     @Override
@@ -438,12 +442,9 @@ public class DailyPlanServiceImpl implements DailyPlanService {
 
         UUID roadmapItemId = request.roadmapItemId();
         if (roadmapItemId != null) {
-            RoadmapItem roadmapItem = roadmapItemRepository.findById(roadmapItemId)
+            RoadmapItem roadmapItem = roadmapItemRepository.findOwnedById(roadmapItemId, userId)
                     .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Roadmap item not found"));
             Roadmap roadmap = roadmapItem.getRoadmapVersion().getRoadmap();
-            if (!roadmap.getOwner().getId().equals(userId)) {
-                throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Roadmap item not found");
-            }
             if (plan.getRoadmapId() == null) {
                 plan.setRoadmapId(roadmap.getId());
                 dailyPlanRepository.save(plan);
@@ -580,6 +581,15 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         dailyPlanVersionRepository.saveAndFlush(version);
         plan.activateVersion(versionId);
         dailyPlanRepository.save(plan);
+
+        items.stream()
+                .filter(item -> item.getCategory()
+                        == com.codegym.aiplanning.entity.daily.DailyTaskCategory.REVIEW)
+                .map(DailyPlanItem::getRoadmapItemId)
+                .filter(java.util.Objects::nonNull)
+                .forEach(roadmapItemId -> weakTopicService.markInReviewByRoadmapItem(
+                        userId,
+                        roadmapItemId));
 
         auditLogService.logAction(
                 userId,

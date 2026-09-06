@@ -12,7 +12,9 @@ public interface DailyEvaluationRepository extends JpaRepository<DailyEvaluation
 
     Optional<DailyEvaluation> findByDailyPlanId(UUID dailyPlanId);
 
-    Optional<DailyEvaluation> findByUserIdAndDailyPlanId(UUID userId, UUID dailyPlanId);
+    Optional<DailyEvaluation> findByUserIdAndDailyPlanVersionId(
+            UUID userId,
+            UUID dailyPlanVersionId);
 
     Optional<DailyEvaluation> findByUserIdAndEvaluationDate(UUID userId, LocalDate evaluationDate);
 }

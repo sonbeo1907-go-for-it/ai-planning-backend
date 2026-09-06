@@ -218,7 +218,7 @@ class DatabasePlanningContextBuilderTest {
                 "Week 1",
                 2,
                 75.0);
-        when(weakTopicContextResolver.resolveUnresolvedWeakTopics(userId, roadmapId))
+        when(weakTopicContextResolver.resolveUnresolvedWeakTopics(userId, activeRoadmapVersionId))
                 .thenReturn(List.of(weakTopicContext));
 
         DailyPlanningContext context = builder.buildContext(targetPlanId, userId);
@@ -286,7 +286,7 @@ class DatabasePlanningContextBuilderTest {
         when(roadmapItemRepository.findAllByRoadmapVersionIdOrderByOrderIndexAsc(activeRoadmapVersionId)).thenReturn(List.of(milestone, topic));
         when(progressEntryRepository.findByUserIdOrderByRecordedAtDesc(org.mockito.ArgumentMatchers.eq(userId), any(Pageable.class))).thenReturn(List.of());
         when(dailyPlanRepository.findFirstByUserIdAndRoadmapIdAndPlanDateBeforeOrderByPlanDateDesc(userId, roadmapId, targetDate)).thenReturn(Optional.empty());
-        when(weakTopicContextResolver.resolveUnresolvedWeakTopics(userId, roadmapId)).thenReturn(List.of());
+        when(weakTopicContextResolver.resolveUnresolvedWeakTopics(userId, activeRoadmapVersionId)).thenReturn(List.of());
 
         DailyPlanningContext context = builder.buildContext(targetPlanId, userId);
 
@@ -331,7 +331,7 @@ class DatabasePlanningContextBuilderTest {
 
         WeakTopicPromptContext wt1 = new WeakTopicPromptContext(UUID.randomUUID(), topic.getId(), "Spring Security", "Week 1", 2, 70.0);
         WeakTopicPromptContext wt2 = new WeakTopicPromptContext(UUID.randomUUID(), UUID.randomUUID(), "JPA Relationships", "Week 1", 1, 50.0);
-        when(weakTopicContextResolver.resolveUnresolvedWeakTopics(userId, roadmapId)).thenReturn(List.of(wt1, wt2));
+        when(weakTopicContextResolver.resolveUnresolvedWeakTopics(userId, activeRoadmapVersionId)).thenReturn(List.of(wt1, wt2));
 
         DailyPlanningContext context = builder.buildContext(targetPlanId, userId);
 

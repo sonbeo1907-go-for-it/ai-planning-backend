@@ -2,16 +2,20 @@ package com.codegym.aiplanning.controller.evaluation;
 
 import com.codegym.aiplanning.common.api.ApiResponse;
 import com.codegym.aiplanning.common.constant.ApiConstant;
+import com.codegym.aiplanning.controller.ai.dto.AiExecutionResponse;
 import com.codegym.aiplanning.controller.evaluation.dto.DailyEvaluationResponse;
 import com.codegym.aiplanning.controller.evaluation.dto.QuizDetailResponse;
 import com.codegym.aiplanning.controller.evaluation.dto.SelfEvaluationRequest;
 import com.codegym.aiplanning.controller.evaluation.dto.SubmitQuizRequest;
+import com.codegym.aiplanning.service.ai.execution.AiExecutionService;
 import com.codegym.aiplanning.service.evaluation.DailyEvaluationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.net.URI;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -19,8 +23,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -30,21 +34,43 @@ import org.springframework.web.bind.annotation.RestController;
 public class DailyEvaluationController {
 
     private final DailyEvaluationService dailyEvaluationService;
+    private final AiExecutionService aiExecutionService;
 
-    public DailyEvaluationController(DailyEvaluationService dailyEvaluationService) {
+    public DailyEvaluationController(
+            DailyEvaluationService dailyEvaluationService,
+            AiExecutionService aiExecutionService) {
         this.dailyEvaluationService = dailyEvaluationService;
+        this.aiExecutionService = aiExecutionService;
     }
 
     @PostMapping(ApiConstant.DAILY_PLAN_QUIZ_GENERATE)
     @Operation(
-            summary = "Generate AI Micro-Quiz for daily plan (US-EVL-01)",
-            description = "Generates 3-5 multiple-choice questions from completed tasks. Returns existing unsubmitted quiz if already generated.")
-    public ApiResponse<QuizDetailResponse> generateDailyQuiz(
+            summary = "Queue AI Micro-Quiz generation for a daily plan (US-EVL-01)",
+            description = "Queues asynchronous generation from completed tasks in the exact active DailyPlanVersion.")
+    public ResponseEntity<ApiResponse<AiExecutionResponse>> generateDailyQuiz(
             @PathVariable UUID planId,
-            @RequestParam(required = false, defaultValue = "false") boolean forceNew,
+            @RequestHeader(value = "Idempotency-Key", required = false)
+                    String idempotencyKey,
             @AuthenticationPrincipal Jwt jwt) {
         UUID userId = UUID.fromString(jwt.getSubject());
-        return ApiResponse.of(dailyEvaluationService.generateDailyQuiz(userId, planId, forceNew));
+        AiExecutionResponse execution = aiExecutionService.submitDailyQuizGeneration(
+                userId,
+                planId,
+                idempotencyKey);
+        return ResponseEntity.accepted()
+                .location(URI.create(ApiConstant.AI_EXECUTIONS + "/" + execution.id()))
+                .body(ApiResponse.of(execution));
+    }
+
+    @GetMapping(ApiConstant.DAILY_PLAN_QUIZ_CURRENT_EXECUTION)
+    @Operation(summary = "Get the latest daily quiz AI execution")
+    public ApiResponse<AiExecutionResponse> getLatestDailyQuizExecution(
+            @PathVariable UUID planId,
+            @AuthenticationPrincipal Jwt jwt) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        return ApiResponse.of(aiExecutionService.getLatestDailyQuizExecution(
+                userId,
+                planId));
     }
 
     @PostMapping(ApiConstant.DAILY_PLAN_QUIZ_SUBMIT)
@@ -74,7 +100,7 @@ public class DailyEvaluationController {
     @GetMapping(ApiConstant.DAILY_PLAN_BY_ID + "/quizzes")
     @Operation(
             summary = "Get all daily quizzes for daily plan (US-EVL-01)",
-            description = "Returns all quiz attempts for this daily plan ordered by creation time descending.")
+            description = "Returns all quiz definitions for this daily plan ordered by creation time descending.")
     public ApiResponse<List<QuizDetailResponse>> getAllDailyQuizzes(
             @PathVariable UUID planId,
             @AuthenticationPrincipal Jwt jwt) {

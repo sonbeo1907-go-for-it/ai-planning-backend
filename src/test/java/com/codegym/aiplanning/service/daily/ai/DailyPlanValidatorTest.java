@@ -60,6 +60,48 @@ class DailyPlanValidatorTest {
                 .hasMessageContaining("REVIEW, NEW_MATERIAL, or PRACTICE");
     }
 
+    @Test
+    void validateResponse_rejectsMoreThanOneReviewTask() {
+        DailyPlanAiResponse response = new DailyPlanAiResponse(
+                "Plan",
+                List.of(
+                        reviewItem("Review one", 10),
+                        reviewItem("Review two", 8),
+                        practiceItem("Practice", 20)),
+                List.of());
+
+        assertThatThrownBy(() -> validator.validateResponse(response, context))
+                .isInstanceOf(InvalidAiDailyPlanResponseException.class)
+                .hasMessageContaining("at most one REVIEW");
+    }
+
+    @Test
+    void validateResponse_rejectsReviewAboveThirtyPercentOfAvailableTime() {
+        DailyPlanAiResponse response = new DailyPlanAiResponse(
+                "Plan",
+                List.of(
+                        reviewItem("Review", 19),
+                        practiceItem("Practice", 20)),
+                List.of());
+
+        assertThatThrownBy(() -> validator.validateResponse(response, context))
+                .isInstanceOf(InvalidAiDailyPlanResponseException.class)
+                .hasMessageContaining("exceeds 30%");
+    }
+
+    @Test
+    void validateResponse_acceptsOneReviewAtThirtyPercent() {
+        DailyPlanAiResponse response = new DailyPlanAiResponse(
+                "Plan",
+                List.of(
+                        reviewItem("Review", 18),
+                        practiceItem("Practice", 30)),
+                List.of());
+
+        assertThatCode(() -> validator.validateResponse(response, context))
+                .doesNotThrowAnyException();
+    }
+
     private DailyPlanAiResponse response(int plannedMinutes, UUID itemId) {
         return new DailyPlanAiResponse(
                 "Plan",
@@ -72,6 +114,32 @@ class DailyPlanValidatorTest {
                         null,
                         null)),
                 List.of());
+    }
+
+    private DailyPlanAiResponse.AiPlanItemDto reviewItem(
+            String title,
+            int plannedMinutes) {
+        return new DailyPlanAiResponse.AiPlanItemDto(
+                roadmapItemId,
+                title,
+                null,
+                DailyTaskCategory.REVIEW,
+                plannedMinutes,
+                null,
+                null);
+    }
+
+    private DailyPlanAiResponse.AiPlanItemDto practiceItem(
+            String title,
+            int plannedMinutes) {
+        return new DailyPlanAiResponse.AiPlanItemDto(
+                roadmapItemId,
+                title,
+                null,
+                DailyTaskCategory.PRACTICE,
+                plannedMinutes,
+                null,
+                null);
     }
 
     private DailyPlanningContext context(int availableMinutes) {

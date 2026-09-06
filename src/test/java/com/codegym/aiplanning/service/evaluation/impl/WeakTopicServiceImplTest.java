@@ -13,16 +13,22 @@ import static org.mockito.Mockito.when;
 
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
+import com.codegym.aiplanning.controller.evaluation.dto.WeakTopicResponse;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.evaluation.WeakTopic;
 import com.codegym.aiplanning.entity.evaluation.WeakTopicStatus;
 import com.codegym.aiplanning.entity.evaluation.WeakTopicTrigger;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
+import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
+import com.codegym.aiplanning.repository.evaluation.QuizRepository;
+import com.codegym.aiplanning.service.evaluation.QuizGeneratorService;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.codegym.aiplanning.service.evaluation.WeakTopicContextResolver.WeakTopicPromptContext;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -46,9 +52,17 @@ class WeakTopicServiceImplTest {
     @Mock
     private UserAccountRepository userAccountRepository;
     @Mock
+    private RoadmapItemRepository roadmapItemRepository;
+    @Mock
     private RoadmapRepository roadmapRepository;
     @Mock
-    private RoadmapItemRepository roadmapItemRepository;
+    private QuizRepository quizRepository;
+    @Mock
+    private QuizGeneratorService quizGeneratorService;
+    @Mock
+    private DailyEvaluationPersistenceService evaluationPersistenceService;
+    @Mock
+    private ObjectMapper objectMapper;
 
     @InjectMocks
     private WeakTopicServiceImpl weakTopicService;
@@ -138,6 +152,9 @@ class WeakTopicServiceImplTest {
     @Test
     void processEvaluationResult_existingWeakTopic_updatesTriggerAndSaves() {
         WeakTopic existingTopic = mock(WeakTopic.class);
+        Roadmap existingRoadmap = mock(Roadmap.class);
+        when(existingRoadmap.getId()).thenReturn(roadmapId);
+        when(existingTopic.getRoadmap()).thenReturn(existingRoadmap);
         when(weakTopicRepository.findByUserIdAndRoadmapItemId(userId, roadmapItemId)).thenReturn(Optional.of(existingTopic));
 
         weakTopicService.processEvaluationResult(userId, roadmapId, roadmapItemId, new BigDecimal("50.00"), 1);
@@ -176,7 +193,7 @@ class WeakTopicServiceImplTest {
         when(mockItem.getParent()).thenReturn(mockParent);
         when(mockParent.getTitle()).thenReturn("Parent Milestone");
 
-        when(weakTopicRepository.findWithItemByUserIdAndRoadmapIdAndStatusIn(
+        when(weakTopicRepository.findWithItemByUserIdAndRoadmapVersionIdAndStatusIn(
                 eq(userId), eq(roadmapId), eq(Collections.singletonList(WeakTopicStatus.UNRESOLVED))))
                 .thenReturn(List.of(mockTopic));
 
@@ -203,7 +220,7 @@ class WeakTopicServiceImplTest {
         
         when(mockItem.getParent()).thenReturn(null);
 
-        when(weakTopicRepository.findWithItemByUserIdAndRoadmapIdAndStatusIn(
+        when(weakTopicRepository.findWithItemByUserIdAndRoadmapVersionIdAndStatusIn(
                 eq(userId), eq(roadmapId), eq(Collections.singletonList(WeakTopicStatus.UNRESOLVED))))
                 .thenReturn(List.of(mockTopic));
 
@@ -215,9 +232,55 @@ class WeakTopicServiceImplTest {
         assertNull(result.get(0).lastRating());
     }
 
+    @Test
+    void getWeakTopics_ownedRoadmap_returnsOwnerScopedTopics() {
+        Roadmap roadmap = mock(Roadmap.class);
+        when(roadmapRepository.findByIdAndOwnerId(roadmapId, userId))
+                .thenReturn(Optional.of(roadmap));
+        when(weakTopicRepository.findWithItemByUserIdAndRoadmapIdAndStatusIn(
+                eq(userId),
+                eq(roadmapId),
+                eq(List.of(WeakTopicStatus.values()))))
+                .thenReturn(List.of());
+
+        List<WeakTopicResponse> result = weakTopicService.getWeakTopics(
+                userId,
+                roadmapId,
+                Collections.emptySet());
+
+        assertEquals(List.of(), result);
+        verify(weakTopicRepository).findWithItemByUserIdAndRoadmapIdAndStatusIn(
+                userId,
+                roadmapId,
+                List.of(WeakTopicStatus.values()));
+    }
+
+    @Test
+    void getWeakTopics_unownedRoadmap_throwsWithoutQueryingWeakTopics() {
+        when(roadmapRepository.findByIdAndOwnerId(roadmapId, userId))
+                .thenReturn(Optional.empty());
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> weakTopicService.getWeakTopics(
+                        userId,
+                        roadmapId,
+                        Collections.emptySet()));
+
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, exception.errorCode());
+        verify(weakTopicRepository, never())
+                .findWithItemByUserIdAndRoadmapIdAndStatusIn(any(), any(), any());
+    }
+
     private void setupMockEntities() {
+        Roadmap roadmap = mock(Roadmap.class);
+        RoadmapVersion version = mock(RoadmapVersion.class);
+        RoadmapItem item = mock(RoadmapItem.class);
+        when(roadmap.getId()).thenReturn(roadmapId);
+        when(version.getRoadmap()).thenReturn(roadmap);
+        when(item.getRoadmapVersion()).thenReturn(version);
+        when(item.getItemType()).thenReturn(RoadmapItemType.TOPIC);
         when(userAccountRepository.findById(userId)).thenReturn(Optional.of(mock(UserAccount.class)));
-        when(roadmapRepository.findById(roadmapId)).thenReturn(Optional.of(mock(Roadmap.class)));
-        when(roadmapItemRepository.findById(roadmapItemId)).thenReturn(Optional.of(mock(RoadmapItem.class)));
+        when(roadmapItemRepository.findOwnedById(roadmapItemId, userId)).thenReturn(Optional.of(item));
     }
 }

@@ -7,12 +7,18 @@ import com.codegym.aiplanning.controller.evaluation.dto.SubmitQuizRequest;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 
 public interface DailyEvaluationService {
 
     QuizDetailResponse generateDailyQuiz(UUID userId, UUID dailyPlanId);
 
     QuizDetailResponse generateDailyQuiz(UUID userId, UUID dailyPlanId, boolean forceNew);
+
+    QuizDetailResponse generateDailyQuizWithProviderConfig(
+            UUID userId,
+            UUID dailyPlanVersionId,
+            AiProviderConfig providerConfig);
 
     QuizDetailResponse submitDailyQuiz(
             UUID userId, UUID dailyPlanId, UUID quizId, SubmitQuizRequest request);
@@ -28,4 +34,3 @@ public interface DailyEvaluationService {
 
     DailyEvaluationResponse getDailyEvaluation(UUID userId, UUID dailyPlanId);
 }
-

@@ -9,6 +9,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 
 public interface WeakTopicService {
 
@@ -24,8 +25,15 @@ public interface WeakTopicService {
 
     QuizDetailResponse generateMasteryCheckQuiz(UUID userId, UUID weakTopicId);
 
+    QuizDetailResponse generateMasteryCheckQuizWithProviderConfig(
+            UUID userId,
+            UUID weakTopicId,
+            AiProviderConfig providerConfig);
+
     MasteryCheckResultResponse submitMasteryCheck(
             UUID userId, UUID weakTopicId, UUID quizId, SubmitQuizRequest request);
 
     void markInReview(UUID userId, UUID weakTopicId);
+
+    void markInReviewByRoadmapItem(UUID userId, UUID roadmapItemId);
 }

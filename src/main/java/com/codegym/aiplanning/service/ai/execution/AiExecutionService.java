@@ -30,4 +30,18 @@ public interface AiExecutionService {
 
     AiExecutionResponse getLatestDailyPlanExecution(
             UUID ownerId, UUID dailyPlanId);
+
+    AiExecutionResponse submitDailyQuizGeneration(
+            UUID ownerId,
+            UUID dailyPlanId,
+            String idempotencyKey);
+
+    AiExecutionResponse getLatestDailyQuizExecution(
+            UUID ownerId,
+            UUID dailyPlanId);
+
+    AiExecutionResponse submitMasteryCheckGeneration(
+            UUID ownerId,
+            UUID weakTopicId,
+            String idempotencyKey);
 }

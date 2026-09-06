@@ -50,6 +50,7 @@ import com.codegym.aiplanning.service.daily.ai.DailyPlanAiGenerator;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext;
 import com.codegym.aiplanning.service.daily.ai.PlanningContextBuilder;
 import com.codegym.aiplanning.service.daily.DailyPlanPersistenceService;
+import com.codegym.aiplanning.service.evaluation.WeakTopicService;
 import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -89,6 +90,8 @@ class DailyPlanServiceTest {
     private DailyPlanAiGenerator aiGenerator;
     @Mock
     private DailyPlanPersistenceService persistenceService;
+    @Mock
+    private WeakTopicService weakTopicService;
 
     private DailyPlanServiceImpl dailyPlanService;
 
@@ -108,7 +111,8 @@ class DailyPlanServiceTest {
                 auditLogService,
                 contextBuilder,
                 aiGenerator,
-                persistenceService);
+                persistenceService,
+                weakTopicService);
 
         userId = UUID.randomUUID();
         userJwt = Jwt.withTokenValue("mock-token")
@@ -438,7 +442,8 @@ class DailyPlanServiceTest {
         when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
                 .thenReturn(Optional.of(version));
         when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId)).thenReturn(List.of());
-        when(roadmapItemRepository.findById(roadmapItemId)).thenReturn(Optional.of(topic));
+        when(roadmapItemRepository.findOwnedById(roadmapItemId, userId))
+                .thenReturn(Optional.of(topic));
         when(dailyPlanItemRepository.save(any(DailyPlanItem.class))).thenAnswer(inv -> {
             DailyPlanItem item = inv.getArgument(0);
             ReflectionTestUtils.setField(item, "id", UUID.randomUUID());

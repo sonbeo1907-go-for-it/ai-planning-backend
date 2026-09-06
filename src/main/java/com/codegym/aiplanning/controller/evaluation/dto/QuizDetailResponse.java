@@ -12,6 +12,7 @@ import java.util.UUID;
 public record QuizDetailResponse(
         UUID id,
         UUID dailyPlanId,
+        UUID dailyPlanVersionId,
         UUID roadmapId,
         QuizType quizType,
         QuizStatus status,

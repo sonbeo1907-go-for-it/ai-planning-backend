@@ -16,16 +16,27 @@ public interface WeakTopicRepository extends JpaRepository<WeakTopic, UUID> {
 
     Optional<WeakTopic> findByIdAndUserId(UUID id, UUID userId);
 
+    @Query("""
+            SELECT wt FROM WeakTopic wt
+            JOIN FETCH wt.user user
+            JOIN FETCH wt.roadmap roadmap
+            JOIN FETCH wt.roadmapVersion roadmapVersion
+            JOIN FETCH wt.roadmapItem item
+            LEFT JOIN FETCH item.parent parent
+            WHERE wt.id = :id AND user.id = :userId
+            """)
+    Optional<WeakTopic> findWithContextByIdAndUserId(
+            @Param("id") UUID id,
+            @Param("userId") UUID userId);
+
     Optional<WeakTopic> findByUserIdAndRoadmapItemId(UUID userId, UUID roadmapItemId);
 
     List<WeakTopic> findByUserIdAndRoadmapIdOrderByCreatedAtDesc(UUID userId, UUID roadmapId);
 
-    List<WeakTopic> findByUserIdAndRoadmapIdAndStatusInOrderByCreatedAtDesc(
-            UUID userId, UUID roadmapId, Collection<WeakTopicStatus> statuses);
-
     @Query("""
-            SELECT wt FROM WeakTopic wt
+            SELECT DISTINCT wt FROM WeakTopic wt
             JOIN FETCH wt.roadmapItem ri
+            LEFT JOIN FETCH ri.parent parent
             WHERE wt.user.id = :userId
               AND wt.roadmap.id = :roadmapId
               AND wt.status IN :statuses
@@ -34,5 +45,19 @@ public interface WeakTopicRepository extends JpaRepository<WeakTopic, UUID> {
     List<WeakTopic> findWithItemByUserIdAndRoadmapIdAndStatusIn(
             @Param("userId") UUID userId,
             @Param("roadmapId") UUID roadmapId,
+            @Param("statuses") Collection<WeakTopicStatus> statuses);
+
+    @Query("""
+            SELECT DISTINCT wt FROM WeakTopic wt
+            JOIN FETCH wt.roadmapItem item
+            LEFT JOIN FETCH item.parent parent
+            WHERE wt.user.id = :userId
+              AND wt.roadmapVersion.id = :roadmapVersionId
+              AND wt.status IN :statuses
+            ORDER BY wt.unresolvedAt DESC
+            """)
+    List<WeakTopic> findWithItemByUserIdAndRoadmapVersionIdAndStatusIn(
+            @Param("userId") UUID userId,
+            @Param("roadmapVersionId") UUID roadmapVersionId,
             @Param("statuses") Collection<WeakTopicStatus> statuses);
 }

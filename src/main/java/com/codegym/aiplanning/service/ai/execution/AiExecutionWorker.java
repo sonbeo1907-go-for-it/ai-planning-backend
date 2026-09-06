@@ -14,6 +14,8 @@ import com.codegym.aiplanning.repository.ai.AiExecutionRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.roadmap.AiRoadmapGeneratorService;
 import com.codegym.aiplanning.service.daily.DailyPlanService;
+import com.codegym.aiplanning.service.evaluation.DailyEvaluationService;
+import com.codegym.aiplanning.service.evaluation.WeakTopicService;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -35,6 +37,8 @@ public class AiExecutionWorker {
     private final DailyPlanService dailyPlanService;
     private final AuditLogService auditLogService;
     private final TransactionTemplate transactionTemplate;
+    private final DailyEvaluationService dailyEvaluationService;
+    private final WeakTopicService weakTopicService;
 
     public AiExecutionWorker(
             AiExecutionRepository executionRepository,
@@ -42,13 +46,17 @@ public class AiExecutionWorker {
             AiRoadmapGeneratorService roadmapGeneratorService,
             DailyPlanService dailyPlanService,
             AuditLogService auditLogService,
-            TransactionTemplate transactionTemplate) {
+            TransactionTemplate transactionTemplate,
+            DailyEvaluationService dailyEvaluationService,
+            WeakTopicService weakTopicService) {
         this.executionRepository = executionRepository;
         this.inputRepository = inputRepository;
         this.roadmapGeneratorService = roadmapGeneratorService;
         this.dailyPlanService = dailyPlanService;
         this.auditLogService = auditLogService;
         this.transactionTemplate = transactionTemplate;
+        this.dailyEvaluationService = dailyEvaluationService;
+        this.weakTopicService = weakTopicService;
     }
 
     @Async("aiGenerationExecutor")
@@ -75,6 +83,20 @@ public class AiExecutionWorker {
     }
 
     private GenerationResult execute(JobContext context) {
+        if (context.targetType() == AiExecutionTargetType.WEAK_TOPIC) {
+            UUID quizId = weakTopicService.generateMasteryCheckQuizWithProviderConfig(
+                    context.ownerId(),
+                    context.targetId(),
+                    context.providerConfig()).id();
+            return new GenerationResult(AiExecutionResultType.QUIZ, quizId);
+        }
+        if (context.targetType() == AiExecutionTargetType.DAILY_PLAN_VERSION) {
+            UUID quizId = dailyEvaluationService.generateDailyQuizWithProviderConfig(
+                    context.ownerId(),
+                    context.targetId(),
+                    context.providerConfig()).id();
+            return new GenerationResult(AiExecutionResultType.QUIZ, quizId);
+        }
         if (context.targetType() == AiExecutionTargetType.DAILY_PLAN) {
             UUID versionId = dailyPlanService.generateAiDraftVersionWithProviderConfig(
                     context.targetId(),
