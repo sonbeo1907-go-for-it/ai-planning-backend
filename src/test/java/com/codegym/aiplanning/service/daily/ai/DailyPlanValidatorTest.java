@@ -65,9 +65,8 @@ class DailyPlanValidatorTest {
         DailyPlanAiResponse response = new DailyPlanAiResponse(
                 "Plan",
                 List.of(
-                        reviewItem("Review one", 10),
-                        reviewItem("Review two", 8),
-                        practiceItem("Practice", 20)),
+                        item("Review one", DailyTaskCategory.REVIEW, 10),
+                        item("Review two", DailyTaskCategory.REVIEW, 5)),
                 List.of());
 
         assertThatThrownBy(() -> validator.validateResponse(response, context))
@@ -80,8 +79,8 @@ class DailyPlanValidatorTest {
         DailyPlanAiResponse response = new DailyPlanAiResponse(
                 "Plan",
                 List.of(
-                        reviewItem("Review", 19),
-                        practiceItem("Practice", 20)),
+                        item("Long review", DailyTaskCategory.REVIEW, 19),
+                        item("Practice", DailyTaskCategory.PRACTICE, 20)),
                 List.of());
 
         assertThatThrownBy(() -> validator.validateResponse(response, context))
@@ -94,12 +93,39 @@ class DailyPlanValidatorTest {
         DailyPlanAiResponse response = new DailyPlanAiResponse(
                 "Plan",
                 List.of(
-                        reviewItem("Review", 18),
-                        practiceItem("Practice", 30)),
+                        item("Review", DailyTaskCategory.REVIEW, 18),
+                        item("Practice", DailyTaskCategory.PRACTICE, 30)),
                 List.of());
 
         assertThatCode(() -> validator.validateResponse(response, context))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void validateResponse_rejectsCompletedTopicAsNewMaterial() {
+        DailyPlanPromptContext promptContext = new DailyPlanPromptContext(
+                LocalDate.now(),
+                "UTC",
+                60,
+                "Roadmap",
+                List.of(new DailyPlanPromptContext.RelevantTopic(
+                        roadmapItemId,
+                        "Completed topic",
+                        60,
+                        DailyPlanPromptContext.TopicPriority.REVIEW_DUE,
+                        true)),
+                null,
+                List.of(),
+                List.of(),
+                List.of());
+        DailyPlanAiResponse response = new DailyPlanAiResponse(
+                "Plan",
+                List.of(item("Repeat as new", DailyTaskCategory.NEW_MATERIAL, 15)),
+                List.of());
+
+        assertThatThrownBy(() -> validator.validateResponse(response, promptContext))
+                .isInstanceOf(InvalidAiDailyPlanResponseException.class)
+                .hasMessageContaining("only as REVIEW");
     }
 
     private DailyPlanAiResponse response(int plannedMinutes, UUID itemId) {
@@ -116,27 +142,15 @@ class DailyPlanValidatorTest {
                 List.of());
     }
 
-    private DailyPlanAiResponse.AiPlanItemDto reviewItem(
+    private DailyPlanAiResponse.AiPlanItemDto item(
             String title,
+            DailyTaskCategory category,
             int plannedMinutes) {
         return new DailyPlanAiResponse.AiPlanItemDto(
                 roadmapItemId,
                 title,
                 null,
-                DailyTaskCategory.REVIEW,
-                plannedMinutes,
-                null,
-                null);
-    }
-
-    private DailyPlanAiResponse.AiPlanItemDto practiceItem(
-            String title,
-            int plannedMinutes) {
-        return new DailyPlanAiResponse.AiPlanItemDto(
-                roadmapItemId,
-                title,
-                null,
-                DailyTaskCategory.PRACTICE,
+                category,
                 plannedMinutes,
                 null,
                 null);
@@ -163,6 +177,8 @@ class DailyPlanValidatorTest {
                                 null,
                                 60,
                                 0))),
+                List.of(),
+                List.of(),
                 List.of(),
                 List.of(),
                 List.of(),

@@ -2,6 +2,7 @@ package com.codegym.aiplanning.repository.daily;
 
 import com.codegym.aiplanning.entity.daily.DailyPlan;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import jakarta.persistence.LockModeType;
@@ -39,5 +40,8 @@ public interface DailyPlanRepository extends JpaRepository<DailyPlan, UUID> {
             Pageable pageable);
 
     Optional<DailyPlan> findFirstByUserIdAndRoadmapIdAndPlanDateBeforeOrderByPlanDateDesc(
+            UUID userId, UUID roadmapId, LocalDate planDate);
+
+    List<DailyPlan> findByUserIdAndRoadmapIdAndPlanDateBeforeOrderByPlanDateDesc(
             UUID userId, UUID roadmapId, LocalDate planDate);
 }

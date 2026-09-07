@@ -24,6 +24,7 @@ import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapVersionRepository;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext.PreviousPlan;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext.ProgressSignal;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext.LatestTopicOutcome;
 import com.codegym.aiplanning.service.evaluation.WeakTopicContextResolver;
 import com.codegym.aiplanning.service.evaluation.WeakTopicContextResolver.WeakTopicPromptContext;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext.RoadmapContext;
@@ -31,22 +32,20 @@ import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext.RoadmapTopic
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext.UnfinishedTask;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext.WeaknessSignal;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
 
-    private static final int MAX_PROGRESS_ENTRIES = 100;
     private static final int MAX_PROGRESS_SIGNALS = 30;
 
     private final DailyPlanRepository dailyPlanRepository;
@@ -125,6 +124,7 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
                 planningVersion.getAvailableMinutes(),
                 roadmapContext,
                 progressContext.progressSignals(),
+                progressContext.latestTopicOutcomes(),
                 unfinishedTasks,
                 progressContext.weaknessSignals(),
                 unresolvedWeakTopics,
@@ -143,6 +143,9 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
 
         List<RoadmapTopic> topics = items.stream()
                 .filter(item -> item.getItemType() == RoadmapItemType.TOPIC)
+                .sorted(Comparator
+                        .comparingInt((RoadmapItem item) -> milestoneOrder(item, milestones))
+                        .thenComparingInt(RoadmapItem::getOrderIndex))
                 .map(item -> {
                     RoadmapItem milestone = item.getParent() == null
                             ? null
@@ -171,35 +174,50 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
                 topics);
     }
 
+    private int milestoneOrder(
+            RoadmapItem topic,
+            Map<UUID, RoadmapItem> milestones) {
+        if (topic.getParent() == null) {
+            return Integer.MAX_VALUE;
+        }
+        RoadmapItem milestone = milestones.get(topic.getParent().getId());
+        return milestone == null ? Integer.MAX_VALUE : milestone.getOrderIndex();
+    }
+
     private ProgressContext buildProgressContext(DailyPlan targetPlan, UUID userId) {
-        List<ProgressEntry> entries = progressEntryRepository.findByUserIdOrderByRecordedAtDesc(
-                userId,
-                PageRequest.of(0, MAX_PROGRESS_ENTRIES));
-        if (entries.isEmpty()) {
-            return new ProgressContext(List.of(), List.of());
+        List<DailyPlan> sourcePlans = dailyPlanRepository
+                .findByUserIdAndRoadmapIdAndPlanDateBeforeOrderByPlanDateDesc(
+                        userId,
+                        targetPlan.getRoadmapId(),
+                        targetPlan.getPlanDate());
+        if (sourcePlans.isEmpty()) {
+            return ProgressContext.empty();
         }
 
-        Map<UUID, DailyPlanItem> itemsById = dailyPlanItemRepository
-                .findAllById(entries.stream().map(ProgressEntry::getDailyPlanItemId).distinct().toList())
-                .stream()
-                .collect(Collectors.toMap(DailyPlanItem::getId, Function.identity()));
-        Map<UUID, DailyPlanVersion> versionsById = dailyPlanVersionRepository
-                .findAllById(itemsById.values().stream()
-                        .map(DailyPlanItem::getDailyPlanVersionId)
-                        .distinct()
-                        .toList())
-                .stream()
-                .collect(Collectors.toMap(DailyPlanVersion::getId, Function.identity()));
-        Map<UUID, DailyPlan> plansById = dailyPlanRepository
-                .findAllById(versionsById.values().stream()
-                        .map(DailyPlanVersion::getDailyPlanId)
-                        .distinct()
-                        .toList())
-                .stream()
+        Map<UUID, DailyPlan> plansById = sourcePlans.stream()
                 .collect(Collectors.toMap(DailyPlan::getId, Function.identity()));
+        List<DailyPlanVersion> versions = dailyPlanVersionRepository.findByDailyPlanIdIn(
+                sourcePlans.stream().map(DailyPlan::getId).toList());
+        if (versions.isEmpty()) {
+            return ProgressContext.empty();
+        }
 
-        List<ProgressSignal> signals = new ArrayList<>();
-        Map<String, WeaknessSignal> weaknessByTopic = new LinkedHashMap<>();
+        Map<UUID, DailyPlanVersion> versionsById = versions.stream()
+                .collect(Collectors.toMap(DailyPlanVersion::getId, Function.identity()));
+        List<DailyPlanItem> items = dailyPlanItemRepository.findByDailyPlanVersionIds(
+                versions.stream().map(DailyPlanVersion::getId).toList());
+        if (items.isEmpty()) {
+            return ProgressContext.empty();
+        }
+
+        Map<UUID, DailyPlanItem> itemsById = items.stream()
+                .collect(Collectors.toMap(DailyPlanItem::getId, Function.identity()));
+        List<ProgressEntry> entries = progressEntryRepository
+                .findByUserIdAndDailyPlanItemIdInOrderByRecordedAtDesc(
+                        userId,
+                        items.stream().map(DailyPlanItem::getId).toList());
+
+        List<ProgressSignal> scopedSignals = new ArrayList<>();
         for (ProgressEntry entry : entries) {
             DailyPlanItem item = itemsById.get(entry.getDailyPlanItemId());
             DailyPlanVersion version = item == null
@@ -208,7 +226,7 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
             DailyPlan sourcePlan = version == null
                     ? null
                     : plansById.get(version.getDailyPlanId());
-            if (!belongsToContext(sourcePlan, targetPlan)) {
+            if (sourcePlan == null) {
                 continue;
             }
 
@@ -226,25 +244,76 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
                     entry.getUnderstandingRating(),
                     entry.getActualResult(),
                     entry.getRecordedAt());
-            if (signals.size() < MAX_PROGRESS_SIGNALS) {
-                signals.add(signal);
-            }
-
-            weaknessSignal(signal).ifPresent(weakness -> weaknessByTopic.putIfAbsent(
-                    weaknessKey(signal),
-                    weakness));
+            scopedSignals.add(signal);
         }
 
+        List<ProgressSignal> orderedSignals = orderByRecordedAtDesc(scopedSignals);
         return new ProgressContext(
-                List.copyOf(signals),
-                List.copyOf(weaknessByTopic.values()));
+                orderedSignals.stream().limit(MAX_PROGRESS_SIGNALS).toList(),
+                deriveLatestTopicOutcomes(orderedSignals, itemsById, versionsById, plansById),
+                deriveWeaknessSignals(orderedSignals));
     }
 
-    private boolean belongsToContext(DailyPlan sourcePlan, DailyPlan targetPlan) {
-        return sourcePlan != null
-                && !sourcePlan.getId().equals(targetPlan.getId())
-                && Objects.equals(sourcePlan.getRoadmapId(), targetPlan.getRoadmapId())
-                && !sourcePlan.getPlanDate().isAfter(targetPlan.getPlanDate());
+    List<LatestTopicOutcome> deriveLatestTopicOutcomes(
+            List<ProgressSignal> signals,
+            Map<UUID, DailyPlanItem> itemsById,
+            Map<UUID, DailyPlanVersion> versionsById,
+            Map<UUID, DailyPlan> plansById) {
+        Map<UUID, LatestTopicOutcome> latestByRoadmapItem = new LinkedHashMap<>();
+        for (ProgressSignal signal : orderByRecordedAtDesc(signals)) {
+            if (signal.roadmapItemId() == null
+                    || latestByRoadmapItem.containsKey(signal.roadmapItemId())) {
+                continue;
+            }
+
+            DailyPlanItem item = itemsById.get(signal.dailyPlanItemId());
+            DailyPlanVersion version = item == null
+                    ? null
+                    : versionsById.get(item.getDailyPlanVersionId());
+            DailyPlan plan = version == null
+                    ? null
+                    : plansById.get(version.getDailyPlanId());
+            latestByRoadmapItem.put(
+                    signal.roadmapItemId(),
+                    new LatestTopicOutcome(
+                            signal.roadmapItemId(),
+                            signal.status(),
+                            signal.completionPercentage(),
+                            signal.difficulty(),
+                            signal.understandingRating(),
+                            signal.recordedAt(),
+                            plan == null ? null : plan.getPlanDate()));
+        }
+        return List.copyOf(latestByRoadmapItem.values());
+    }
+
+    /**
+     * Determines weakness from the most recent outcome for each Roadmap Item.
+     *
+     * <p>An earlier difficult, skipped, or partially-completed attempt must not override a later
+     * successful attempt with healthy self-assessment. Manual Daily Plan tasks without a Roadmap
+     * Item remain available as unfinished-task context, but cannot establish roadmap-topic weakness.
+     */
+    List<WeaknessSignal> deriveWeaknessSignals(List<ProgressSignal> signals) {
+        Map<UUID, ProgressSignal> latestByRoadmapItem = new LinkedHashMap<>();
+        for (ProgressSignal signal : orderByRecordedAtDesc(signals)) {
+            if (signal.roadmapItemId() != null) {
+                latestByRoadmapItem.putIfAbsent(signal.roadmapItemId(), signal);
+            }
+        }
+
+        return latestByRoadmapItem.values().stream()
+                .map(this::weaknessSignal)
+                .flatMap(Optional::stream)
+                .toList();
+    }
+
+    private List<ProgressSignal> orderByRecordedAtDesc(List<ProgressSignal> signals) {
+        return signals.stream()
+                .sorted(Comparator.comparing(
+                        ProgressSignal::recordedAt,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .toList();
     }
 
     private Optional<PreviousPlan> buildPreviousPlan(DailyPlan targetPlan, UUID userId) {
@@ -314,13 +383,6 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
                 String.join("; ", reasons)));
     }
 
-    private String weaknessKey(ProgressSignal signal) {
-        UUID identifier = signal.roadmapItemId() == null
-                ? signal.dailyPlanItemId()
-                : signal.roadmapItemId();
-        return identifier.toString();
-    }
-
     private DailyTaskStatus toTaskStatus(ProgressEntryStatus status) {
         return DailyTaskStatus.valueOf(status.name());
     }
@@ -331,5 +393,11 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
 
     private record ProgressContext(
             List<ProgressSignal> progressSignals,
-            List<WeaknessSignal> weaknessSignals) {}
+            List<LatestTopicOutcome> latestTopicOutcomes,
+            List<WeaknessSignal> weaknessSignals) {
+
+        private static ProgressContext empty() {
+            return new ProgressContext(List.of(), List.of(), List.of());
+        }
+    }
 }

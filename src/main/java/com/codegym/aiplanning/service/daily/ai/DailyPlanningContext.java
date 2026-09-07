@@ -15,12 +15,25 @@ public record DailyPlanningContext(
         int availableMinutes,
         RoadmapContext roadmap,
         List<ProgressSignal> recentProgress,
+        List<LatestTopicOutcome> latestTopicOutcomes,
         List<UnfinishedTask> unfinishedTasks,
         List<WeaknessSignal> weaknessSignals,
         List<WeakTopicPromptContext> unresolvedWeakTopics,
         PreviousPlan previousPlan) {
 
     public DailyPlanningContext {
+        if (recentProgress == null) {
+            recentProgress = List.of();
+        }
+        if (latestTopicOutcomes == null) {
+            latestTopicOutcomes = List.of();
+        }
+        if (unfinishedTasks == null) {
+            unfinishedTasks = List.of();
+        }
+        if (weaknessSignals == null) {
+            weaknessSignals = List.of();
+        }
         if (unresolvedWeakTopics == null) {
             unresolvedWeakTopics = List.of();
         }
@@ -45,6 +58,7 @@ public record DailyPlanningContext(
                 availableMinutes,
                 roadmap,
                 recentProgress,
+                List.of(),
                 unfinishedTasks,
                 weaknessSignals,
                 List.of(),
@@ -81,6 +95,21 @@ public record DailyPlanningContext(
             Integer understandingRating,
             String actualResult,
             Instant recordedAt) {}
+
+    /**
+     * The most recently recorded outcome for one Roadmap Item within this Roadmap.
+     *
+     * <p>This application-side snapshot is rebuilt from progress history for every generation. It
+     * is not a new persistence model and is not sent to the provider as raw history.
+     */
+    public record LatestTopicOutcome(
+            UUID roadmapItemId,
+            DailyTaskStatus status,
+            int completionPercentage,
+            Integer difficulty,
+            Integer understandingRating,
+            Instant recordedAt,
+            LocalDate planDate) {}
 
     public record UnfinishedTask(
             UUID dailyPlanItemId,

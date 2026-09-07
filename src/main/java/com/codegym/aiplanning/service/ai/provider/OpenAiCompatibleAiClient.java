@@ -11,6 +11,7 @@ import com.codegym.aiplanning.service.ai.AiCredentialSelector;
 import com.codegym.aiplanning.service.ai.AiProviderSelector;
 import com.codegym.aiplanning.service.ai.ResolvedAiCredential;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
@@ -21,6 +22,8 @@ import org.springframework.web.client.RestClientResponseException;
 
 @Component
 public class OpenAiCompatibleAiClient implements AiClientService {
+
+    private static final String DEEPSEEK_PROVIDER_CODE = "DEEPSEEK";
 
     private final AiProviderSelector providerSelector;
     private final AiCredentialSelector credentialSelector;
@@ -59,7 +62,7 @@ public class OpenAiCompatibleAiClient implements AiClientService {
                     .uri(ProviderConnectionSupport.endpoint(
                             provider.getBaseUrl(), "/chat/completions"))
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + credential.secret())
-                    .body(requestBody(config, systemPrompt, userPrompt))
+                    .body(requestBody(config, provider, systemPrompt, userPrompt))
                     .retrieve()
                     .body(CompletionResponse.class);
             return requireContent(response);
@@ -91,16 +94,24 @@ public class OpenAiCompatibleAiClient implements AiClientService {
     }
 
     private Map<String, Object> requestBody(
-            AiProviderConfig config, String systemPrompt, String userPrompt) {
-        return Map.of(
-                "model", config.getModel(),
-                "messages", List.of(
-                        Map.of("role", "system", "content", systemPrompt),
-                        Map.of("role", "user", "content", userPrompt)),
-                "max_tokens", config.getMaxOutputTokens(),
-                "temperature", config.getTemperature(),
-                "response_format", Map.of("type", "json_object"),
-                "stream", false);
+            AiProviderConfig config,
+            AiProvider provider,
+            String systemPrompt,
+            String userPrompt) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("model", config.getModel());
+        request.put("messages", List.of(
+                Map.of("role", "system", "content", systemPrompt),
+                Map.of("role", "user", "content", userPrompt)));
+        request.put("max_tokens", config.getMaxOutputTokens());
+        request.put("temperature", config.getTemperature());
+        request.put("response_format", Map.of("type", "json_object"));
+        request.put("stream", false);
+
+        if (DEEPSEEK_PROVIDER_CODE.equalsIgnoreCase(provider.getCode())) {
+            request.put("thinking", Map.of("type", "disabled"));
+        }
+        return request;
     }
 
     private void requireSupportedProtocol(AiProvider provider) {

@@ -42,6 +42,7 @@ class DailyPlanAiGeneratorTest {
                 new AiPlanParser(objectMapper),
                 new DailyPlanValidator(),
                 new DailyPlanConstraintEvaluator(),
+                new DailyPlanPromptContextBuilder(),
                 objectMapper);
         roadmapItemId = UUID.randomUUID();
     }
@@ -71,9 +72,15 @@ class DailyPlanAiGeneratorTest {
                 anyString(),
                 promptCaptor.capture());
         assertThat(promptCaptor.getAllValues().get(0))
-                .contains("unfinishedTasks")
-                .contains("weaknessSignals")
-                .contains(roadmapItemId.toString());
+                .contains("relevantTopics")
+                .contains("unresolvedTasks")
+                .contains("topicSignals")
+                .contains(roadmapItemId.toString())
+                .doesNotContain("userId")
+                .doesNotContain("dailyPlanId")
+                .doesNotContain("recentProgress")
+                .doesNotContain("actualResult")
+                .doesNotContain("\"previousPlan\":");
     }
 
     @Test
@@ -114,6 +121,7 @@ class DailyPlanAiGeneratorTest {
                 baseContext.availableMinutes(),
                 baseContext.roadmap(),
                 baseContext.recentProgress(),
+                baseContext.latestTopicOutcomes(),
                 baseContext.unfinishedTasks(),
                 baseContext.weaknessSignals(),
                 List.of(weakTopic),
@@ -172,6 +180,7 @@ class DailyPlanAiGeneratorTest {
                 baseContext.availableMinutes(),
                 baseContext.roadmap(),
                 baseContext.recentProgress(),
+                baseContext.latestTopicOutcomes(),
                 baseContext.unfinishedTasks(),
                 baseContext.weaknessSignals(),
                 List.of(wt1, wt2),
@@ -207,6 +216,7 @@ class DailyPlanAiGeneratorTest {
                 baseContext.availableMinutes(),
                 baseContext.roadmap(),
                 baseContext.recentProgress(),
+                baseContext.latestTopicOutcomes(),
                 baseContext.unfinishedTasks(),
                 baseContext.weaknessSignals(),
                 null,
@@ -303,6 +313,14 @@ class DailyPlanAiGeneratorTest {
                                 120,
                                 0))),
                 List.of(),
+                List.of(new DailyPlanningContext.LatestTopicOutcome(
+                        roadmapItemId,
+                        DailyTaskStatus.PARTIALLY_COMPLETED,
+                        50,
+                        4,
+                        2,
+                        java.time.Instant.now(),
+                        LocalDate.now().minusDays(1))),
                 List.of(unfinished),
                 List.of(new DailyPlanningContext.WeaknessSignal(
                         roadmapItemId,
@@ -311,6 +329,7 @@ class DailyPlanAiGeneratorTest {
                         2,
                         DailyTaskStatus.PARTIALLY_COMPLETED,
                         "reported difficulty is high")),
+                List.of(),
                 new DailyPlanningContext.PreviousPlan(
                         UUID.randomUUID(),
                         LocalDate.now().minusDays(1),
