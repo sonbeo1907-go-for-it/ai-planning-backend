@@ -72,6 +72,31 @@ public class RoadmapItem extends BaseEntity {
         return item;
     }
 
+    public static RoadmapItem learningUnit(
+            RoadmapVersion version,
+            RoadmapItem topic,
+            String title,
+            String description,
+            int orderIndex,
+            int estimatedMinutes) {
+        if (topic == null || topic.getItemType() != RoadmapItemType.TOPIC) {
+            throw new IllegalArgumentException("A Learning Unit must belong to a Topic.");
+        }
+        if (!topic.getRoadmapVersion().getId().equals(version.getId())) {
+            throw new IllegalArgumentException(
+                    "A Learning Unit and its Topic must belong to the same Roadmap version.");
+        }
+        RoadmapItem item = new RoadmapItem();
+        item.roadmapVersion = version;
+        item.parent = topic;
+        item.itemType = RoadmapItemType.LEARNING_UNIT;
+        item.title = title;
+        item.description = description;
+        item.orderIndex = orderIndex;
+        item.estimatedMinutes = estimatedMinutes;
+        return item;
+    }
+
     public RoadmapVersion getRoadmapVersion() {
         return roadmapVersion;
     }
@@ -105,7 +130,8 @@ public class RoadmapItem extends BaseEntity {
         this.title = title;
         this.description = description;
         this.orderIndex = orderIndex;
-        if (itemType == RoadmapItemType.TOPIC) {
+        if (itemType == RoadmapItemType.TOPIC
+                || itemType == RoadmapItemType.LEARNING_UNIT) {
             this.estimatedMinutes = estimatedMinutes;
         }
     }

@@ -540,9 +540,17 @@ class DailyPlanControllerIntegrationTest {
         rVersion.activate(java.time.Instant.now());
         rVersion = roadmapVersionRepository2.saveAndFlush(rVersion);
 
-        // Add a Topic to active Roadmap version
+        // Add an executable Learning Unit to the active Roadmap version.
         RoadmapItem milestone = roadmapItemRepository.saveAndFlush(RoadmapItem.milestone(rVersion, "Week 1", "Desc", 0));
         RoadmapItem topic = roadmapItemRepository.saveAndFlush(RoadmapItem.topic(rVersion, milestone, "Learn Java Records", "Desc", 0, 45));
+        RoadmapItem learningUnit = roadmapItemRepository.saveAndFlush(
+                RoadmapItem.learningUnit(
+                        rVersion,
+                        topic,
+                        "Implement a Java record",
+                        "Create and use one immutable data carrier.",
+                        0,
+                        45));
 
         // 2. Create Daily Plan linking to the Roadmap
         LocalDate today = LocalDate.now();
@@ -579,7 +587,7 @@ class DailyPlanControllerIntegrationTest {
                     "plannedMinutes": 45,
                     "roadmapItemId": "%s"
                 }
-                """, topic.getId());
+                """, learningUnit.getId());
 
         mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
                         + "/versions/" + versionId + "/items")
@@ -587,6 +595,6 @@ class DailyPlanControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(addTaskPayload))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.roadmapItemId").value(topic.getId().toString()));
+                .andExpect(jsonPath("$.data.roadmapItemId").value(learningUnit.getId().toString()));
     }
 }

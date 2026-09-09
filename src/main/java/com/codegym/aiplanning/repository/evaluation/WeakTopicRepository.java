@@ -23,6 +23,7 @@ public interface WeakTopicRepository extends JpaRepository<WeakTopic, UUID> {
             JOIN FETCH wt.roadmapVersion roadmapVersion
             JOIN FETCH wt.roadmapItem item
             LEFT JOIN FETCH item.parent parent
+            LEFT JOIN FETCH parent.parent milestone
             WHERE wt.id = :id AND user.id = :userId
             """)
     Optional<WeakTopic> findWithContextByIdAndUserId(
@@ -37,6 +38,7 @@ public interface WeakTopicRepository extends JpaRepository<WeakTopic, UUID> {
             SELECT DISTINCT wt FROM WeakTopic wt
             JOIN FETCH wt.roadmapItem ri
             LEFT JOIN FETCH ri.parent parent
+            LEFT JOIN FETCH parent.parent milestone
             WHERE wt.user.id = :userId
               AND wt.roadmap.id = :roadmapId
               AND wt.status IN :statuses
@@ -51,6 +53,7 @@ public interface WeakTopicRepository extends JpaRepository<WeakTopic, UUID> {
             SELECT DISTINCT wt FROM WeakTopic wt
             JOIN FETCH wt.roadmapItem item
             LEFT JOIN FETCH item.parent parent
+            LEFT JOIN FETCH parent.parent milestone
             WHERE wt.user.id = :userId
               AND wt.roadmapVersion.id = :roadmapVersionId
               AND wt.status IN :statuses

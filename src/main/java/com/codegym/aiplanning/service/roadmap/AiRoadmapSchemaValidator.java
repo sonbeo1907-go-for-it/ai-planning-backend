@@ -1,6 +1,7 @@
 package com.codegym.aiplanning.service.roadmap;
 
 import com.codegym.aiplanning.service.roadmap.model.GeneratedRoadmapPlan;
+import com.codegym.aiplanning.service.roadmap.model.GeneratedRoadmapPlan.GeneratedLearningUnit;
 import com.codegym.aiplanning.service.roadmap.model.GeneratedRoadmapPlan.GeneratedMilestone;
 import com.codegym.aiplanning.service.roadmap.model.GeneratedRoadmapPlan.GeneratedTopic;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -20,6 +21,8 @@ public class AiRoadmapSchemaValidator {
     private static final Set<String> MILESTONE_FIELDS =
             Set.of("title", "description", "orderIndex", "topics");
     private static final Set<String> TOPIC_FIELDS =
+            Set.of("title", "description", "orderIndex", "estimatedMinutes", "learningUnits");
+    private static final Set<String> LEARNING_UNIT_FIELDS =
             Set.of("title", "description", "orderIndex", "estimatedMinutes");
 
     private final ObjectMapper objectMapper;
@@ -51,12 +54,33 @@ public class AiRoadmapSchemaValidator {
                 requireExactFields(topicNode, TOPIC_FIELDS, "topic");
                 requireOrderIndex(topicNode, topicIndex, "topic");
                 int estimatedMinutes = requireInteger(
-                        topicNode, "estimatedMinutes", 1, 1440, "topic");
+                        topicNode, "estimatedMinutes", 1, 10080, "topic");
+                JsonNode learningUnitsNode =
+                        requireArray(topicNode, "learningUnits", "topic");
+                requireSize(learningUnitsNode, 1, 12, "learningUnits");
+                List<GeneratedLearningUnit> learningUnits = new ArrayList<>();
+                for (int unitIndex = 0; unitIndex < learningUnitsNode.size(); unitIndex++) {
+                    JsonNode unitNode = learningUnitsNode.get(unitIndex);
+                    requireExactFields(
+                            unitNode, LEARNING_UNIT_FIELDS, "learningUnit");
+                    requireOrderIndex(unitNode, unitIndex, "learningUnit");
+                    learningUnits.add(new GeneratedLearningUnit(
+                            requireText(unitNode, "title", 200, "learningUnit"),
+                            requireText(unitNode, "description", 4000, "learningUnit"),
+                            unitIndex,
+                            requireInteger(
+                                    unitNode,
+                                    "estimatedMinutes",
+                                    1,
+                                    1440,
+                                    "learningUnit")));
+                }
                 topics.add(new GeneratedTopic(
                         requireText(topicNode, "title", 200, "topic"),
                         requireText(topicNode, "description", 4000, "topic"),
                         topicIndex,
-                        estimatedMinutes));
+                        estimatedMinutes,
+                        List.copyOf(learningUnits)));
             }
 
             milestones.add(new GeneratedMilestone(

@@ -108,7 +108,7 @@ public class DailyEvaluationPersistenceService {
             DailyPlanVersion dailyPlanVersion,
             Roadmap roadmap,
             RoadmapVersion roadmapVersion,
-            List<UUID> completedTopicItemIds) {}
+            List<UUID> completedLearningUnitIds) {}
 
     @Transactional(readOnly = true)
     public DailyQuizContext prepareDailyQuizContext(
@@ -126,17 +126,17 @@ public class DailyEvaluationPersistenceService {
         Roadmap roadmap = roadmapRepository.findByIdAndOwnerId(plan.getRoadmapId(), userId)
                 .orElseThrow(() -> notFound("Roadmap was not found."));
 
-        List<UUID> completedTopicIds = findCompletedTopicIds(version.getId());
-        RoadmapVersion roadmapVersion = validateCompletedTopics(
+        List<UUID> completedLearningUnitIds = findCompletedLearningUnitIds(version.getId());
+        RoadmapVersion roadmapVersion = validateCompletedLearningUnits(
                 userId,
                 roadmap,
-                completedTopicIds);
+                completedLearningUnitIds);
         return new DailyQuizContext(
                 plan,
                 version,
                 roadmap,
                 roadmapVersion,
-                completedTopicIds);
+                completedLearningUnitIds);
     }
 
     @Transactional(readOnly = true)
@@ -151,7 +151,7 @@ public class DailyEvaluationPersistenceService {
         return plan.getActiveVersionId();
     }
 
-    private List<UUID> findCompletedTopicIds(UUID versionId) {
+    private List<UUID> findCompletedLearningUnitIds(UUID versionId) {
         List<DailyPlanItem> items = dailyPlanItemRepository
                 .findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId);
         if (items.isEmpty()) {
@@ -172,45 +172,63 @@ public class DailyEvaluationPersistenceService {
             }
         }
 
-        Set<UUID> topicIds = new HashSet<>();
+        Set<UUID> learningUnitIds = new HashSet<>();
         for (DailyPlanItem item : items) {
             ProgressEntryStatus status = latestStatus.get(item.getId());
             boolean completed = status == ProgressEntryStatus.COMPLETED
                     || (status == null
                     && item.getStatus() == DailyTaskStatus.COMPLETED);
             if (completed && item.getRoadmapItemId() != null) {
-                topicIds.add(item.getRoadmapItemId());
+                learningUnitIds.add(item.getRoadmapItemId());
             }
         }
-        if (topicIds.isEmpty()) {
+        if (learningUnitIds.isEmpty()) {
             throw insufficientCompletedTasks();
         }
-        return new ArrayList<>(topicIds);
+        return new ArrayList<>(learningUnitIds);
     }
 
-    private RoadmapVersion validateCompletedTopics(
+    private RoadmapVersion validateCompletedLearningUnits(
             UUID userId,
             Roadmap roadmap,
-            List<UUID> topicIds) {
+            List<UUID> learningUnitIds) {
         RoadmapVersion expectedVersion = null;
-        for (UUID topicId : topicIds) {
-            RoadmapItem item = roadmapItemRepository.findOwnedById(topicId, userId)
-                    .orElseThrow(() -> notFound("Completed Roadmap topic was not found."));
-            if (item.getItemType() != RoadmapItemType.TOPIC
+        for (UUID learningUnitId : learningUnitIds) {
+            RoadmapItem item = roadmapItemRepository.findOwnedById(learningUnitId, userId)
+                    .orElseThrow(() -> notFound("Completed Roadmap Learning Unit was not found."));
+            if (!hasValidLearningUnitHierarchy(item)
                     || !item.getRoadmapVersion().getRoadmap().getId().equals(roadmap.getId())) {
                 throw new BusinessException(
                         ErrorCode.ROADMAP_STRUCTURE_INCOMPLETE,
-                        "Completed tasks must reference topics from the Daily Plan Roadmap.");
+                        "Completed tasks must reference Learning Units from the Daily Plan Roadmap.");
             }
             if (expectedVersion == null) {
                 expectedVersion = item.getRoadmapVersion();
             } else if (!expectedVersion.getId().equals(item.getRoadmapVersion().getId())) {
                 throw new BusinessException(
                         ErrorCode.ROADMAP_STRUCTURE_INCOMPLETE,
-                        "A Daily Plan quiz cannot mix topics from different Roadmap versions.");
+                        "A Daily Plan quiz cannot mix Learning Units from different Roadmap versions.");
             }
         }
         return expectedVersion;
+    }
+
+    private boolean hasValidLearningUnitHierarchy(RoadmapItem learningUnit) {
+        if (learningUnit.getItemType() != RoadmapItemType.LEARNING_UNIT
+                || learningUnit.getRoadmapVersion() == null) {
+            return false;
+        }
+        RoadmapItem topic = learningUnit.getParent();
+        RoadmapItem milestone = topic == null ? null : topic.getParent();
+        UUID versionId = learningUnit.getRoadmapVersion().getId();
+        return topic != null
+                && topic.getItemType() == RoadmapItemType.TOPIC
+                && topic.getRoadmapVersion() != null
+                && versionId.equals(topic.getRoadmapVersion().getId())
+                && milestone != null
+                && milestone.getItemType() == RoadmapItemType.MILESTONE
+                && milestone.getRoadmapVersion() != null
+                && versionId.equals(milestone.getRoadmapVersion().getId());
     }
 
     @Transactional(readOnly = true)
@@ -284,7 +302,7 @@ public class DailyEvaluationPersistenceService {
 
         UserAccount user = userAccountRepository.findById(userId)
                 .orElseThrow(() -> notFound("User was not found."));
-        Map<UUID, RoadmapItem> allowedTopics = loadAllowedTopics(
+        Map<UUID, RoadmapItem> allowedLearningUnits = loadAllowedLearningUnits(
                 userId,
                 context,
                 generatedPlan);
@@ -294,30 +312,35 @@ public class DailyEvaluationPersistenceService {
                 context.dailyPlanVersion(),
                 context.roadmap(),
                 context.roadmapVersion());
-        addQuestions(quiz, generatedPlan, allowedTopics);
+        addQuestions(quiz, generatedPlan, allowedLearningUnits);
         return mapToQuizDetailResponse(quizRepository.saveAndFlush(quiz));
     }
 
-    private Map<UUID, RoadmapItem> loadAllowedTopics(
+    private Map<UUID, RoadmapItem> loadAllowedLearningUnits(
             UUID userId,
             DailyQuizContext context,
             GeneratedQuizPlan generatedPlan) {
-        Set<UUID> allowedIds = new HashSet<>(context.completedTopicItemIds());
+        Set<UUID> allowedIds = new HashSet<>(context.completedLearningUnitIds());
         Map<UUID, RoadmapItem> result = new HashMap<>();
         for (GeneratedQuestion question : generatedPlan.questions()) {
             UUID itemId = question.roadmapItemId();
             if (itemId == null || !allowedIds.contains(itemId)) {
                 throw new BusinessException(
                         ErrorCode.AI_OUTPUT_INVALID,
-                        "AI quiz referenced a topic outside the completed-topic context.");
+                        "AI quiz referenced a Learning Unit outside the completed context.");
             }
             RoadmapItem item = roadmapItemRepository.findOwnedById(itemId, userId)
-                    .orElseThrow(() -> notFound("Roadmap topic was not found."));
+                    .orElseThrow(() -> notFound("Roadmap Learning Unit was not found."));
+            if (item.getItemType() != RoadmapItemType.LEARNING_UNIT) {
+                throw new BusinessException(
+                        ErrorCode.AI_OUTPUT_INVALID,
+                        "AI quiz referenced a Roadmap Item that is not a Learning Unit.");
+            }
             if (!context.roadmapVersion().getId()
                     .equals(item.getRoadmapVersion().getId())) {
                 throw new BusinessException(
                         ErrorCode.AI_OUTPUT_INVALID,
-                        "AI quiz referenced a topic from another Roadmap version.");
+                        "AI quiz referenced a Learning Unit from another Roadmap version.");
             }
             result.put(itemId, item);
         }
@@ -327,10 +350,10 @@ public class DailyEvaluationPersistenceService {
     private void addQuestions(
             Quiz quiz,
             GeneratedQuizPlan generatedPlan,
-            Map<UUID, RoadmapItem> topics) {
+            Map<UUID, RoadmapItem> learningUnits) {
         for (GeneratedQuestion generated : generatedPlan.questions()) {
             QuizQuestion question = QuizQuestion.create(
-                    topics.get(generated.roadmapItemId()),
+                    learningUnits.get(generated.roadmapItemId()),
                     generated.questionText(),
                     serializeOptions(generated.options()),
                     generated.correctOption(),
@@ -480,16 +503,18 @@ public class DailyEvaluationPersistenceService {
             UUID userId,
             Quiz quiz,
             QuizAttempt attempt) {
-        Map<UUID, int[]> perTopic = new HashMap<>();
+        Map<UUID, int[]> perLearningUnit = new HashMap<>();
         for (QuizAttemptAnswer answer : attempt.getAnswers()) {
-            UUID topicId = answer.getQuestion().getRoadmapItem().getId();
-            int[] counts = perTopic.computeIfAbsent(topicId, ignored -> new int[2]);
+            UUID learningUnitId = answer.getQuestion().getRoadmapItem().getId();
+            int[] counts = perLearningUnit.computeIfAbsent(
+                    learningUnitId,
+                    ignored -> new int[2]);
             counts[1]++;
             if (answer.isCorrect()) {
                 counts[0]++;
             }
         }
-        for (Map.Entry<UUID, int[]> entry : perTopic.entrySet()) {
+        for (Map.Entry<UUID, int[]> entry : perLearningUnit.entrySet()) {
             int[] counts = entry.getValue();
             BigDecimal score = BigDecimal
                     .valueOf((double) counts[0] * 100.0 / counts[1])

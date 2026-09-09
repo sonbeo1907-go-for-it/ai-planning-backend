@@ -23,7 +23,7 @@ public class QuizSchemaValidator {
         this.objectMapper = objectMapper;
     }
 
-    public GeneratedQuizPlan validate(String rawResponse, Set<UUID> validTopicIds) {
+    public GeneratedQuizPlan validate(String rawResponse, Set<UUID> validLearningUnitIds) {
         JsonNode root = parseObject(rawResponse);
         JsonNode questionsNode = requireArray(root, "questions", "quiz");
         requireSize(questionsNode, 3, 5, "questions");
@@ -35,7 +35,9 @@ public class QuizSchemaValidator {
                 throw invalid("Each question item must be a JSON object.");
             }
 
-            UUID topicId = extractAndValidateTopicId(qNode, validTopicIds);
+            UUID learningUnitId = extractAndValidateLearningUnitId(
+                    qNode,
+                    validLearningUnitIds);
             String questionText = requireText(qNode, "questionText", 1000, "question[" + i + "]");
             JsonNode optionsNode = requireArray(qNode, "options", "question[" + i + "]");
             if (optionsNode.size() != 4) {
@@ -68,7 +70,7 @@ public class QuizSchemaValidator {
             String explanation = requireText(qNode, "explanation", 2000, "question[" + i + "]");
 
             questions.add(new GeneratedQuestion(
-                    topicId,
+                    learningUnitId,
                     questionText,
                     List.copyOf(options),
                     correctOption,
@@ -79,18 +81,25 @@ public class QuizSchemaValidator {
         return new GeneratedQuizPlan(List.copyOf(questions));
     }
 
-    private UUID extractAndValidateTopicId(JsonNode qNode, Set<UUID> validTopicIds) {
-        JsonNode topicIdNode = qNode.get("topicId");
+    private UUID extractAndValidateLearningUnitId(
+            JsonNode questionNode,
+            Set<UUID> validLearningUnitIds) {
+        JsonNode topicIdNode = questionNode.get("topicId");
         if (topicIdNode == null || !topicIdNode.isTextual() || topicIdNode.textValue().isBlank()) {
             throw invalid("Question topicId must be a non-blank UUID string.");
         }
 
         try {
-            UUID topicId = UUID.fromString(topicIdNode.textValue().trim());
-            if (validTopicIds != null && !validTopicIds.isEmpty() && !validTopicIds.contains(topicId)) {
-                throw invalid("Question topicId " + topicId + " is not in the list of completed topics.");
+            UUID learningUnitId = UUID.fromString(topicIdNode.textValue().trim());
+            if (validLearningUnitIds != null
+                    && !validLearningUnitIds.isEmpty()
+                    && !validLearningUnitIds.contains(learningUnitId)) {
+                throw invalid(
+                        "Question topicId "
+                                + learningUnitId
+                                + " is not in the list of completed Learning Units.");
             }
-            return topicId;
+            return learningUnitId;
         } catch (IllegalArgumentException e) {
             throw invalid("Question topicId is not a valid UUID format.");
         }

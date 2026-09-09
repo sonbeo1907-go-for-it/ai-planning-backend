@@ -4,6 +4,7 @@ import com.codegym.aiplanning.common.entity.BaseEntity;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -67,6 +68,11 @@ public class WeakTopic extends BaseEntity {
             BigDecimal quizScore,
             Integer understandingRating,
             Instant unresolvedAt) {
+        if (roadmapItem == null
+                || roadmapItem.getItemType() != RoadmapItemType.LEARNING_UNIT) {
+            throw new IllegalArgumentException(
+                    "A Weak Topic signal must target a Learning Unit.");
+        }
         WeakTopic weakTopic = new WeakTopic();
         weakTopic.user = user;
         weakTopic.roadmap = roadmap;

@@ -74,6 +74,7 @@ public final class ApiConstant {
             DAILY_PLAN_BY_ID + "/ai-executions/current";
     public static final String ROADMAPS = API_V1 + "/roadmaps";
     public static final String ROADMAP_BY_ID = "/{roadmapId}";
+    public static final String ROADMAP_COPY = ROADMAP_BY_ID + "/copy";
     public static final String ROADMAP_VERSIONS = ROADMAP_BY_ID + "/versions";
     public static final String ROADMAP_VERSION_BY_ID =
             ROADMAP_VERSIONS + "/{versionId}";
@@ -83,6 +84,9 @@ public final class ApiConstant {
             ROADMAP_VERSION_BY_ID + "/milestones";
     public static final String ROADMAP_VERSION_TOPICS =
             ROADMAP_VERSION_MILESTONES + "/{milestoneId}/topics";
+    public static final String ROADMAP_VERSION_LEARNING_UNITS =
+            ROADMAP_VERSION_BY_ID + "/topics/{topicId}/learning-units";
+    public static final String ROADMAP_PROGRESS = ROADMAP_BY_ID + "/progress";
     public static final String ROADMAP_VERSION_ITEM_BY_ID =
             ROADMAP_VERSION_BY_ID + "/items/{itemId}";
     public static final String ROADMAP_GENERATE_AI = ROADMAP_BY_ID + "/generate-ai";

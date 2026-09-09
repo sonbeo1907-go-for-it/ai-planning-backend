@@ -142,7 +142,15 @@ public class AiRoadmapGeneratorServiceImpl implements AiRoadmapGeneratorService 
                           "title": "Topic title",
                           "description": "Topic description",
                           "orderIndex": 0,
-                          "estimatedMinutes": 60
+                          "estimatedMinutes": 240,
+                          "learningUnits": [
+                            {
+                              "title": "One atomic learning outcome",
+                              "description": "A concrete outcome achievable in one study session",
+                              "orderIndex": 0,
+                              "estimatedMinutes": 60
+                            }
+                          ]
                         }
                       ]
                     }
@@ -151,7 +159,11 @@ public class AiRoadmapGeneratorServiceImpl implements AiRoadmapGeneratorService 
 
                 The object must contain no additional fields. Generate 3 to 6 milestones and
                 2 to 5 topics per milestone. orderIndex values must be contiguous and zero-based.
-                estimatedMinutes must be a positive integer. Write user-facing content in Vietnamese.
+                Every topic must contain 1 to 12 ordered learningUnits. A Learning Unit must be
+                one concrete, independently completable learning outcome that can be scheduled in
+                a single Daily Plan session. Decompose broad or compound Topic titles instead of
+                copying the Topic as one generic Learning Unit. estimatedMinutes must be a positive
+                integer. Write user-facing content in Vietnamese.
                 """;
     }
 

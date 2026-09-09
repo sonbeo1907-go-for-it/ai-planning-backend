@@ -70,6 +70,20 @@ public class Roadmap extends BaseEntity {
         return roadmap;
     }
 
+    public static Roadmap editableCopyOf(Roadmap source, String title) {
+        if (source == null || source.status != RoadmapStatus.ACTIVE) {
+            throw new IllegalArgumentException(
+                    "Only an activated Roadmap can be copied as an editable Roadmap.");
+        }
+
+        Roadmap copy = manualDraft(source.owner, title, source.description);
+        copy.proficiencyLevel = source.proficiencyLevel;
+        copy.dailyCommitmentMinutes = source.dailyCommitmentMinutes;
+        copy.expectedDurationDays = source.expectedDurationDays;
+        copy.onboardingCompletedAt = source.onboardingCompletedAt;
+        return copy;
+    }
+
     public UserAccount getOwner() {
         return owner;
     }
@@ -111,9 +125,9 @@ public class Roadmap extends BaseEntity {
     }
 
     public void updateMetadata(String title, String description) {
-        if (status == RoadmapStatus.ONBOARDING || status == RoadmapStatus.ARCHIVED) {
+        if (status != RoadmapStatus.DRAFT) {
             throw new IllegalStateException(
-                    "Roadmap metadata cannot be edited in its current state.");
+                    "Only a draft Roadmap can have its metadata edited.");
         }
         this.title = title;
         this.description = description;
@@ -152,6 +166,10 @@ public class Roadmap extends BaseEntity {
     public void activateVersion(UUID versionId) {
         if (status == RoadmapStatus.ONBOARDING || status == RoadmapStatus.ARCHIVED) {
             throw new IllegalStateException("Roadmap cannot activate a version in its current state.");
+        }
+        if (status == RoadmapStatus.ACTIVE && !versionId.equals(activeVersionId)) {
+            throw new IllegalStateException(
+                    "An activated Roadmap cannot switch to another version.");
         }
         activeVersionId = versionId;
         status = RoadmapStatus.ACTIVE;

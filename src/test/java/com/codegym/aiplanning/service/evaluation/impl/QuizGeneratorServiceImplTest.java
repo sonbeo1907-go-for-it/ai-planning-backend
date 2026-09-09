@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import java.util.List;
 import java.util.Optional;
@@ -77,6 +78,28 @@ class QuizGeneratorServiceImplTest {
         verify(quizAiGenerator, never())
                 .generateMasteryCheck(
                         org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void dailyQuizRejectsTopicLevelTargets() {
+        UUID userId = UUID.randomUUID();
+        UUID topicId = UUID.randomUUID();
+        when(roadmapItemRepository.findAllOwnedByIds(List.of(topicId), userId))
+                .thenReturn(List.of(roadmapItem));
+        when(roadmapItem.getItemType())
+                .thenReturn(RoadmapItemType.TOPIC);
+
+        assertThatThrownBy(() -> service.generateDailyQuizQuestions(
+                        userId,
+                        UUID.randomUUID(),
+                        List.of(topicId)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Learning Unit");
+
+        verify(quizAiGenerator, never())
+                .generateDailyQuiz(
+                        org.mockito.ArgumentMatchers.anyList(),
                         org.mockito.ArgumentMatchers.any());
     }
 }

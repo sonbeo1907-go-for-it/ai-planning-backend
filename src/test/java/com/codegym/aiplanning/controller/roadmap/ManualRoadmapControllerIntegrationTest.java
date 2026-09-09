@@ -15,6 +15,7 @@ import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.entity.profile.UserProfile;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.repository.profile.UserProfileRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapSourceRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
@@ -48,17 +49,34 @@ class ManualRoadmapControllerIntegrationTest {
     private UserProfileRepository userProfileRepository;
 
     @Autowired
+    private RoadmapSourceRepository roadmapSourceRepository;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Test
-    void userBuildsOrdersActivatesAndVersionsAnIndependentManualRoadmap() throws Exception {
+    void userBuildsActivatesAndCopiesAnIndependentManualRoadmap() throws Exception {
         String token = login(createAccount(UserRole.USER));
         CreatedRoadmap created = createRoadmap(token, "Backend with Java");
 
         UUID weekTwo = addMilestone(token, created, "Week 2", 0);
         UUID weekOne = addMilestone(token, created, "Week 1", 0);
         UUID javaBasics = addTopic(token, created, weekOne, "Java basics", 0, 60);
-        addTopic(token, created, weekTwo, "Spring Boot", 0, 120);
+        UUID encapsulation = addLearningUnit(
+                token,
+                created,
+                javaBasics,
+                "Understand encapsulation",
+                0,
+                30);
+        UUID springBoot = addTopic(token, created, weekTwo, "Spring Boot", 0, 120);
+        addLearningUnit(
+                token,
+                created,
+                springBoot,
+                "Build a Spring Boot REST endpoint",
+                0,
+                60);
 
         mockMvc.perform(patch(itemPath(created, javaBasics))
                         .header("Authorization", bearer(token))
@@ -83,7 +101,13 @@ class ManualRoadmapControllerIntegrationTest {
                 .andExpect(jsonPath("$.data.milestones[0].orderIndex").value(0))
                 .andExpect(jsonPath("$.data.milestones[1].title").value("Week 2"))
                 .andExpect(jsonPath("$.data.milestones[0].topics[0].title")
-                        .value("Java OOP fundamentals"));
+                        .value("Java OOP fundamentals"))
+                .andExpect(jsonPath(
+                                "$.data.milestones[0].topics[0].learningUnits[0].id")
+                        .value(encapsulation.toString()))
+                .andExpect(jsonPath(
+                                "$.data.milestones[0].topics[0].learningUnits[0].title")
+                        .value("Understand encapsulation"));
 
         mockMvc.perform(post(versionPath(created) + "/activate")
                         .header("Authorization", bearer(token)))
@@ -104,28 +128,67 @@ class ManualRoadmapControllerIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_STATUS_TRANSITION"));
 
-        MvcResult nextDraftResult = mockMvc.perform(post(roadmapPath(created.roadmapId()) + "/versions")
+        mockMvc.perform(patch(roadmapPath(created.roadmapId()))
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "Overwrite activated Roadmap",
+                                  "description": "This must remain unchanged",
+                                  "entityVersion": 0
+                                }
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ROADMAP_ALREADY_ACTIVATED"))
+                .andExpect(jsonPath("$.message").value(
+                        "This Roadmap has already been activated. "
+                                + "Create an editable copy as a new Roadmap instead."));
+
+        mockMvc.perform(post(roadmapPath(created.roadmapId()) + "/versions")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ROADMAP_ALREADY_ACTIVATED"))
+                .andExpect(jsonPath("$.message").value(
+                        "This Roadmap has already been activated. "
+                                + "Create an editable copy as a new Roadmap instead."));
+
+        mockMvc.perform(post(roadmapPath(created.roadmapId()) + "/regenerate-ai")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ROADMAP_ALREADY_ACTIVATED"));
+
+        MvcResult copyResult = mockMvc.perform(post(roadmapPath(created.roadmapId()) + "/copy")
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.versionNumber").value(2))
+                .andExpect(jsonPath("$.data.title").value("Backend with Java (Copy)"))
                 .andExpect(jsonPath("$.data.status").value("DRAFT"))
-                .andExpect(jsonPath("$.data.origin").value("USER_EDITED"))
-                .andExpect(jsonPath("$.data.milestones[0].topics[0].title")
+                .andExpect(jsonPath("$.data.activeVersionId").doesNotExist())
+                .andExpect(jsonPath("$.data.versions.length()").value(1))
+                .andExpect(jsonPath("$.data.versions[0].versionNumber").value(1))
+                .andExpect(jsonPath("$.data.versions[0].status").value("DRAFT"))
+                .andExpect(jsonPath("$.data.versions[0].origin").value("MANUAL"))
+                .andExpect(jsonPath("$.data.versions[0].milestones[0].topics[0].title")
                         .value("Java OOP fundamentals"))
+                .andExpect(jsonPath(
+                                "$.data.versions[0].milestones[0].topics[0]"
+                                        + ".learningUnits[0].title")
+                        .value("Understand encapsulation"))
                 .andReturn();
-        UUID nextVersionId = dataId(nextDraftResult);
-
-        mockMvc.perform(post(roadmapPath(created.roadmapId()) + "/versions/" + nextVersionId + "/activate")
-                        .header("Authorization", bearer(token)))
-                .andExpect(status().isOk());
+        UUID copiedRoadmapId = dataId(copyResult);
+        assertThat(copiedRoadmapId).isNotEqualTo(created.roadmapId());
 
         mockMvc.perform(get(roadmapPath(created.roadmapId()))
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"))
-                .andExpect(jsonPath("$.data.activeVersionId").value(nextVersionId.toString()))
+                .andExpect(jsonPath("$.data.activeVersionId")
+                        .value(created.versionId().toString()))
+                .andExpect(jsonPath("$.data.versions.length()").value(1))
                 .andExpect(jsonPath("$.data.versions[0].status").value("ACTIVE"))
-                .andExpect(jsonPath("$.data.versions[1].status").value("SUPERSEDED"));
+                .andExpect(jsonPath("$.data.versions[0].id")
+                        .value(created.versionId().toString()));
     }
 
     @Test
@@ -138,6 +201,21 @@ class ManualRoadmapControllerIntegrationTest {
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("ROADMAP_STRUCTURE_INCOMPLETE"));
+    }
+
+    @Test
+    void activationRequiresEveryTopicToContainALearningUnit() throws Exception {
+        String token = login(createAccount(UserRole.USER));
+        CreatedRoadmap created = createRoadmap(token, "Frontend with React");
+        UUID milestoneId = addMilestone(token, created, "Week 1", null);
+        addTopic(token, created, milestoneId, "React components", 0, 60);
+
+        mockMvc.perform(post(versionPath(created) + "/activate")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("ROADMAP_STRUCTURE_INCOMPLETE"))
+                .andExpect(jsonPath("$.message")
+                        .value("Every Topic requires at least one Learning Unit before activation."));
     }
 
     @Test
@@ -216,7 +294,18 @@ class ManualRoadmapControllerIntegrationTest {
         mockMvc.perform(get(roadmapPath(created.roadmapId()))
                         .header("Authorization", bearer(otherToken)))
                 .andExpect(status().isNotFound());
+        mockMvc.perform(post(roadmapPath(created.roadmapId()) + "/copy")
+                        .header("Authorization", bearer(otherToken)))
+                .andExpect(status().isNotFound());
         mockMvc.perform(get(ApiConstant.ROADMAPS)
+                        .header("Authorization", bearer(adminToken)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+        mockMvc.perform(post(roadmapPath(created.roadmapId()) + "/copy")
+                        .header("Authorization", bearer(adminToken)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+        mockMvc.perform(get(roadmapPath(created.roadmapId()) + "/progress")
                         .header("Authorization", bearer(adminToken)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
@@ -259,17 +348,53 @@ class ManualRoadmapControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("DRAFT"));
 
-        mockMvc.perform(post(roadmapPath(roadmapId) + "/versions")
+        MvcResult versionResult = mockMvc.perform(post(roadmapPath(roadmapId) + "/versions")
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.versionNumber").value(1))
-                .andExpect(jsonPath("$.data.status").value("DRAFT"));
+                .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                .andReturn();
+        CreatedRoadmap created = new CreatedRoadmap(roadmapId, dataId(versionResult));
 
         mockMvc.perform(get(roadmapPath(roadmapId))
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(roadmapId.toString()))
                 .andExpect(jsonPath("$.data.versions.length()").value(1));
+
+        UUID milestoneId = addMilestone(token, created, "TypeScript foundation", 0);
+        UUID topicId = addTopic(
+                token,
+                created,
+                milestoneId,
+                "TypeScript types",
+                0,
+                60);
+        addLearningUnit(
+                token,
+                created,
+                topicId,
+                "Use primitive and union types",
+                0,
+                30);
+        mockMvc.perform(post(versionPath(created) + "/activate")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk());
+
+        MvcResult copyResult = mockMvc.perform(post(roadmapPath(roadmapId) + "/copy")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andReturn();
+        UUID copiedRoadmapId = dataId(copyResult);
+
+        var originalLinks = roadmapSourceRepository.findByRoadmapId(roadmapId);
+        var copiedLinks = roadmapSourceRepository.findByRoadmapId(copiedRoadmapId);
+        assertThat(originalLinks).hasSize(1);
+        assertThat(copiedLinks).hasSize(1);
+        assertThat(copiedLinks.get(0).getLearningSource().getId())
+                .isEqualTo(originalLinks.get(0).getLearningSource().getId());
+        assertThat(copiedLinks.get(0).getId())
+                .isNotEqualTo(originalLinks.get(0).getId());
     }
 
     @Test
@@ -313,7 +438,16 @@ class ManualRoadmapControllerIntegrationTest {
         assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}/patch")
                         .isMissingNode())
                 .isFalse();
+        assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}~1copy/post")
+                        .isMissingNode())
+                .isFalse();
         assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}~1versions~1{versionId}~1milestones/post")
+                        .isMissingNode())
+                .isFalse();
+        assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}~1versions~1{versionId}~1topics~1{topicId}~1learning-units/post")
+                        .isMissingNode())
+                .isFalse();
+        assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}~1progress/get")
                         .isMissingNode())
                 .isFalse();
         assertThat(document.at("/paths/~1api~1v1~1roadmaps~1{roadmapId}~1versions~1{versionId}~1activate/post")
@@ -387,6 +521,31 @@ class ManualRoadmapControllerIntegrationTest {
                                 "orderIndex", orderIndex,
                                 "estimatedMinutes", estimatedMinutes))))
                 .andExpect(status().isOk())
+                .andReturn();
+        return dataId(result);
+    }
+
+    private UUID addLearningUnit(
+            String token,
+            CreatedRoadmap created,
+            UUID topicId,
+            String title,
+            int orderIndex,
+            int estimatedMinutes)
+            throws Exception {
+        MvcResult result = mockMvc.perform(post(versionPath(created)
+                        + "/topics/"
+                        + topicId
+                        + "/learning-units")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "title", title,
+                                "orderIndex", orderIndex,
+                                "estimatedMinutes", estimatedMinutes))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.itemType").value("LEARNING_UNIT"))
+                .andExpect(jsonPath("$.data.parentItemId").value(topicId.toString()))
                 .andReturn();
         return dataId(result);
     }

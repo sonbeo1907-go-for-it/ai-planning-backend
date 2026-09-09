@@ -196,7 +196,7 @@ class QuizSchemaValidatorTest {
 
         assertThatThrownBy(() -> validator.validate(json, Set.of(topicId)))
                 .isInstanceOf(InvalidAiQuizResponseException.class)
-                .hasMessageContaining("is not in the list of completed topics");
+                .hasMessageContaining("is not in the list of completed Learning Units");
     }
 
     @Test

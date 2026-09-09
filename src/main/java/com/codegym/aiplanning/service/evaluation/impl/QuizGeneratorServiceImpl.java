@@ -4,9 +4,10 @@ import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import com.codegym.aiplanning.service.evaluation.QuizGeneratorService;
-import com.codegym.aiplanning.service.evaluation.impl.QuizAiGenerator.CompletedTopicInfo;
+import com.codegym.aiplanning.service.evaluation.impl.QuizAiGenerator.CompletedLearningUnitInfo;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -28,11 +29,11 @@ public class QuizGeneratorServiceImpl implements QuizGeneratorService {
     public GeneratedQuizPlan generateDailyQuizQuestions(
             UUID userId,
             UUID dailyPlanId,
-            List<UUID> completedTopicItemIds) {
+            List<UUID> completedLearningUnitIds) {
         return generateDailyQuizQuestions(
                 userId,
                 dailyPlanId,
-                completedTopicItemIds,
+                completedLearningUnitIds,
                 null);
     }
 
@@ -40,27 +41,24 @@ public class QuizGeneratorServiceImpl implements QuizGeneratorService {
     public GeneratedQuizPlan generateDailyQuizQuestions(
             UUID userId,
             UUID dailyPlanId,
-            List<UUID> completedTopicItemIds,
+            List<UUID> completedLearningUnitIds,
             AiProviderConfig providerConfig) {
         List<RoadmapItem> items = roadmapItemRepository.findAllOwnedByIds(
-                completedTopicItemIds,
+                completedLearningUnitIds,
                 userId);
-        long requestedTopicCount = completedTopicItemIds.stream()
+        long requestedLearningUnitCount = completedLearningUnitIds.stream()
                 .distinct()
                 .count();
-        if (items.size() != requestedTopicCount) {
+        if (items.size() != requestedLearningUnitCount) {
             throw new BusinessException(
                     ErrorCode.RESOURCE_NOT_FOUND,
-                    "One or more completed Roadmap topics were not found.");
+                    "One or more completed Roadmap Learning Units were not found.");
         }
 
-        List<CompletedTopicInfo> topicInfos = items.stream()
-                .map(item -> new CompletedTopicInfo(
-                        item.getId(),
-                        item.getTitle(),
-                        item.getDescription() != null ? item.getDescription() : ""))
+        List<CompletedLearningUnitInfo> learningUnitInfos = items.stream()
+                .map(this::toLearningUnitInfo)
                 .toList();
-        return quizAiGenerator.generateDailyQuiz(topicInfos, providerConfig);
+        return quizAiGenerator.generateDailyQuiz(learningUnitInfos, providerConfig);
     }
 
     @Override
@@ -84,11 +82,43 @@ public class QuizGeneratorServiceImpl implements QuizGeneratorService {
         RoadmapItem item = roadmapItemRepository.findOwnedById(roadmapItemId, userId)
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.RESOURCE_NOT_FOUND,
-                        "Roadmap topic was not found."));
-        CompletedTopicInfo topicInfo = new CompletedTopicInfo(
-                roadmapItemId,
-                item.getTitle(),
-                item.getDescription() != null ? item.getDescription() : "");
-        return quizAiGenerator.generateMasteryCheck(topicInfo, providerConfig);
+                        "Roadmap Learning Unit was not found."));
+        CompletedLearningUnitInfo learningUnitInfo = toLearningUnitInfo(item);
+        return quizAiGenerator.generateMasteryCheck(learningUnitInfo, providerConfig);
+    }
+
+    private CompletedLearningUnitInfo toLearningUnitInfo(RoadmapItem learningUnit) {
+        if (learningUnit.getItemType() != RoadmapItemType.LEARNING_UNIT
+                || learningUnit.getRoadmapVersion() == null) {
+            throw invalidLearningUnitHierarchy();
+        }
+        RoadmapItem topic = learningUnit.getParent();
+        RoadmapItem milestone = topic == null ? null : topic.getParent();
+        UUID versionId = learningUnit.getRoadmapVersion().getId();
+        boolean validHierarchy = topic != null
+                && topic.getItemType() == RoadmapItemType.TOPIC
+                && topic.getRoadmapVersion() != null
+                && versionId.equals(topic.getRoadmapVersion().getId())
+                && milestone != null
+                && milestone.getItemType() == RoadmapItemType.MILESTONE
+                && milestone.getRoadmapVersion() != null
+                && versionId.equals(milestone.getRoadmapVersion().getId());
+        if (!validHierarchy) {
+            throw invalidLearningUnitHierarchy();
+        }
+        return new CompletedLearningUnitInfo(
+                learningUnit.getId(),
+                learningUnit.getTitle(),
+                learningUnit.getDescription() != null ? learningUnit.getDescription() : "",
+                topic.getId(),
+                topic.getTitle(),
+                milestone.getId(),
+                milestone.getTitle());
+    }
+
+    private BusinessException invalidLearningUnitHierarchy() {
+        return new BusinessException(
+                ErrorCode.ROADMAP_STRUCTURE_INCOMPLETE,
+                "Quiz generation requires a Learning Unit inside a Topic and Milestone.");
     }
 }

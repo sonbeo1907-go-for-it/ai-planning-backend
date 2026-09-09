@@ -1,6 +1,7 @@
 package com.codegym.aiplanning.service.daily.ai;
 
 import com.codegym.aiplanning.entity.daily.DailyTaskStatus;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -26,10 +27,31 @@ public record DailyPlanPromptContext(
 
     public record RelevantTopic(
             UUID roadmapItemId,
+            UUID parentTopicId,
+            String parentTopicTitle,
             String title,
+            String description,
             int estimatedMinutes,
             TopicPriority priority,
-            boolean completed) {}
+            boolean completed) {
+
+        public RelevantTopic(
+                UUID roadmapItemId,
+                String title,
+                int estimatedMinutes,
+                TopicPriority priority,
+                boolean completed) {
+            this(
+                    roadmapItemId,
+                    roadmapItemId,
+                    title,
+                    title,
+                    null,
+                    estimatedMinutes,
+                    priority,
+                    completed);
+        }
+    }
 
     public record UnresolvedTask(
             UUID dailyPlanItemId,
@@ -41,8 +63,14 @@ public record DailyPlanPromptContext(
     /** A persisted weak-topic signal produced by the evaluation module. */
     public record ExplicitWeakTopic(
             UUID weakTopicId,
-            UUID roadmapItemId,
-            String title,
+            UUID targetItemId,
+            RoadmapItemType targetItemType,
+            UUID learningUnitId,
+            String learningUnitTitle,
+            UUID topicId,
+            String topicTitle,
+            UUID milestoneId,
+            String milestoneTitle,
             Integer lastRating,
             Double lastScore) {}
 

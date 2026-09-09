@@ -153,8 +153,11 @@ class WeakTopicServiceImplTest {
     void processEvaluationResult_existingWeakTopic_updatesTriggerAndSaves() {
         WeakTopic existingTopic = mock(WeakTopic.class);
         Roadmap existingRoadmap = mock(Roadmap.class);
+        RoadmapItem existingLearningUnit = mock(RoadmapItem.class);
         when(existingRoadmap.getId()).thenReturn(roadmapId);
         when(existingTopic.getRoadmap()).thenReturn(existingRoadmap);
+        when(existingTopic.getRoadmapItem()).thenReturn(existingLearningUnit);
+        stubLearningUnitHierarchy(existingLearningUnit);
         when(weakTopicRepository.findByUserIdAndRoadmapItemId(userId, roadmapItemId)).thenReturn(Optional.of(existingTopic));
 
         weakTopicService.processEvaluationResult(userId, roadmapId, roadmapItemId, new BigDecimal("50.00"), 1);
@@ -177,21 +180,58 @@ class WeakTopicServiceImplTest {
     }
 
     @Test
+    void processEvaluationResult_topicTarget_rejectsAmbiguousWeakness() {
+        Roadmap roadmap = mock(Roadmap.class);
+        RoadmapVersion version = mock(RoadmapVersion.class);
+        RoadmapItem topic = mock(RoadmapItem.class);
+        when(weakTopicRepository.findByUserIdAndRoadmapItemId(userId, roadmapItemId))
+                .thenReturn(Optional.empty());
+        when(userAccountRepository.findById(userId))
+                .thenReturn(Optional.of(mock(UserAccount.class)));
+        when(roadmapItemRepository.findOwnedById(roadmapItemId, userId))
+                .thenReturn(Optional.of(topic));
+        when(topic.getRoadmapVersion()).thenReturn(version);
+        when(topic.getItemType()).thenReturn(RoadmapItemType.TOPIC);
+        when(version.getRoadmap()).thenReturn(roadmap);
+        when(roadmap.getId()).thenReturn(roadmapId);
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> weakTopicService.processEvaluationResult(
+                        userId,
+                        roadmapId,
+                        roadmapItemId,
+                        new BigDecimal("70.00"),
+                        null));
+
+        assertEquals(ErrorCode.ROADMAP_STRUCTURE_INCOMPLETE, exception.errorCode());
+        verify(weakTopicRepository, never()).save(any());
+    }
+
+    @Test
     void resolveUnresolvedWeakTopics_returnsMappedContexts() {
         WeakTopic mockTopic = mock(WeakTopic.class);
         RoadmapItem mockItem = mock(RoadmapItem.class);
-        RoadmapItem mockParent = mock(RoadmapItem.class);
+        RoadmapItem mockParentTopic = mock(RoadmapItem.class);
+        RoadmapItem mockMilestone = mock(RoadmapItem.class);
         
-        UUID topicId = UUID.randomUUID();
-        when(mockTopic.getId()).thenReturn(topicId);
+        UUID weakTopicId = UUID.randomUUID();
+        UUID parentTopicId = UUID.randomUUID();
+        UUID milestoneId = UUID.randomUUID();
+        when(mockTopic.getId()).thenReturn(weakTopicId);
         when(mockTopic.getRoadmapItem()).thenReturn(mockItem);
         when(mockTopic.getLastUnderstandingRating()).thenReturn(2);
         when(mockTopic.getLastQuizScore()).thenReturn(new BigDecimal("75.50"));
         
         when(mockItem.getId()).thenReturn(roadmapItemId);
-        when(mockItem.getTitle()).thenReturn("Child Item");
-        when(mockItem.getParent()).thenReturn(mockParent);
-        when(mockParent.getTitle()).thenReturn("Parent Milestone");
+        when(mockItem.getItemType()).thenReturn(RoadmapItemType.LEARNING_UNIT);
+        when(mockItem.getTitle()).thenReturn("Encapsulation exercise");
+        when(mockItem.getParent()).thenReturn(mockParentTopic);
+        when(mockParentTopic.getId()).thenReturn(parentTopicId);
+        when(mockParentTopic.getTitle()).thenReturn("Core OOP principles");
+        when(mockParentTopic.getParent()).thenReturn(mockMilestone);
+        when(mockMilestone.getId()).thenReturn(milestoneId);
+        when(mockMilestone.getTitle()).thenReturn("OOP foundations");
 
         when(weakTopicRepository.findWithItemByUserIdAndRoadmapVersionIdAndStatusIn(
                 eq(userId), eq(roadmapId), eq(Collections.singletonList(WeakTopicStatus.UNRESOLVED))))
@@ -201,16 +241,21 @@ class WeakTopicServiceImplTest {
 
         assertEquals(1, result.size());
         WeakTopicPromptContext ctx = result.get(0);
-        assertEquals(topicId, ctx.weakTopicId());
-        assertEquals(roadmapItemId, ctx.roadmapItemId());
-        assertEquals("Child Item", ctx.topicTitle());
-        assertEquals("Parent Milestone", ctx.milestoneTitle());
+        assertEquals(weakTopicId, ctx.weakTopicId());
+        assertEquals(roadmapItemId, ctx.targetItemId());
+        assertEquals(RoadmapItemType.LEARNING_UNIT, ctx.targetItemType());
+        assertEquals(roadmapItemId, ctx.learningUnitId());
+        assertEquals("Encapsulation exercise", ctx.learningUnitTitle());
+        assertEquals(parentTopicId, ctx.topicId());
+        assertEquals("Core OOP principles", ctx.topicTitle());
+        assertEquals(milestoneId, ctx.milestoneId());
+        assertEquals("OOP foundations", ctx.milestoneTitle());
         assertEquals(2, ctx.lastRating());
         assertEquals(75.50, ctx.lastScore());
     }
 
     @Test
-    void resolveUnresolvedWeakTopics_noParent_mapsMilestoneToNull() {
+    void resolveUnresolvedWeakTopics_legacyTopic_remainsReadable() {
         WeakTopic mockTopic = mock(WeakTopic.class);
         RoadmapItem mockItem = mock(RoadmapItem.class);
         
@@ -219,6 +264,9 @@ class WeakTopicServiceImplTest {
         when(mockTopic.getLastUnderstandingRating()).thenReturn(null);
         
         when(mockItem.getParent()).thenReturn(null);
+        when(mockItem.getItemType()).thenReturn(RoadmapItemType.TOPIC);
+        when(mockItem.getId()).thenReturn(roadmapItemId);
+        when(mockItem.getTitle()).thenReturn("Legacy topic");
 
         when(weakTopicRepository.findWithItemByUserIdAndRoadmapVersionIdAndStatusIn(
                 eq(userId), eq(roadmapId), eq(Collections.singletonList(WeakTopicStatus.UNRESOLVED))))
@@ -227,6 +275,9 @@ class WeakTopicServiceImplTest {
         List<WeakTopicPromptContext> result = weakTopicService.resolveUnresolvedWeakTopics(userId, roadmapId);
 
         assertEquals(1, result.size());
+        assertNull(result.get(0).learningUnitId());
+        assertEquals(roadmapItemId, result.get(0).topicId());
+        assertEquals("Legacy topic", result.get(0).topicTitle());
         assertNull(result.get(0).milestoneTitle());
         assertNull(result.get(0).lastScore());
         assertNull(result.get(0).lastRating());
@@ -272,6 +323,60 @@ class WeakTopicServiceImplTest {
                 .findWithItemByUserIdAndRoadmapIdAndStatusIn(any(), any(), any());
     }
 
+    @Test
+    void getWeakTopics_learningUnitTarget_exposesUnambiguousHierarchy() {
+        UUID weakTopicId = UUID.randomUUID();
+        UUID roadmapVersionId = UUID.randomUUID();
+        UUID topicId = UUID.randomUUID();
+        UUID milestoneId = UUID.randomUUID();
+        Roadmap roadmap = mock(Roadmap.class);
+        RoadmapVersion roadmapVersion = mock(RoadmapVersion.class);
+        RoadmapItem learningUnit = mock(RoadmapItem.class);
+        RoadmapItem topic = mock(RoadmapItem.class);
+        RoadmapItem milestone = mock(RoadmapItem.class);
+        WeakTopic weakTopic = mock(WeakTopic.class);
+
+        when(roadmap.getId()).thenReturn(roadmapId);
+        when(roadmapVersion.getId()).thenReturn(roadmapVersionId);
+        when(learningUnit.getId()).thenReturn(roadmapItemId);
+        when(learningUnit.getItemType()).thenReturn(RoadmapItemType.LEARNING_UNIT);
+        when(learningUnit.getTitle()).thenReturn("Encapsulation exercise");
+        when(learningUnit.getParent()).thenReturn(topic);
+        when(topic.getId()).thenReturn(topicId);
+        when(topic.getTitle()).thenReturn("Core OOP principles");
+        when(topic.getParent()).thenReturn(milestone);
+        when(milestone.getId()).thenReturn(milestoneId);
+        when(milestone.getTitle()).thenReturn("OOP foundations");
+        when(weakTopic.getId()).thenReturn(weakTopicId);
+        when(weakTopic.getRoadmap()).thenReturn(roadmap);
+        when(weakTopic.getRoadmapVersion()).thenReturn(roadmapVersion);
+        when(weakTopic.getRoadmapItem()).thenReturn(learningUnit);
+        when(weakTopic.getStatus()).thenReturn(WeakTopicStatus.UNRESOLVED);
+        when(weakTopic.getTriggerSource()).thenReturn(WeakTopicTrigger.QUIZ_FAILED);
+        when(roadmapRepository.findByIdAndOwnerId(roadmapId, userId))
+                .thenReturn(Optional.of(roadmap));
+        when(weakTopicRepository.findWithItemByUserIdAndRoadmapIdAndStatusIn(
+                userId,
+                roadmapId,
+                List.of(WeakTopicStatus.values())))
+                .thenReturn(List.of(weakTopic));
+
+        WeakTopicResponse response = weakTopicService.getWeakTopics(
+                        userId,
+                        roadmapId,
+                        Collections.emptySet())
+                .get(0);
+
+        assertEquals(roadmapItemId, response.roadmapItemId());
+        assertEquals(RoadmapItemType.LEARNING_UNIT, response.targetItemType());
+        assertEquals(roadmapItemId, response.learningUnitId());
+        assertEquals("Encapsulation exercise", response.learningUnitTitle());
+        assertEquals(topicId, response.topicId());
+        assertEquals("Core OOP principles", response.topicTitle());
+        assertEquals(milestoneId, response.milestoneId());
+        assertEquals("OOP foundations", response.milestoneTitle());
+    }
+
     private void setupMockEntities() {
         Roadmap roadmap = mock(Roadmap.class);
         RoadmapVersion version = mock(RoadmapVersion.class);
@@ -279,8 +384,29 @@ class WeakTopicServiceImplTest {
         when(roadmap.getId()).thenReturn(roadmapId);
         when(version.getRoadmap()).thenReturn(roadmap);
         when(item.getRoadmapVersion()).thenReturn(version);
-        when(item.getItemType()).thenReturn(RoadmapItemType.TOPIC);
+        stubLearningUnitHierarchy(item, version);
         when(userAccountRepository.findById(userId)).thenReturn(Optional.of(mock(UserAccount.class)));
         when(roadmapItemRepository.findOwnedById(roadmapItemId, userId)).thenReturn(Optional.of(item));
+    }
+
+    private void stubLearningUnitHierarchy(RoadmapItem learningUnit) {
+        stubLearningUnitHierarchy(learningUnit, mock(RoadmapVersion.class));
+    }
+
+    private void stubLearningUnitHierarchy(
+            RoadmapItem learningUnit,
+            RoadmapVersion version) {
+        RoadmapItem topic = mock(RoadmapItem.class);
+        RoadmapItem milestone = mock(RoadmapItem.class);
+        UUID versionId = UUID.randomUUID();
+        when(version.getId()).thenReturn(versionId);
+        when(learningUnit.getRoadmapVersion()).thenReturn(version);
+        when(learningUnit.getItemType()).thenReturn(RoadmapItemType.LEARNING_UNIT);
+        when(learningUnit.getParent()).thenReturn(topic);
+        when(topic.getItemType()).thenReturn(RoadmapItemType.TOPIC);
+        when(topic.getRoadmapVersion()).thenReturn(version);
+        when(topic.getParent()).thenReturn(milestone);
+        when(milestone.getItemType()).thenReturn(RoadmapItemType.MILESTONE);
+        when(milestone.getRoadmapVersion()).thenReturn(version);
     }
 }

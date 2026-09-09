@@ -17,5 +17,21 @@ public record GeneratedRoadmapPlan(
             String title,
             String description,
             int orderIndex,
+            int estimatedMinutes,
+            List<GeneratedLearningUnit> learningUnits) {
+
+        public GeneratedTopic(
+                String title,
+                String description,
+                int orderIndex,
+                int estimatedMinutes) {
+            this(title, description, orderIndex, estimatedMinutes, List.of());
+        }
+    }
+
+    public record GeneratedLearningUnit(
+            String title,
+            String description,
+            int orderIndex,
             int estimatedMinutes) {}
 }

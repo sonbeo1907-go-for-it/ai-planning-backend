@@ -3,6 +3,7 @@ package com.codegym.aiplanning.service.ai.execution;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -163,7 +164,7 @@ class AiExecutionServiceImplTest {
     }
 
     @Test
-    void repeatedIdempotencyKeyReturnsTheOriginalExecution() {
+    void repeatedIdempotencyKeyReturnsTheOriginalExecutionAfterRoadmapRevalidation() {
         UUID executionId = UUID.randomUUID();
         AiExecution existing = persistedExecution(
                 AiExecution.queue(
@@ -183,7 +184,28 @@ class AiExecutionServiceImplTest {
                 ownerId, roadmapId, List.of(), " same-request ");
 
         assertEquals(executionId, response.id());
-        verify(roadmapPersistenceService, never()).prepare(any(), any(), any());
+        verify(roadmapPersistenceService).prepare(ownerId, roadmapId, List.of());
+        verify(providerSelector, never()).requireDefault(any());
+        verify(executionRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void repeatedIdempotencyKeyCannotBypassActivatedRoadmapRule() {
+        doThrow(new BusinessException(
+                        ErrorCode.ROADMAP_ALREADY_ACTIVATED,
+                        "This Roadmap has already been activated. "
+                                + "Create an editable copy as a new Roadmap instead."))
+                .when(roadmapPersistenceService)
+                .prepare(ownerId, roadmapId, List.of());
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.submitRoadmapGeneration(
+                        ownerId, roadmapId, List.of(), "same-request"));
+
+        assertEquals(ErrorCode.ROADMAP_ALREADY_ACTIVATED, exception.errorCode());
+        verify(executionRepository, never())
+                .findByOwnerIdAndIdempotencyKey(any(), any());
         verify(providerSelector, never()).requireDefault(any());
         verify(executionRepository, never()).saveAndFlush(any());
     }

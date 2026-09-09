@@ -1,6 +1,7 @@
 package com.codegym.aiplanning.service.daily.ai;
 
 import com.codegym.aiplanning.entity.daily.DailyTaskStatus;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanPromptContext.RelevantTopic;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanPromptContext.ExplicitWeakTopic;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanPromptContext.SignalBand;
@@ -32,6 +33,7 @@ public class DailyPlanPromptContextBuilder {
     private static final int MAX_ROADMAP_TITLE_LENGTH = 160;
     private static final int MAX_TOPIC_TITLE_LENGTH = 160;
     private static final int MAX_TASK_TITLE_LENGTH = 160;
+    private static final int MAX_TOPIC_DESCRIPTION_LENGTH = 600;
 
     public DailyPlanPromptContext build(DailyPlanningContext source) {
         List<DailyPlanningContext.UnfinishedTask> selectedUnfinished = source.unfinishedTasks()
@@ -67,11 +69,25 @@ public class DailyPlanPromptContextBuilder {
                 source.previousPlan() == null ? null : source.previousPlan().planDate(),
                 selectedUnfinished.stream().map(this::toUnresolvedTask).toList(),
                 source.unresolvedWeakTopics().stream()
+                        .filter(weakTopic -> weakTopic.targetItemType()
+                                == RoadmapItemType.LEARNING_UNIT)
+                        .filter(weakTopic -> activeTopics.containsKey(
+                                weakTopic.learningUnitId()))
                         .limit(MAX_EXPLICIT_WEAK_TOPICS)
                         .map(weakTopic -> new ExplicitWeakTopic(
                                 weakTopic.weakTopicId(),
-                                weakTopic.roadmapItemId(),
+                                weakTopic.targetItemId(),
+                                weakTopic.targetItemType(),
+                                weakTopic.learningUnitId(),
+                                shorten(
+                                        weakTopic.learningUnitTitle(),
+                                        MAX_TOPIC_TITLE_LENGTH),
+                                weakTopic.topicId(),
                                 shorten(weakTopic.topicTitle(), MAX_TOPIC_TITLE_LENGTH),
+                                weakTopic.milestoneId(),
+                                shorten(
+                                        weakTopic.milestoneTitle(),
+                                        MAX_TOPIC_TITLE_LENGTH),
                                 weakTopic.lastRating(),
                                 weakTopic.lastScore()))
                         .toList(),
@@ -109,8 +125,8 @@ public class DailyPlanPromptContextBuilder {
             Map<UUID, DailyPlanningContext.LatestTopicOutcome> latestOutcomes) {
         Set<UUID> weakIds = new HashSet<>();
         for (var weakTopic : source.unresolvedWeakTopics()) {
-            if (activeTopicIds.contains(weakTopic.roadmapItemId())) {
-                weakIds.add(weakTopic.roadmapItemId());
+            if (activeTopicIds.contains(weakTopic.targetItemId())) {
+                weakIds.add(weakTopic.targetItemId());
             }
         }
         for (DailyPlanningContext.WeaknessSignal weakness : source.weaknessSignals()) {
@@ -224,7 +240,10 @@ public class DailyPlanPromptContextBuilder {
                     topic.roadmapItemId(),
                     new RelevantTopic(
                             topic.roadmapItemId(),
+                            topic.parentTopicId(),
+                            shorten(topic.parentTopicTitle(), MAX_TOPIC_TITLE_LENGTH),
                             shorten(topic.title(), MAX_TOPIC_TITLE_LENGTH),
+                            shorten(topic.description(), MAX_TOPIC_DESCRIPTION_LENGTH),
                             topic.estimatedMinutes(),
                             priority,
                             isCompleted(latestOutcomes.get(topic.roadmapItemId()))));

@@ -52,6 +52,7 @@ import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext;
 import com.codegym.aiplanning.service.daily.ai.PlanningContextBuilder;
 import com.codegym.aiplanning.service.daily.DailyPlanPersistenceService;
 import com.codegym.aiplanning.service.evaluation.WeakTopicService;
+import com.codegym.aiplanning.service.roadmap.RoadmapProgressService;
 
 @Service
 public class DailyPlanServiceImpl implements DailyPlanService {
@@ -68,6 +69,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
     private final DailyPlanAiGenerator aiGenerator;
     private final DailyPlanPersistenceService persistenceService;
     private final WeakTopicService weakTopicService;
+    private final RoadmapProgressService roadmapProgressService;
 
     public DailyPlanServiceImpl(
             DailyPlanRepository dailyPlanRepository,
@@ -81,7 +83,8 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             PlanningContextBuilder contextBuilder,
             DailyPlanAiGenerator aiGenerator,
             DailyPlanPersistenceService persistenceService,
-            WeakTopicService weakTopicService) {
+            WeakTopicService weakTopicService,
+            RoadmapProgressService roadmapProgressService) {
         this.dailyPlanRepository = dailyPlanRepository;
         this.dailyPlanVersionRepository = dailyPlanVersionRepository;
         this.dailyPlanItemRepository = dailyPlanItemRepository;
@@ -94,6 +97,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         this.aiGenerator = aiGenerator;
         this.persistenceService = persistenceService;
         this.weakTopicService = weakTopicService;
+        this.roadmapProgressService = roadmapProgressService;
     }
 
     @Override
@@ -445,6 +449,20 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             RoadmapItem roadmapItem = roadmapItemRepository.findOwnedById(roadmapItemId, userId)
                     .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Roadmap item not found"));
             Roadmap roadmap = roadmapItem.getRoadmapVersion().getRoadmap();
+            if (roadmap.getStatus() != RoadmapStatus.ACTIVE
+                    || roadmap.getActiveVersionId() == null
+                    || !roadmap.getActiveVersionId().equals(
+                            roadmapItem.getRoadmapVersion().getId())) {
+                throw new BusinessException(
+                        ErrorCode.INVALID_PLAN_TRANSITION,
+                        "A Roadmap-backed task must reference the ACTIVE RoadmapVersion.");
+            }
+            if (roadmapItem.getItemType()
+                    != com.codegym.aiplanning.entity.roadmap.RoadmapItemType.LEARNING_UNIT) {
+                throw new BusinessException(
+                        ErrorCode.INVALID_PLAN_TRANSITION,
+                        "A Roadmap-backed Daily Plan task must reference a Learning Unit.");
+            }
             if (plan.getRoadmapId() == null) {
                 plan.setRoadmapId(roadmap.getId());
                 dailyPlanRepository.save(plan);
@@ -603,7 +621,11 @@ public class DailyPlanServiceImpl implements DailyPlanService {
 
     @Override
     @Transactional
-    public DailyPlanItemResponse recordProgress(UUID planId, UUID itemId, com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest request, Jwt actorJwt) {
+    public DailyPlanItemResponse recordProgress(
+            UUID planId,
+            UUID itemId,
+            com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest request,
+            Jwt actorJwt) {
         UUID userId = extractUserId(actorJwt);
         String username = extractUsername(actorJwt);
 
@@ -639,22 +661,28 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         item.updateStatus(taskStatus);
         DailyPlanItem savedItem = dailyPlanItemRepository.save(item);
 
-        int actualMinutes = request.actualMinutes() != null ? request.actualMinutes() : item.getPlannedMinutes();
+        int actualMinutes = request.actualMinutes() != null
+                ? request.actualMinutes()
+                : item.getPlannedMinutes();
         int percentage = taskStatus.completionPercentage();
 
         ProgressEntry entry = ProgressEntry.create(
-                userId, 
-                itemId, 
-                request.status(), 
-                actualMinutes, 
+                userId,
+                itemId,
+                request.status(),
+                actualMinutes,
                 percentage,
                 request.actualResult(),
                 request.difficulty(),
                 request.understandingRating(),
                 request.note(),
-                null // supersedes logic can be added later or mapped here if provided
-        );
-        progressEntryRepository.save(entry);
+                null);
+        ProgressEntry savedEntry = progressEntryRepository.save(entry);
+        roadmapProgressService.recordOutcome(
+                userId,
+                item.getRoadmapItemId(),
+                savedEntry,
+                request.status());
 
         auditLogService.logAction(
                 userId,

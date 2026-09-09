@@ -43,7 +43,9 @@ public class AiRoadmapController {
             summary = "Queue AI Master Plan generation",
             description = "Queues generation from the Roadmap goal and optional owner-selected "
                     + "materials. Returns HTTP 202 with an execution ID for status polling; "
-                    + "a successful execution references the new DRAFT RoadmapVersion.")
+                    + "a successful execution references the new DRAFT RoadmapVersion. "
+                    + "An activated Roadmap is immutable and must first be copied into a new "
+                    + "Roadmap.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
             responseCode = "202",
             description = "Generation was queued or an existing active execution was returned")
@@ -67,7 +69,8 @@ public class AiRoadmapController {
             summary = "Queue AI Master Plan regeneration",
             description = "Queues creation of a new DRAFT version using optional adjustment "
                     + "instructions while preserving previous versions. Returns HTTP 202 with "
-                    + "an execution ID for status polling.")
+                    + "an execution ID for status polling. Regeneration is unavailable after "
+                    + "the Roadmap is activated; create an editable Roadmap copy instead.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
             responseCode = "202",
             description = "Regeneration was queued or an existing active execution was returned")

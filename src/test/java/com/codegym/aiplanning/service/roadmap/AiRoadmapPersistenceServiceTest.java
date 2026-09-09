@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -19,6 +20,7 @@ import com.codegym.aiplanning.entity.material.MaterialStatus;
 import com.codegym.aiplanning.entity.material.MaterialType;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import com.codegym.aiplanning.entity.roadmap.RoadmapSource;
 import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
@@ -32,14 +34,17 @@ import com.codegym.aiplanning.repository.roadmap.RoadmapVersionRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.roadmap.impl.AiRoadmapPersistenceService;
 import com.codegym.aiplanning.service.roadmap.model.GeneratedRoadmapPlan;
+import com.codegym.aiplanning.service.roadmap.model.GeneratedRoadmapPlan.GeneratedLearningUnit;
 import com.codegym.aiplanning.service.roadmap.model.GeneratedRoadmapPlan.GeneratedMilestone;
 import com.codegym.aiplanning.service.roadmap.model.GeneratedRoadmapPlan.GeneratedTopic;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -140,6 +145,40 @@ class AiRoadmapPersistenceServiceTest {
     }
 
     @Test
+    void activatedRoadmapCannotGenerateAnotherVersion() {
+        when(roadmapRepository.findOwnedByIdForUpdate(roadmapId, userId))
+                .thenReturn(Optional.of(roadmap));
+        when(roadmap.getStatus()).thenReturn(RoadmapStatus.ACTIVE);
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.prepare(userId, roadmapId, List.of()));
+
+        assertEquals(ErrorCode.ROADMAP_ALREADY_ACTIVATED, exception.errorCode());
+        verify(roadmapSourceRepository, never()).findByRoadmapId(roadmapId);
+    }
+
+    @Test
+    void activatedRoadmapRejectsAQueuedGenerationThatFinishesAfterActivation() {
+        when(roadmapRepository.findOwnedByIdForUpdate(roadmapId, userId))
+                .thenReturn(Optional.of(roadmap));
+        when(roadmap.getStatus()).thenReturn(RoadmapStatus.ACTIVE);
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.saveGeneratedVersion(
+                        userId,
+                        roadmapId,
+                        validPlan(),
+                        RoadmapVersionOrigin.AI_GENERATED));
+
+        assertEquals(ErrorCode.ROADMAP_ALREADY_ACTIVATED, exception.errorCode());
+        verify(roadmapVersionRepository, never())
+                .saveAndFlush(any(RoadmapVersion.class));
+        verify(roadmapItemRepository, never()).save(any(RoadmapItem.class));
+    }
+
+    @Test
     void regenerationSupersedesTheDraftWithoutDeletingItsHistory() {
         when(owner.getEmail()).thenReturn("user@example.com");
         when(roadmap.getId()).thenReturn(roadmapId);
@@ -171,6 +210,14 @@ class AiRoadmapPersistenceServiceTest {
                     }
                     return item;
                 });
+        when(roadmapItemRepository.saveAndFlush(any(RoadmapItem.class)))
+                .thenAnswer(invocation -> {
+                    RoadmapItem item = invocation.getArgument(0, RoadmapItem.class);
+                    if (item.getId() == null) {
+                        ReflectionTestUtils.setField(item, "id", UUID.randomUUID());
+                    }
+                    return item;
+                });
         when(roadmapItemRepository.findAllByRoadmapVersionIds(anyList()))
                 .thenReturn(List.of());
 
@@ -191,12 +238,53 @@ class AiRoadmapPersistenceServiceTest {
                         .ROADMAP_VERSION_REGENERATED_BY_AI),
                 eq("RoadmapVersion"),
                 any());
+
+        ArgumentCaptor<RoadmapItem> savedItemCaptor =
+                ArgumentCaptor.forClass(RoadmapItem.class);
+        ArgumentCaptor<RoadmapItem> flushedItemCaptor =
+                ArgumentCaptor.forClass(RoadmapItem.class);
+        verify(roadmapItemRepository, times(9)).save(savedItemCaptor.capture());
+        verify(roadmapItemRepository, times(6)).saveAndFlush(flushedItemCaptor.capture());
+        List<RoadmapItem> savedItems = new ArrayList<>(savedItemCaptor.getAllValues());
+        savedItems.addAll(flushedItemCaptor.getAllValues());
+        assertEquals(
+                3,
+                savedItems.stream()
+                        .filter(item -> item.getItemType() == RoadmapItemType.MILESTONE)
+                        .count());
+        assertEquals(
+                6,
+                savedItems.stream()
+                        .filter(item -> item.getItemType() == RoadmapItemType.TOPIC)
+                        .count());
+        assertEquals(
+                6,
+                savedItems.stream()
+                        .filter(item -> item.getItemType() == RoadmapItemType.LEARNING_UNIT)
+                        .count());
+        savedItems.stream()
+                .filter(item -> item.getItemType() == RoadmapItemType.LEARNING_UNIT)
+                .forEach(unit -> assertEquals(
+                        RoadmapItemType.TOPIC,
+                        unit.getParent().getItemType()));
     }
 
     private GeneratedRoadmapPlan validPlan() {
         List<GeneratedTopic> topics = List.of(
                 new GeneratedTopic("Chủ đề 1", "Mô tả", 0, 60),
                 new GeneratedTopic("Chủ đề 2", "Mô tả", 1, 60));
+        topics = topics.stream()
+                .map(topic -> new GeneratedTopic(
+                        topic.title(),
+                        topic.description(),
+                        topic.orderIndex(),
+                        topic.estimatedMinutes(),
+                        List.of(new GeneratedLearningUnit(
+                                "Concrete learning outcome",
+                                "One independently completable unit",
+                                0,
+                                30))))
+                .toList();
         return new GeneratedRoadmapPlan(
                 "Lộ trình",
                 "Mô tả",

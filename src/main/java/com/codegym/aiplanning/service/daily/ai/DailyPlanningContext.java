@@ -75,12 +75,35 @@ public record DailyPlanningContext(
 
     public record RoadmapTopic(
             UUID roadmapItemId,
+            UUID parentTopicId,
+            String parentTopicTitle,
             UUID milestoneId,
             String milestoneTitle,
             String title,
             String description,
             int estimatedMinutes,
-            int orderIndex) {}
+            int orderIndex) {
+
+        public RoadmapTopic(
+                UUID roadmapItemId,
+                UUID milestoneId,
+                String milestoneTitle,
+                String title,
+                String description,
+                int estimatedMinutes,
+                int orderIndex) {
+            this(
+                    roadmapItemId,
+                    roadmapItemId,
+                    title,
+                    milestoneId,
+                    milestoneTitle,
+                    title,
+                    description,
+                    estimatedMinutes,
+                    orderIndex);
+        }
+    }
 
     public record ProgressSignal(
             UUID progressEntryId,

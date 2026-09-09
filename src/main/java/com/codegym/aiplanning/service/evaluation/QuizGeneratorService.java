@@ -21,12 +21,12 @@ public interface QuizGeneratorService {
     ) {}
 
     GeneratedQuizPlan generateDailyQuizQuestions(
-            UUID userId, UUID dailyPlanId, List<UUID> completedTopicItemIds);
+            UUID userId, UUID dailyPlanId, List<UUID> completedLearningUnitIds);
 
     GeneratedQuizPlan generateDailyQuizQuestions(
             UUID userId,
             UUID dailyPlanId,
-            List<UUID> completedTopicItemIds,
+            List<UUID> completedLearningUnitIds,
             AiProviderConfig providerConfig);
 
     GeneratedQuizPlan generateMasteryCheckQuestions(

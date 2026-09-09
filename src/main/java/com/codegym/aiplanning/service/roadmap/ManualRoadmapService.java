@@ -1,17 +1,17 @@
 package com.codegym.aiplanning.service.roadmap;
 
+import com.codegym.aiplanning.controller.roadmap.dto.CreateLearningUnitRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.CreateMilestoneRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.CreateRoadmapRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.CreateTopicRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapItemResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapResponse;
+import com.codegym.aiplanning.controller.roadmap.dto.RoadmapSummaryResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapVersionResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.UpdateRoadmapItemRequest;
-import java.util.List;
-import java.util.UUID;
-import com.codegym.aiplanning.controller.roadmap.dto.RoadmapSummaryResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.UpdateRoadmapRequest;
 import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
+import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -23,6 +23,8 @@ public interface ManualRoadmapService {
             UUID userId, String query, RoadmapStatus status, Pageable pageable);
 
     RoadmapResponse get(UUID userId, UUID roadmapId);
+
+    RoadmapResponse createEditableCopy(UUID userId, UUID roadmapId);
 
     RoadmapResponse update(
             UUID userId, UUID roadmapId, UpdateRoadmapRequest request);
@@ -40,6 +42,13 @@ public interface ManualRoadmapService {
             UUID versionId,
             UUID milestoneId,
             CreateTopicRequest request);
+
+    RoadmapItemResponse addLearningUnit(
+            UUID userId,
+            UUID roadmapId,
+            UUID versionId,
+            UUID topicId,
+            CreateLearningUnitRequest request);
 
     RoadmapItemResponse updateItem(
             UUID userId,

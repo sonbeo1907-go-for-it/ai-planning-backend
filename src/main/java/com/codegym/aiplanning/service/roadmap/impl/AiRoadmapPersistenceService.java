@@ -28,6 +28,7 @@ import com.codegym.aiplanning.service.roadmap.RoadmapGenerationContext.SourceDoc
 import com.codegym.aiplanning.service.roadmap.model.GeneratedRoadmapPlan;
 import com.codegym.aiplanning.service.roadmap.model.GeneratedRoadmapPlan.GeneratedMilestone;
 import com.codegym.aiplanning.service.roadmap.model.GeneratedRoadmapPlan.GeneratedTopic;
+import com.codegym.aiplanning.service.roadmap.model.GeneratedRoadmapPlan.GeneratedLearningUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -81,6 +82,7 @@ public class AiRoadmapPersistenceService {
                     ErrorCode.INVALID_STATUS_TRANSITION,
                     "An archived Roadmap cannot generate a new version.");
         }
+        requireNotActivated(roadmap);
 
         List<RoadmapSource> existingLinks = roadmapSourceRepository.findByRoadmapId(roadmapId);
         attachSelectedMaterials(userId, roadmap, existingLinks, selectedMaterialIds);
@@ -108,6 +110,7 @@ public class AiRoadmapPersistenceService {
             GeneratedRoadmapPlan plan,
             RoadmapVersionOrigin origin) {
         Roadmap roadmap = requireOwnedRoadmapForUpdate(userId, roadmapId);
+        requireNotActivated(roadmap);
         supersedeExistingDraft(roadmapId);
 
         int nextVersionNumber = roadmapVersionRepository
@@ -234,6 +237,16 @@ public class AiRoadmapPersistenceService {
                 });
     }
 
+    private void requireNotActivated(Roadmap roadmap) {
+        if (roadmap.getStatus() == RoadmapStatus.ACTIVE
+                || roadmap.getActiveVersionId() != null) {
+            throw new BusinessException(
+                    ErrorCode.ROADMAP_ALREADY_ACTIVATED,
+                    "This Roadmap has already been activated. "
+                            + "Create an editable copy as a new Roadmap instead.");
+        }
+    }
+
     private void persistItems(RoadmapVersion version, GeneratedRoadmapPlan plan) {
         for (GeneratedMilestone generatedMilestone : plan.milestones()) {
             RoadmapItem milestone = roadmapItemRepository.save(RoadmapItem.milestone(
@@ -242,13 +255,22 @@ public class AiRoadmapPersistenceService {
                     generatedMilestone.description(),
                     generatedMilestone.orderIndex()));
             for (GeneratedTopic generatedTopic : generatedMilestone.topics()) {
-                roadmapItemRepository.save(RoadmapItem.topic(
+                RoadmapItem topic = roadmapItemRepository.saveAndFlush(RoadmapItem.topic(
                         version,
                         milestone,
                         generatedTopic.title(),
                         generatedTopic.description(),
                         generatedTopic.orderIndex(),
                         generatedTopic.estimatedMinutes()));
+                for (GeneratedLearningUnit generatedUnit : generatedTopic.learningUnits()) {
+                    roadmapItemRepository.save(RoadmapItem.learningUnit(
+                            version,
+                            topic,
+                            generatedUnit.title(),
+                            generatedUnit.description(),
+                            generatedUnit.orderIndex(),
+                            generatedUnit.estimatedMinutes()));
+                }
             }
         }
         roadmapItemRepository.flush();
@@ -258,9 +280,15 @@ public class AiRoadmapPersistenceService {
         List<RoadmapItem> items = roadmapItemRepository
                 .findAllByRoadmapVersionIds(List.of(version.getId()));
         Map<UUID, List<RoadmapItem>> topicsByMilestoneId = new HashMap<>();
+        Map<UUID, List<RoadmapItem>> unitsByTopicId = new HashMap<>();
         for (RoadmapItem item : items) {
             if (item.getItemType() == RoadmapItemType.TOPIC && item.getParent() != null) {
                 topicsByMilestoneId
+                        .computeIfAbsent(item.getParent().getId(), ignored -> new ArrayList<>())
+                        .add(item);
+            } else if (item.getItemType() == RoadmapItemType.LEARNING_UNIT
+                    && item.getParent() != null) {
+                unitsByTopicId
                         .computeIfAbsent(item.getParent().getId(), ignored -> new ArrayList<>())
                         .add(item);
             }
@@ -273,7 +301,15 @@ public class AiRoadmapPersistenceService {
                         topicsByMilestoneId
                                 .getOrDefault(milestone.getId(), List.of())
                                 .stream()
-                                .map(topic -> RoadmapItemResponse.from(topic, List.of()))
+                                .map(topic -> RoadmapItemResponse.from(
+                                        topic,
+                                        List.of(),
+                                        unitsByTopicId
+                                                .getOrDefault(topic.getId(), List.of())
+                                                .stream()
+                                                .map(unit -> RoadmapItemResponse.from(
+                                                        unit, List.of(), List.of()))
+                                                .toList()))
                                 .toList()))
                 .toList();
         return RoadmapVersionResponse.from(version, milestones);

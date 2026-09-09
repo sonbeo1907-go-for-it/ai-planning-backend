@@ -2,10 +2,12 @@ package com.codegym.aiplanning.controller.roadmap;
 
 import com.codegym.aiplanning.common.api.ApiResponse;
 import com.codegym.aiplanning.common.constant.ApiConstant;
+import com.codegym.aiplanning.controller.roadmap.dto.CreateLearningUnitRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.CreateMilestoneRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.CreateRoadmapRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.CreateTopicRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapItemResponse;
+import com.codegym.aiplanning.controller.roadmap.dto.RoadmapProgressResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapSummaryResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapVersionResponse;
@@ -13,6 +15,7 @@ import com.codegym.aiplanning.controller.roadmap.dto.UpdateRoadmapItemRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.UpdateRoadmapRequest;
 import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
 import com.codegym.aiplanning.service.roadmap.ManualRoadmapService;
+import com.codegym.aiplanning.service.roadmap.RoadmapProgressService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -43,9 +46,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class ManualRoadmapController {
 
     private final ManualRoadmapService manualRoadmapService;
+    private final RoadmapProgressService roadmapProgressService;
 
-    public ManualRoadmapController(ManualRoadmapService manualRoadmapService) {
+    public ManualRoadmapController(
+            ManualRoadmapService manualRoadmapService,
+            RoadmapProgressService roadmapProgressService) {
         this.manualRoadmapService = manualRoadmapService;
+        this.roadmapProgressService = roadmapProgressService;
     }
 
     @PostMapping
@@ -79,8 +86,32 @@ public class ManualRoadmapController {
         return ApiResponse.of(manualRoadmapService.get(userId(jwt), roadmapId));
     }
 
+    @PostMapping(ApiConstant.ROADMAP_COPY)
+    @Operation(
+            summary = "Create an editable copy of an activated Roadmap",
+            description = "Copies the active content hierarchy and source links into a new "
+                    + "owner-scoped Roadmap with Version 1 in DRAFT. Progress and learning "
+                    + "history are not copied.")
+    public ApiResponse<RoadmapResponse> createEditableCopy(
+            @PathVariable UUID roadmapId,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ApiResponse.of(
+                manualRoadmapService.createEditableCopy(userId(jwt), roadmapId));
+    }
+
+    @GetMapping(ApiConstant.ROADMAP_PROGRESS)
+    @Operation(summary = "Read progress for the active RoadmapVersion")
+    public ApiResponse<RoadmapProgressResponse> getProgress(
+            @PathVariable UUID roadmapId, @AuthenticationPrincipal Jwt jwt) {
+        return ApiResponse.of(
+                roadmapProgressService.getProgress(userId(jwt), roadmapId));
+    }
+
     @PatchMapping(ApiConstant.ROADMAP_BY_ID)
-    @Operation(summary = "Update owner-controlled Roadmap title and description")
+    @Operation(
+            summary = "Update draft Roadmap title and description",
+            description = "An activated Roadmap is immutable. Create an editable Roadmap copy "
+                    + "before changing its metadata.")
     public ApiResponse<RoadmapResponse> update(
             @PathVariable UUID roadmapId,
             @Valid @RequestBody UpdateRoadmapRequest request,
@@ -90,7 +121,10 @@ public class ManualRoadmapController {
     }
 
     @PostMapping(ApiConstant.ROADMAP_VERSIONS)
-    @Operation(summary = "Create the next editable draft RoadmapVersion")
+    @Operation(
+            summary = "Initialize a draft version for a Roadmap without content",
+            description = "Available only before activation. An activated Roadmap is immutable; "
+                    + "create an editable Roadmap copy instead.")
     public ApiResponse<RoadmapVersionResponse> createDraftVersion(
             @PathVariable UUID roadmapId, @AuthenticationPrincipal Jwt jwt) {
         return ApiResponse.of(
@@ -98,7 +132,7 @@ public class ManualRoadmapController {
     }
 
     @GetMapping(ApiConstant.ROADMAP_VERSION_BY_ID)
-    @Operation(summary = "Read one exact RoadmapVersion and its Milestones and Topics")
+    @Operation(summary = "Read one exact RoadmapVersion and its complete item hierarchy")
     public ApiResponse<RoadmapVersionResponse> getVersion(
             @PathVariable UUID roadmapId,
             @PathVariable UUID versionId,
@@ -130,8 +164,20 @@ public class ManualRoadmapController {
                 userId(jwt), roadmapId, versionId, milestoneId, request));
     }
 
+    @PostMapping(ApiConstant.ROADMAP_VERSION_LEARNING_UNITS)
+    @Operation(summary = "Add an executable Learning Unit to a Topic in a draft RoadmapVersion")
+    public ApiResponse<RoadmapItemResponse> addLearningUnit(
+            @PathVariable UUID roadmapId,
+            @PathVariable UUID versionId,
+            @PathVariable UUID topicId,
+            @Valid @RequestBody CreateLearningUnitRequest request,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ApiResponse.of(manualRoadmapService.addLearningUnit(
+                userId(jwt), roadmapId, versionId, topicId, request));
+    }
+
     @PatchMapping(ApiConstant.ROADMAP_VERSION_ITEM_BY_ID)
-    @Operation(summary = "Edit and reorder a draft Milestone or Topic")
+    @Operation(summary = "Edit and reorder a draft Roadmap item")
     public ApiResponse<RoadmapItemResponse> updateItem(
             @PathVariable UUID roadmapId,
             @PathVariable UUID versionId,
@@ -144,7 +190,7 @@ public class ManualRoadmapController {
 
     @DeleteMapping(ApiConstant.ROADMAP_VERSION_ITEM_BY_ID)
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @Operation(summary = "Delete a Milestone or Topic from a draft RoadmapVersion")
+    @Operation(summary = "Delete an item from a draft RoadmapVersion")
     public void deleteItem(
             @PathVariable UUID roadmapId,
             @PathVariable UUID versionId,

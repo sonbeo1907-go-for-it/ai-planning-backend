@@ -134,32 +134,47 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
     private RoadmapContext buildRoadmapContext(
             Roadmap roadmap, RoadmapVersion activeVersion) {
         List<RoadmapItem> items = roadmapItemRepository
-                .findAllByRoadmapVersionIdOrderByOrderIndexAsc(activeVersion.getId());
+                .findAllByRoadmapVersionIds(List.of(activeVersion.getId()));
         Map<UUID, RoadmapItem> milestones = items.stream()
                 .filter(item -> item.getItemType() == RoadmapItemType.MILESTONE)
                 .collect(Collectors.toMap(
                         RoadmapItem::getId,
                         Function.identity()));
 
-        List<RoadmapTopic> topics = items.stream()
+        Map<UUID, List<RoadmapItem>> unitsByTopicId = items.stream()
+                .filter(item -> item.getItemType() == RoadmapItemType.LEARNING_UNIT)
+                .filter(item -> item.getParent() != null)
+                .collect(Collectors.groupingBy(
+                        item -> item.getParent().getId(),
+                        LinkedHashMap::new,
+                        Collectors.toList()));
+
+        List<RoadmapItem> orderedTopics = items.stream()
                 .filter(item -> item.getItemType() == RoadmapItemType.TOPIC)
                 .sorted(Comparator
                         .comparingInt((RoadmapItem item) -> milestoneOrder(item, milestones))
                         .thenComparingInt(RoadmapItem::getOrderIndex))
-                .map(item -> {
-                    RoadmapItem milestone = item.getParent() == null
-                            ? null
-                            : milestones.get(item.getParent().getId());
-                    return new RoadmapTopic(
-                            item.getId(),
-                            milestone == null ? null : milestone.getId(),
-                            milestone == null ? null : milestone.getTitle(),
-                            item.getTitle(),
-                            item.getDescription(),
-                            item.getEstimatedMinutes(),
-                            item.getOrderIndex());
-                })
                 .toList();
+
+        List<RoadmapTopic> topics = new ArrayList<>();
+        for (RoadmapItem topic : orderedTopics) {
+            RoadmapItem milestone = topic.getParent() == null
+                    ? null
+                    : milestones.get(topic.getParent().getId());
+            List<RoadmapItem> learningUnits = unitsByTopicId
+                    .getOrDefault(topic.getId(), List.of())
+                    .stream()
+                    .sorted(Comparator.comparingInt(RoadmapItem::getOrderIndex))
+                    .toList();
+            if (learningUnits.isEmpty()) {
+                throw invalidPlan(
+                        "Every Topic in the ACTIVE RoadmapVersion must contain at least one Learning Unit.");
+            }
+            for (RoadmapItem learningUnit : learningUnits) {
+                topics.add(toExecutableRoadmapItem(
+                        learningUnit, topic, milestone));
+            }
+        }
 
         if (topics.isEmpty()) {
             throw invalidPlan("The selected Roadmap ACTIVE version has no topics.");
@@ -172,6 +187,22 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
                 roadmap.getTitle(),
                 roadmap.getDescription(),
                 topics);
+    }
+
+    private RoadmapTopic toExecutableRoadmapItem(
+            RoadmapItem executableItem,
+            RoadmapItem topic,
+            RoadmapItem milestone) {
+        return new RoadmapTopic(
+                executableItem.getId(),
+                topic.getId(),
+                topic.getTitle(),
+                milestone == null ? null : milestone.getId(),
+                milestone == null ? null : milestone.getTitle(),
+                executableItem.getTitle(),
+                executableItem.getDescription(),
+                executableItem.getEstimatedMinutes(),
+                executableItem.getOrderIndex());
     }
 
     private int milestoneOrder(

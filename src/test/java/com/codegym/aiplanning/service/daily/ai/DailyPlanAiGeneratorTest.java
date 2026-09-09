@@ -12,6 +12,7 @@ import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.entity.ai.AiPurpose;
 import com.codegym.aiplanning.entity.daily.DailyTaskStatus;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import com.codegym.aiplanning.service.ai.AiClientService;
 import com.codegym.aiplanning.service.evaluation.WeakTopicContextResolver.WeakTopicPromptContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -105,9 +106,10 @@ class DailyPlanAiGeneratorTest {
     @Test
     void generate_includesWeakTopicPromptInstructionsAndContext() {
         UUID weakTopicId = UUID.randomUUID();
-        WeakTopicPromptContext weakTopic = new WeakTopicPromptContext(
+        WeakTopicPromptContext weakTopic = weakLearningUnit(
                 weakTopicId,
                 roadmapItemId,
+                "Configure authentication",
                 "Spring Security",
                 "Week 1",
                 2,
@@ -155,17 +157,19 @@ class DailyPlanAiGeneratorTest {
     }
 
     @Test
-    void generate_whenMultipleWeakTopics_serializesAllInUserPrompt() {
-        WeakTopicPromptContext wt1 = new WeakTopicPromptContext(
+    void generate_whenWeakTopicsIncludeAnotherRoadmap_filtersToActiveLearningUnits() {
+        WeakTopicPromptContext wt1 = weakLearningUnit(
                 UUID.randomUUID(),
                 roadmapItemId,
+                "Configure authentication",
                 "Spring Security",
                 "Week 1",
                 2,
                 70.0);
-        WeakTopicPromptContext wt2 = new WeakTopicPromptContext(
+        WeakTopicPromptContext wt2 = weakLearningUnit(
                 UUID.randomUUID(),
                 UUID.randomUUID(),
+                "Configure audit listeners",
                 "JPA Auditing",
                 "Week 2",
                 1,
@@ -202,7 +206,7 @@ class DailyPlanAiGeneratorTest {
 
         assertThat(userPromptCaptor.getValue())
                 .contains("Spring Security")
-                .contains("JPA Auditing");
+                .doesNotContain("JPA Auditing");
     }
 
     @Test
@@ -355,5 +359,27 @@ class DailyPlanAiGeneratorTest {
                   "adjustments": []
                 }
                 """.formatted(roadmapItemId, plannedMinutes);
+    }
+
+    private WeakTopicPromptContext weakLearningUnit(
+            UUID weakTopicId,
+            UUID learningUnitId,
+            String learningUnitTitle,
+            String topicTitle,
+            String milestoneTitle,
+            Integer rating,
+            Double score) {
+        return new WeakTopicPromptContext(
+                weakTopicId,
+                learningUnitId,
+                RoadmapItemType.LEARNING_UNIT,
+                learningUnitId,
+                learningUnitTitle,
+                UUID.randomUUID(),
+                topicTitle,
+                UUID.randomUUID(),
+                milestoneTitle,
+                rating,
+                score);
     }
 }

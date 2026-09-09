@@ -29,6 +29,14 @@ class AiRoadmapSchemaValidatorTest {
         assertEquals(3, result.milestones().size());
         assertEquals(2, result.milestones().get(0).topics().size());
         assertEquals(60, result.milestones().get(0).topics().get(0).estimatedMinutes());
+        assertEquals(
+                1,
+                result.milestones()
+                        .get(0)
+                        .topics()
+                        .get(0)
+                        .learningUnits()
+                        .size());
     }
 
     @Test
@@ -49,6 +57,20 @@ class AiRoadmapSchemaValidatorTest {
         ObjectNode firstTopic =
                 (ObjectNode) firstMilestone.withArray("topics").get(0);
         firstTopic.put("estimatedMinutes", 0);
+
+        assertThrows(
+                InvalidAiRoadmapResponseException.class,
+                () -> validator.validate(objectMapper.writeValueAsString(roadmap)));
+    }
+
+    @Test
+    void rejectsTopicsWithoutConcreteLearningUnits() throws Exception {
+        ObjectNode roadmap = validRoadmap();
+        ObjectNode firstMilestone =
+                (ObjectNode) roadmap.withArray("milestones").get(0);
+        ObjectNode firstTopic =
+                (ObjectNode) firstMilestone.withArray("topics").get(0);
+        firstTopic.withArray("learningUnits").removeAll();
 
         assertThrows(
                 InvalidAiRoadmapResponseException.class,
@@ -93,6 +115,12 @@ class AiRoadmapSchemaValidatorTest {
                 topic.put("description", "Mô tả chủ đề");
                 topic.put("orderIndex", topicIndex);
                 topic.put("estimatedMinutes", 60);
+                ArrayNode learningUnits = topic.putArray("learningUnits");
+                ObjectNode learningUnit = learningUnits.addObject();
+                learningUnit.put("title", "ÄÆ¡n vá»‹ há»c " + topicIndex);
+                learningUnit.put("description", "Má»¥c tiÃªu há»c táº­p cá»¥ thá»ƒ");
+                learningUnit.put("orderIndex", 0);
+                learningUnit.put("estimatedMinutes", 30);
             }
         }
         return roadmap;

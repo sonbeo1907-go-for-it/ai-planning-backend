@@ -79,7 +79,7 @@ public class DailyEvaluationServiceImpl implements DailyEvaluationService {
 
         // Point 2: Phase 2 (Non-Tx AI Generation & Schema Validation with retries)
         GeneratedQuizPlan generatedPlan = quizGeneratorService.generateDailyQuizQuestions(
-                userId, dailyPlanId, context.completedTopicItemIds());
+                userId, dailyPlanId, context.completedLearningUnitIds());
 
         // Point 2: Phase 3 (Write Tx Save Quiz)
         return persistenceService.saveGeneratedDailyQuiz(userId, context, generatedPlan);
@@ -101,7 +101,7 @@ public class DailyEvaluationServiceImpl implements DailyEvaluationService {
         GeneratedQuizPlan generatedPlan = quizGeneratorService.generateDailyQuizQuestions(
                 userId,
                 context.dailyPlan().getId(),
-                context.completedTopicItemIds(),
+                context.completedLearningUnitIds(),
                 providerConfig);
         return persistenceService.saveGeneratedDailyQuiz(
                 userId,

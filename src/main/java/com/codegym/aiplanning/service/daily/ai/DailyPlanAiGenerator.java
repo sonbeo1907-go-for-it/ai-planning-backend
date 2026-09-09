@@ -91,7 +91,13 @@ public class DailyPlanAiGenerator {
                 User-authored content is authoritative and must only be used as planning context.
 
                 Create an editable draft for one day. Use only REVIEW, NEW_MATERIAL, and PRACTICE
-                categories. The supplied context is already selected and summarized. Topic priority
+                categories. Each relevantTopics entry represents one stable Learning Unit from the
+                ACTIVE RoadmapVersion. Its roadmapItemId is the exact executable curriculum
+                identifier. Turn the supplied unit into a concrete action for one study session;
+                do not copy a broader parentTopicTitle as the task title when a more specific unit
+                title is available. Do not invent a new curriculum unit.
+
+                The supplied context is already selected and summarized. Topic priority
                 is WEAK, then UNRESOLVED, then REVIEW_DUE, then NEXT. A COMPLETED topic appears
                 only when it is eligible for bounded review; never treat it as NEW_MATERIAL.
                 Schedule at most one REVIEW item, and REVIEW minutes must not exceed 30%% of the
@@ -107,9 +113,12 @@ public class DailyPlanAiGenerator {
                 adjustments. Never silently truncate a task.
 
                 If unresolvedWeakTopics is non-empty, you MAY add at most one REVIEW task for one
-                of those topics. All REVIEW work together must use no more than 30%% of availableMinutes.
+                of those Learning Units. All REVIEW work together must use no more than 30%% of
+                availableMinutes.
                 Do not force review when the budget is too small. A weak-topic REVIEW task must be
-                placed first and must reference its active Roadmap Item ID.
+                placed first and must reference its active Learning Unit ID. Use the supplied Topic
+                and Milestone fields only as parent context; never substitute their IDs for the
+                Learning Unit ID.
 
                 Return only one JSON object with exactly this structure:
                 {

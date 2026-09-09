@@ -290,6 +290,14 @@ class DailyEvaluationControllerIntegrationTest {
                 RoadmapItem.milestone(roadmapVersion, "Week 1", "", 0));
         RoadmapItem topic = roadmapItemRepository.saveAndFlush(
                 RoadmapItem.topic(roadmapVersion, milestone, "Topic", "", 0, 60));
+        RoadmapItem learningUnit = roadmapItemRepository.saveAndFlush(
+                RoadmapItem.learningUnit(
+                        roadmapVersion,
+                        topic,
+                        "Apply the topic",
+                        "",
+                        0,
+                        60));
         DailyPlan plan = dailyPlanRepository.saveAndFlush(DailyPlan.create(
                 user.getId(),
                 LocalDate.now(),
@@ -311,7 +319,7 @@ class DailyEvaluationControllerIntegrationTest {
                 login(email),
                 roadmap,
                 roadmapVersion,
-                topic,
+                learningUnit,
                 plan,
                 dailyVersion);
     }

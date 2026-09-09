@@ -14,10 +14,41 @@ public record RoadmapItemResponse(
         String description,
         int orderIndex,
         Integer estimatedMinutes,
-        List<RoadmapItemResponse> topics) {
+        List<RoadmapItemResponse> topics,
+        List<RoadmapItemResponse> learningUnits) {
+
+    public RoadmapItemResponse(
+            UUID id,
+            long version,
+            RoadmapItemType itemType,
+            UUID parentItemId,
+            String title,
+            String description,
+            int orderIndex,
+            Integer estimatedMinutes,
+            List<RoadmapItemResponse> topics) {
+        this(
+                id,
+                version,
+                itemType,
+                parentItemId,
+                title,
+                description,
+                orderIndex,
+                estimatedMinutes,
+                topics,
+                List.of());
+    }
 
     public static RoadmapItemResponse from(
             RoadmapItem item, List<RoadmapItemResponse> topics) {
+        return from(item, topics, List.of());
+    }
+
+    public static RoadmapItemResponse from(
+            RoadmapItem item,
+            List<RoadmapItemResponse> topics,
+            List<RoadmapItemResponse> learningUnits) {
         return new RoadmapItemResponse(
                 item.getId(),
                 item.getVersion(),
@@ -27,7 +58,8 @@ public record RoadmapItemResponse(
                 item.getDescription(),
                 item.getOrderIndex(),
                 item.getEstimatedMinutes(),
-                topics == null ? List.of() : topics);
+                topics == null ? List.of() : topics,
+                learningUnits == null ? List.of() : learningUnits);
     }
 
     @Override

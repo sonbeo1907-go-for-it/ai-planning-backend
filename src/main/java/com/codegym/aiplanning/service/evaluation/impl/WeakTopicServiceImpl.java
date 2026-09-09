@@ -17,6 +17,7 @@ import com.codegym.aiplanning.entity.evaluation.WeakTopicStatus;
 import com.codegym.aiplanning.entity.evaluation.WeakTopicTrigger;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.repository.evaluation.QuizRepository;
 import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
@@ -107,8 +108,9 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
             if (!existingWeakTopic.getRoadmap().getId().equals(roadmapId)) {
                 throw new BusinessException(
                         ErrorCode.RESOURCE_NOT_FOUND,
-                        "Roadmap topic not found");
+                        "Roadmap Learning Unit was not found.");
             }
+            requireLearningUnitHierarchy(existingWeakTopic.getRoadmapItem());
             existingWeakTopic.updateTrigger(triggerSource, quizScore, understandingRating, Instant.now());
             weakTopicRepository.save(existingWeakTopic);
         } else {
@@ -117,15 +119,14 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
             RoadmapItem roadmapItem = roadmapItemRepository.findOwnedById(roadmapItemId, userId)
                     .orElseThrow(() -> new BusinessException(
                             ErrorCode.RESOURCE_NOT_FOUND,
-                            "Roadmap topic not found"));
+                            "Roadmap Learning Unit was not found."));
             Roadmap roadmap = roadmapItem.getRoadmapVersion().getRoadmap();
-            if (!roadmap.getId().equals(roadmapId)
-                    || roadmapItem.getItemType()
-                    != com.codegym.aiplanning.entity.roadmap.RoadmapItemType.TOPIC) {
+            if (!roadmap.getId().equals(roadmapId)) {
                 throw new BusinessException(
                         ErrorCode.RESOURCE_NOT_FOUND,
-                        "Roadmap topic not found");
+                        "Roadmap Learning Unit was not found.");
             }
+            requireLearningUnitHierarchy(roadmapItem);
 
             WeakTopic newWeakTopic = WeakTopic.create(
                     user,
@@ -164,14 +165,17 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
 
         return unresolvedTopics.stream()
                 .map(wt -> {
-                    String milestoneTitle = wt.getRoadmapItem().getParent() != null
-                            ? wt.getRoadmapItem().getParent().getTitle()
-                            : null;
+                    LearningTargetHierarchy hierarchy = hierarchyOf(wt.getRoadmapItem());
                     return new WeakTopicPromptContext(
                             wt.getId(),
                             wt.getRoadmapItem().getId(),
-                            wt.getRoadmapItem().getTitle(),
-                            milestoneTitle,
+                            wt.getRoadmapItem().getItemType(),
+                            hierarchy.learningUnitId(),
+                            hierarchy.learningUnitTitle(),
+                            hierarchy.topicId(),
+                            hierarchy.topicTitle(),
+                            hierarchy.milestoneId(),
+                            hierarchy.milestoneTitle(),
                             wt.getLastUnderstandingRating(),
                             wt.getLastQuizScore() != null ? wt.getLastQuizScore().doubleValue() : null
                     );
@@ -309,13 +313,19 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
 
     private WeakTopicResponse toResponse(WeakTopic weakTopic) {
         RoadmapItem item = weakTopic.getRoadmapItem();
+        LearningTargetHierarchy hierarchy = hierarchyOf(item);
         return new WeakTopicResponse(
                 weakTopic.getId(),
                 weakTopic.getRoadmap().getId(),
                 weakTopic.getRoadmapVersion().getId(),
                 item.getId(),
-                item.getTitle(),
-                item.getParent() == null ? null : item.getParent().getTitle(),
+                item.getItemType(),
+                hierarchy.learningUnitId(),
+                hierarchy.learningUnitTitle(),
+                hierarchy.topicId(),
+                hierarchy.topicTitle(),
+                hierarchy.milestoneId(),
+                hierarchy.milestoneTitle(),
                 weakTopic.getStatus(),
                 weakTopic.getTriggerSource(),
                 weakTopic.getLastQuizScore(),
@@ -323,6 +333,69 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
                 weakTopic.getUnresolvedAt(),
                 weakTopic.getMasteredAt());
     }
+
+    private void requireLearningUnitHierarchy(RoadmapItem item) {
+        if (item.getItemType() != RoadmapItemType.LEARNING_UNIT
+                || item.getRoadmapVersion() == null) {
+            throw invalidWeakTopicTarget();
+        }
+        RoadmapItem topic = item.getParent();
+        RoadmapItem milestone = topic == null ? null : topic.getParent();
+        UUID versionId = item.getRoadmapVersion().getId();
+        boolean valid = topic != null
+                && topic.getItemType() == RoadmapItemType.TOPIC
+                && topic.getRoadmapVersion() != null
+                && versionId.equals(topic.getRoadmapVersion().getId())
+                && milestone != null
+                && milestone.getItemType() == RoadmapItemType.MILESTONE
+                && milestone.getRoadmapVersion() != null
+                && versionId.equals(milestone.getRoadmapVersion().getId());
+        if (!valid) {
+            throw invalidWeakTopicTarget();
+        }
+    }
+
+    private BusinessException invalidWeakTopicTarget() {
+        return new BusinessException(
+                ErrorCode.ROADMAP_STRUCTURE_INCOMPLETE,
+                "Weak Topic signals must target a Learning Unit inside a Topic and Milestone.");
+    }
+
+    /**
+     * Maps both the strict V2 Learning Unit target and any readable legacy Topic target.
+     * Legacy rows are exposed with null Learning Unit fields and are never accepted for new
+     * weakness signals.
+     */
+    private LearningTargetHierarchy hierarchyOf(RoadmapItem item) {
+        if (item.getItemType() == RoadmapItemType.LEARNING_UNIT) {
+            RoadmapItem topic = item.getParent();
+            RoadmapItem milestone = topic == null ? null : topic.getParent();
+            return new LearningTargetHierarchy(
+                    item.getId(),
+                    item.getTitle(),
+                    topic == null ? null : topic.getId(),
+                    topic == null ? null : topic.getTitle(),
+                    milestone == null ? null : milestone.getId(),
+                    milestone == null ? null : milestone.getTitle());
+        }
+
+        RoadmapItem milestone = item.getParent();
+        return new LearningTargetHierarchy(
+                null,
+                null,
+                item.getId(),
+                item.getTitle(),
+                milestone == null ? null : milestone.getId(),
+                milestone == null ? null : milestone.getTitle());
+    }
+
+    private record LearningTargetHierarchy(
+            UUID learningUnitId,
+            String learningUnitTitle,
+            UUID topicId,
+            String topicTitle,
+            UUID milestoneId,
+            String milestoneTitle) {}
 
     private WeakTopic requireOwnedWeakTopic(UUID userId, UUID weakTopicId) {
         return weakTopicRepository.findWithContextByIdAndUserId(weakTopicId, userId)

@@ -301,6 +301,10 @@ public class AiExecutionServiceImpl implements AiExecutionService {
             String adjustmentPrompt,
             AiExecutionOperation operation,
             String idempotencyKey) {
+        // Validate the current Roadmap state before returning an idempotent execution.
+        // Otherwise, an old key could bypass the immutable-ACTIVE rule.
+        roadmapPersistenceService.prepare(ownerId, roadmapId, materialIds);
+
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
         if (normalizedKey != null) {
             AiExecution existing = findMatchingIdempotentExecution(
@@ -314,8 +318,6 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                 return AiExecutionResponse.from(existing);
             }
         }
-
-        roadmapPersistenceService.prepare(ownerId, roadmapId, materialIds);
 
         AiExecution active = executionRepository
                 .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
