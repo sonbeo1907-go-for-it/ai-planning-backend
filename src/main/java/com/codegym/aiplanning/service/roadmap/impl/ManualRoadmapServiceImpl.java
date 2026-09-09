@@ -6,6 +6,7 @@ import com.codegym.aiplanning.controller.roadmap.dto.CreateMilestoneRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.CreateRoadmapRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.CreateTopicRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapItemResponse;
+import com.codegym.aiplanning.controller.roadmap.dto.RoadmapProgressResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapSummaryResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapVersionResponse;
@@ -27,6 +28,7 @@ import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapVersionRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.roadmap.ManualRoadmapService;
+import com.codegym.aiplanning.service.roadmap.RoadmapProgressService;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -47,18 +49,21 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
     private final RoadmapVersionRepository roadmapVersionRepository;
     private final RoadmapItemRepository roadmapItemRepository;
     private final AuditLogService auditLogService;
+    private final RoadmapProgressService roadmapProgressService;
 
     public ManualRoadmapServiceImpl(
             UserAccountRepository userAccountRepository,
             RoadmapRepository roadmapRepository,
             RoadmapVersionRepository roadmapVersionRepository,
             RoadmapItemRepository roadmapItemRepository,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            RoadmapProgressService roadmapProgressService) {
         this.userAccountRepository = userAccountRepository;
         this.roadmapRepository = roadmapRepository;
         this.roadmapVersionRepository = roadmapVersionRepository;
         this.roadmapItemRepository = roadmapItemRepository;
         this.auditLogService = auditLogService;
+        this.roadmapProgressService = roadmapProgressService;
     }
 
     @Override
@@ -75,8 +80,10 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
                 AuditEventAction.ROADMAP_CREATED,
                 "Roadmap",
                 roadmap.getId().toString());
+        RoadmapProgressResponse progress = roadmapProgressService.calculateRoadmapProgress(
+                roadmap.getId(), roadmap.getActiveVersionId(), userId);
         return RoadmapResponse.from(
-                roadmap, List.of(RoadmapVersionResponse.from(version, List.of())));
+                roadmap, List.of(RoadmapVersionResponse.from(version, List.of())), progress);
     }
 
     @Override
@@ -126,7 +133,7 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
     @Override
     @Transactional(readOnly = true)
     public RoadmapResponse get(UUID userId, UUID roadmapId) {
-        return roadmapResponse(requireOwned(userId, roadmapId));
+        return roadmapResponse(requireOwned(userId, roadmapId), userId);
     }
 
     @Override
@@ -153,7 +160,7 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
                 AuditEventAction.ROADMAP_UPDATED,
                 "Roadmap",
                 saved.getId().toString());
-        return roadmapResponse(saved);
+        return roadmapResponse(saved, userId);
     }
 
     @Override
@@ -381,13 +388,15 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
         }
     }
 
-    private RoadmapResponse roadmapResponse(Roadmap roadmap) {
+    private RoadmapResponse roadmapResponse(Roadmap roadmap, UUID userId) {
         List<RoadmapVersionResponse> versions = roadmapVersionRepository
                 .findAllByRoadmapIdOrderByVersionNumberDesc(roadmap.getId())
                 .stream()
                 .map(this::versionResponse)
                 .toList();
-        return RoadmapResponse.from(roadmap, versions);
+        RoadmapProgressResponse progress = roadmapProgressService.calculateRoadmapProgress(
+                roadmap.getId(), roadmap.getActiveVersionId(), userId);
+        return RoadmapResponse.from(roadmap, versions, progress);
     }
 
     private RoadmapResponse roadmapListResponse(

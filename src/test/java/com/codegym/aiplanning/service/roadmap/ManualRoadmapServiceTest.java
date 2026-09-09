@@ -5,7 +5,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.codegym.aiplanning.controller.roadmap.dto.RoadmapProgressResponse;
+import com.codegym.aiplanning.controller.roadmap.dto.RoadmapResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapSummaryResponse;
+import java.util.Optional;
 import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
@@ -49,6 +52,9 @@ class ManualRoadmapServiceTest {
     @Mock
     private AuditLogService auditLogService;
 
+    @Mock
+    private RoadmapProgressService roadmapProgressService;
+
     private ManualRoadmapService service;
 
     @BeforeEach
@@ -58,7 +64,8 @@ class ManualRoadmapServiceTest {
                 roadmapRepository,
                 roadmapVersionRepository,
                 roadmapItemRepository,
-                auditLogService);
+                auditLogService,
+                roadmapProgressService);
     }
 
     @Test
@@ -147,6 +154,38 @@ class ManualRoadmapServiceTest {
         verify(roadmapRepository, never()).findByOwnerId(userId, pageable);
         verify(roadmapRepository, never()).findByOwnerIdAndStatus(
                 userId, RoadmapStatus.ACTIVE, pageable);
+    }
+
+    @Test
+    void getPopulatesRoadmapProgressFromService() {
+        UUID userId = UUID.randomUUID();
+        UUID roadmapId = UUID.randomUUID();
+        UUID activeVersionId = UUID.randomUUID();
+
+        UserAccount owner = UserAccount.create(
+                "owner@example.com", "Password1", UserRole.USER, AccountStatus.ACTIVE);
+        setId(owner, userId);
+
+        Roadmap roadmap = Roadmap.manualDraft(owner, "My Backend Roadmap", null);
+        setId(roadmap, roadmapId);
+        ReflectionTestUtils.setField(roadmap, "activeVersionId", activeVersionId);
+
+        when(roadmapRepository.findByIdAndOwnerId(roadmapId, userId))
+                .thenReturn(Optional.of(roadmap));
+        when(roadmapVersionRepository.findAllByRoadmapIdOrderByVersionNumberDesc(roadmapId))
+                .thenReturn(List.of());
+        when(roadmapProgressService.calculateRoadmapProgress(roadmapId, activeVersionId, userId))
+                .thenReturn(new RoadmapProgressResponse(50, 10, 20));
+
+        RoadmapResponse response = service.get(userId, roadmapId);
+
+        assertThat(response).isNotNull();
+        assertThat(response.progress()).isEqualTo(new RoadmapProgressResponse(50, 10, 20));
+        assertThat(response.progress().completionPercentage()).isEqualTo(50);
+        assertThat(response.progress().completedItemsCount()).isEqualTo(10);
+        assertThat(response.progress().totalItemsCount()).isEqualTo(20);
+
+        verify(roadmapProgressService).calculateRoadmapProgress(roadmapId, activeVersionId, userId);
     }
 
     private void setId(Object entity, UUID id) {
