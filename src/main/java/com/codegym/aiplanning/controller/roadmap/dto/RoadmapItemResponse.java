@@ -14,7 +14,33 @@ public record RoadmapItemResponse(
         String description,
         int orderIndex,
         Integer estimatedMinutes,
-        List<RoadmapItemResponse> topics) {
+        List<RoadmapItemResponse> topics,
+        RoadmapItemProgressResponse progress,
+        List<StudyUnitResponse> studyUnits) {
+
+    public RoadmapItemResponse(
+            UUID id,
+            long version,
+            RoadmapItemType itemType,
+            UUID parentItemId,
+            String title,
+            String description,
+            int orderIndex,
+            Integer estimatedMinutes,
+            List<RoadmapItemResponse> topics) {
+        this(
+                id,
+                version,
+                itemType,
+                parentItemId,
+                title,
+                description,
+                orderIndex,
+                estimatedMinutes,
+                topics,
+                null,
+                List.of());
+    }
 
     public static RoadmapItemResponse from(
             RoadmapItem item, List<RoadmapItemResponse> topics) {
@@ -27,7 +53,28 @@ public record RoadmapItemResponse(
                 item.getDescription(),
                 item.getOrderIndex(),
                 item.getEstimatedMinutes(),
-                topics == null ? List.of() : topics);
+                topics == null ? List.of() : topics,
+                null,
+                List.of());
+    }
+
+    public static RoadmapItemResponse withProgress(
+            RoadmapItem item,
+            List<RoadmapItemResponse> topics,
+            RoadmapItemProgressResponse progress,
+            List<StudyUnitResponse> studyUnits) {
+        return new RoadmapItemResponse(
+                item.getId(),
+                item.getVersion(),
+                item.getItemType(),
+                item.getParent() == null ? null : item.getParent().getId(),
+                item.getTitle(),
+                item.getDescription(),
+                item.getOrderIndex(),
+                item.getEstimatedMinutes(),
+                topics == null ? List.of() : topics,
+                progress,
+                studyUnits == null ? List.of() : studyUnits);
     }
 
     @Override
