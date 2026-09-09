@@ -46,6 +46,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import com.codegym.aiplanning.controller.daily.dto.AvailableLearningUnitResponse;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemProgress;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemProgressStatus;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
+import com.codegym.aiplanning.repository.roadmap.RoadmapItemProgressRepository;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanAiResponse;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanAiGenerator;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext;
@@ -64,12 +74,45 @@ public class DailyPlanServiceImpl implements DailyPlanService {
     private final UserProfileRepository userProfileRepository;
     private final RoadmapRepository roadmapRepository;
     private final RoadmapItemRepository roadmapItemRepository;
+    private final RoadmapItemProgressRepository roadmapItemProgressRepository;
     private final AuditLogService auditLogService;
     private final PlanningContextBuilder contextBuilder;
     private final DailyPlanAiGenerator aiGenerator;
     private final DailyPlanPersistenceService persistenceService;
     private final WeakTopicService weakTopicService;
     private final RoadmapProgressService roadmapProgressService;
+
+    @Autowired
+    public DailyPlanServiceImpl(
+            DailyPlanRepository dailyPlanRepository,
+            DailyPlanVersionRepository dailyPlanVersionRepository,
+            DailyPlanItemRepository dailyPlanItemRepository,
+            ProgressEntryRepository progressEntryRepository,
+            UserProfileRepository userProfileRepository,
+            RoadmapRepository roadmapRepository,
+            RoadmapItemRepository roadmapItemRepository,
+            RoadmapItemProgressRepository roadmapItemProgressRepository,
+            AuditLogService auditLogService,
+            PlanningContextBuilder contextBuilder,
+            DailyPlanAiGenerator aiGenerator,
+            DailyPlanPersistenceService persistenceService,
+            WeakTopicService weakTopicService,
+            RoadmapProgressService roadmapProgressService) {
+        this.dailyPlanRepository = dailyPlanRepository;
+        this.dailyPlanVersionRepository = dailyPlanVersionRepository;
+        this.dailyPlanItemRepository = dailyPlanItemRepository;
+        this.progressEntryRepository = progressEntryRepository;
+        this.userProfileRepository = userProfileRepository;
+        this.roadmapRepository = roadmapRepository;
+        this.roadmapItemRepository = roadmapItemRepository;
+        this.roadmapItemProgressRepository = roadmapItemProgressRepository;
+        this.auditLogService = auditLogService;
+        this.contextBuilder = contextBuilder;
+        this.aiGenerator = aiGenerator;
+        this.persistenceService = persistenceService;
+        this.weakTopicService = weakTopicService;
+        this.roadmapProgressService = roadmapProgressService;
+    }
 
     public DailyPlanServiceImpl(
             DailyPlanRepository dailyPlanRepository,
@@ -85,19 +128,10 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             DailyPlanPersistenceService persistenceService,
             WeakTopicService weakTopicService,
             RoadmapProgressService roadmapProgressService) {
-        this.dailyPlanRepository = dailyPlanRepository;
-        this.dailyPlanVersionRepository = dailyPlanVersionRepository;
-        this.dailyPlanItemRepository = dailyPlanItemRepository;
-        this.progressEntryRepository = progressEntryRepository;
-        this.userProfileRepository = userProfileRepository;
-        this.roadmapRepository = roadmapRepository;
-        this.roadmapItemRepository = roadmapItemRepository;
-        this.auditLogService = auditLogService;
-        this.contextBuilder = contextBuilder;
-        this.aiGenerator = aiGenerator;
-        this.persistenceService = persistenceService;
-        this.weakTopicService = weakTopicService;
-        this.roadmapProgressService = roadmapProgressService;
+        this(dailyPlanRepository, dailyPlanVersionRepository, dailyPlanItemRepository,
+                progressEntryRepository, userProfileRepository, roadmapRepository,
+                roadmapItemRepository, null, auditLogService, contextBuilder,
+                aiGenerator, persistenceService, weakTopicService, roadmapProgressService);
     }
 
     @Override
@@ -244,16 +278,18 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             return List.of();
         }
 
-        Map<UUID, List<DailyPlanItem>> itemsByVersionId = new HashMap<>();
-        for (DailyPlanItem item : dailyPlanItemRepository.findByDailyPlanVersionIds(
-                versions.stream().map(DailyPlanVersion::getId).toList())) {
+        List<DailyPlanItem> allItems = dailyPlanItemRepository.findByDailyPlanVersionIds(
+                versions.stream().map(DailyPlanVersion::getId).toList());
+        List<DailyPlanItemResponse> enrichedItems = enrichTaskResponses(allItems, userId);
+        Map<UUID, List<DailyPlanItemResponse>> itemsByVersionId = new HashMap<>();
+        for (DailyPlanItemResponse item : enrichedItems) {
             itemsByVersionId
                     .computeIfAbsent(
-                            item.getDailyPlanVersionId(), ignored -> new ArrayList<>())
+                            item.versionId(), ignored -> new ArrayList<>())
                     .add(item);
         }
         return versions.stream()
-                .map(version -> DailyPlanVersionResponse.from(
+                .map(version -> DailyPlanVersionResponse.of(
                         version,
                         itemsByVersionId.getOrDefault(version.getId(), List.of())))
                 .toList();
@@ -266,7 +302,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         UUID userId = extractUserId(actorJwt);
         DailyPlan plan = requirePlanForUser(planId, userId);
         DailyPlanVersion version = requireVersion(plan.getId(), versionId);
-        return versionResponse(version);
+        return versionResponse(version, userId);
     }
 
     @Override
@@ -322,7 +358,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 AuditEventAction.DAILY_PLAN_VERSION_CREATED,
                 "DailyPlanVersion",
                 draft.getId().toString());
-        return DailyPlanVersionResponse.from(draft, savedCopies);
+        return DailyPlanVersionResponse.of(draft, enrichTaskResponses(savedCopies, userId));
     }
 
     @Override
@@ -374,7 +410,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                     .findByDailyPlanIdAndGenerationRequestKey(planId, normalizedRequestKey)
                     .orElse(null);
             if (existing != null) {
-                return versionResponse(existing);
+                return versionResponse(existing, userId);
             }
         }
 
@@ -397,7 +433,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 normalizedRequestKey,
                 response.items());
 
-        return versionResponse(savedDraft);
+        return versionResponse(savedDraft, userId);
     }
 
     private String buildAiExplanation(DailyPlanAiResponse response) {
@@ -493,7 +529,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 "DailyPlanItem",
                 savedItem.getId().toString());
 
-        return DailyPlanItemResponse.from(savedItem);
+        return enrichTaskResponse(savedItem, userId);
     }
 
     @Override
@@ -519,12 +555,43 @@ public class DailyPlanServiceImpl implements DailyPlanService {
 
         items.remove(item);
         int targetIndex = Math.min(request.orderIndex(), items.size());
+
+        UUID roadmapItemId = item.getRoadmapItemId();
+        if (request.roadmapItemId() != null) {
+            UUID targetRoadmapItemId = request.roadmapItemId();
+            RoadmapItem roadmapItem = roadmapItemRepository.findOwnedById(targetRoadmapItemId, userId)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Roadmap item not found"));
+            Roadmap roadmap = roadmapItem.getRoadmapVersion().getRoadmap();
+            if (roadmap.getStatus() != RoadmapStatus.ACTIVE
+                    || roadmap.getActiveVersionId() == null
+                    || !roadmap.getActiveVersionId().equals(
+                            roadmapItem.getRoadmapVersion().getId())) {
+                throw new BusinessException(
+                        ErrorCode.INVALID_PLAN_TRANSITION,
+                        "A Roadmap-backed task must reference the ACTIVE RoadmapVersion.");
+            }
+            if (roadmapItem.getItemType()
+                    != com.codegym.aiplanning.entity.roadmap.RoadmapItemType.LEARNING_UNIT) {
+                throw new BusinessException(
+                        ErrorCode.INVALID_PLAN_TRANSITION,
+                        "A Roadmap-backed Daily Plan task must reference a Learning Unit.");
+            }
+            if (plan.getRoadmapId() == null) {
+                plan.setRoadmapId(roadmap.getId());
+                dailyPlanRepository.save(plan);
+            } else if (!plan.getRoadmapId().equals(roadmap.getId())) {
+                throw new BusinessException(ErrorCode.INVALID_PLAN_TRANSITION, "Roadmap item does not belong to the plan's roadmap");
+            }
+            roadmapItemId = targetRoadmapItemId;
+        }
+
         item.updateDraftDetails(
                 request.category(),
                 request.title().trim(),
                 normalizeOptional(request.description()),
                 request.plannedMinutes(),
-                targetIndex);
+                targetIndex,
+                roadmapItemId);
         items.add(targetIndex, item);
 
         int totalPlannedMinutes = 0;
@@ -548,7 +615,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 AuditEventAction.DAILY_PLAN_UPDATED,
                 "DailyPlanItem",
                 itemId.toString());
-        return DailyPlanVersionResponse.from(version, items);
+        return DailyPlanVersionResponse.of(version, enrichTaskResponses(items, userId));
     }
 
     @Override
@@ -691,7 +758,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 "DailyPlanItem",
                 savedItem.getId().toString());
 
-        return DailyPlanItemResponse.from(savedItem);
+        return enrichTaskResponse(savedItem, userId);
     }
 
     @Override
@@ -756,7 +823,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 "DailyPlanItem",
                 item.getId().toString());
 
-        return DailyPlanItemResponse.from(item);
+        return enrichTaskResponse(item, userId);
     }
 
     @Override
@@ -802,7 +869,106 @@ public class DailyPlanServiceImpl implements DailyPlanService {
 
         List<DailyPlanItem> remainingItems = dailyPlanItemRepository
                 .findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId);
-        return DailyPlanVersionResponse.from(version, remainingItems);
+        return DailyPlanVersionResponse.of(version, enrichTaskResponses(remainingItems, userId));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<AvailableLearningUnitResponse> getAvailableLearningUnits(UUID planId, Jwt actorJwt) {
+        UUID userId = extractUserId(actorJwt);
+        DailyPlan plan = requirePlanForUser(planId, userId);
+        if (plan.getRoadmapId() == null) {
+            return List.of();
+        }
+
+        Roadmap roadmap = roadmapRepository.findByIdAndOwnerId(plan.getRoadmapId(), userId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.RESOURCE_NOT_FOUND, "Roadmap not found."));
+
+        if (roadmap.getStatus() != RoadmapStatus.ACTIVE || roadmap.getActiveVersionId() == null) {
+            return List.of();
+        }
+
+        UUID versionId = roadmap.getActiveVersionId();
+        List<RoadmapItem> allItems = roadmapItemRepository.findAllByRoadmapVersionIds(List.of(versionId));
+        if (allItems.isEmpty()) {
+            return List.of();
+        }
+
+        Map<UUID, RoadmapItemProgress> progressByItemId = roadmapItemProgressRepository != null
+                ? roadmapItemProgressRepository.findByUserIdAndRoadmapVersionId(userId, versionId).stream()
+                        .collect(Collectors.toMap(RoadmapItemProgress::getRoadmapItemId, Function.identity(), (a, b) -> a))
+                : Map.of();
+
+        return allItems.stream()
+                .filter(item -> item.getItemType() == RoadmapItemType.LEARNING_UNIT)
+                .map(unit -> {
+                    RoadmapItem topic = unit.getParent();
+                    RoadmapItem milestone = (topic != null) ? topic.getParent() : null;
+                    RoadmapItemProgress progress = progressByItemId.get(unit.getId());
+                    RoadmapItemProgressStatus status = progress != null
+                            ? progress.getStatus()
+                            : RoadmapItemProgressStatus.NOT_STARTED;
+
+                    return new AvailableLearningUnitResponse(
+                            unit.getId(),
+                            unit.getTitle(),
+                            unit.getDescription(),
+                            unit.getEstimatedMinutes(),
+                            unit.getOrderIndex(),
+                            topic != null ? topic.getId() : null,
+                            topic != null ? topic.getTitle() : null,
+                            milestone != null ? milestone.getId() : null,
+                            milestone != null ? milestone.getTitle() : null,
+                            status
+                    );
+                })
+                .toList();
+    }
+
+    private List<DailyPlanItemResponse> enrichTaskResponses(List<DailyPlanItem> items, UUID userId) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> roadmapItemIds = items.stream()
+                .map(DailyPlanItem::getRoadmapItemId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        Map<UUID, RoadmapItem> roadmapItemMap = roadmapItemIds.isEmpty()
+                ? Map.of()
+                : roadmapItemRepository.findAllOwnedByIdsWithParent(roadmapItemIds, userId).stream()
+                        .collect(Collectors.toMap(RoadmapItem::getId, Function.identity(), (existing, replacing) -> existing));
+
+        return items.stream()
+                .map(item -> {
+                    RoadmapItem roadmapItem = item.getRoadmapItemId() != null
+                            ? roadmapItemMap.get(item.getRoadmapItemId())
+                            : null;
+                    String roadmapItemTitle = roadmapItem != null ? roadmapItem.getTitle() : null;
+                    String parentTopicTitle = (roadmapItem != null && roadmapItem.getParent() != null)
+                            ? roadmapItem.getParent().getTitle()
+                            : null;
+                    return DailyPlanItemResponse.from(item, roadmapItemTitle, parentTopicTitle);
+                })
+                .toList();
+    }
+
+    private DailyPlanItemResponse enrichTaskResponse(DailyPlanItem item, UUID userId) {
+        if (item == null) {
+            return null;
+        }
+        if (item.getRoadmapItemId() == null) {
+            return DailyPlanItemResponse.from(item, null, null);
+        }
+        RoadmapItem roadmapItem = roadmapItemRepository
+                .findOwnedById(item.getRoadmapItemId(), userId)
+                .orElse(null);
+        String roadmapItemTitle = roadmapItem != null ? roadmapItem.getTitle() : null;
+        String parentTopicTitle = (roadmapItem != null && roadmapItem.getParent() != null)
+                ? roadmapItem.getParent().getTitle()
+                : null;
+        return DailyPlanItemResponse.from(item, roadmapItemTitle, parentTopicTitle);
     }
 
     private DailyPlan requirePlanForUser(UUID planId, UUID userId) {
@@ -872,6 +1038,12 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                         version.getId()));
     }
 
+    private DailyPlanVersionResponse versionResponse(DailyPlanVersion version, UUID userId) {
+        List<DailyPlanItem> items = dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(
+                version.getId());
+        return DailyPlanVersionResponse.of(version, enrichTaskResponses(items, userId));
+    }
+
     private DailyPlanResponse buildDailyPlanResponse(DailyPlan plan) {
         UUID versionId = plan.getActiveVersionId();
         if (versionId == null) {
@@ -888,18 +1060,16 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 .findByIdAndDailyPlanId(versionId, plan.getId())
                 .orElse(null);
 
-        List<DailyPlanItemResponse> items = version != null
+        List<DailyPlanItem> items = version != null
                 ? dailyPlanItemRepository
                         .findByDailyPlanVersionIdOrderByOrderIndexAsc(version.getId())
-                        .stream()
-                        .map(DailyPlanItemResponse::from)
-                        .toList()
                 : List.of();
+        List<DailyPlanItemResponse> itemResponses = enrichTaskResponses(items, plan.getUserId());
 
         int available = version != null ? version.getAvailableMinutes() : 60;
         int planned = version != null ? version.getTotalPlannedMinutes() : 0;
 
-        return DailyPlanResponse.of(plan, versionId, available, planned, items);
+        return DailyPlanResponse.of(plan, versionId, available, planned, itemResponses);
     }
 
     private DailyPlanResponse buildDailyPlanResponse(
@@ -912,7 +1082,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 version.getId(),
                 version.getAvailableMinutes(),
                 version.getTotalPlannedMinutes(),
-                items.stream().map(DailyPlanItemResponse::from).toList());
+                enrichTaskResponses(items, plan.getUserId()));
     }
 
     private String getUserTimeZone(UUID userId) {

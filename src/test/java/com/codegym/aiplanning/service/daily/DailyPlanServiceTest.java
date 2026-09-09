@@ -95,6 +95,8 @@ class DailyPlanServiceTest {
     private WeakTopicService weakTopicService;
     @Mock
     private RoadmapProgressService roadmapProgressService;
+    @Mock
+    private com.codegym.aiplanning.repository.roadmap.RoadmapItemProgressRepository roadmapItemProgressRepository;
 
     private DailyPlanServiceImpl dailyPlanService;
 
@@ -111,6 +113,7 @@ class DailyPlanServiceTest {
                 userProfileRepository,
                 roadmapRepository,
                 roadmapItemRepository,
+                roadmapItemProgressRepository,
                 auditLogService,
                 contextBuilder,
                 aiGenerator,
@@ -479,6 +482,8 @@ class DailyPlanServiceTest {
 
         assertThat(response).isNotNull();
         assertThat(response.roadmapItemId()).isEqualTo(roadmapItemId);
+        assertThat(response.roadmapItemTitle()).isEqualTo("Complete one concrete exercise");
+        assertThat(response.parentTopicTitle()).isEqualTo("Roadmap Topic");
         assertThat(plan.getRoadmapId()).isEqualTo(roadmapId);
     }
 
@@ -722,5 +727,152 @@ class DailyPlanServiceTest {
                 List.of(),
                 List.of(),
                 null);
+    }
+
+    @Test
+    void getAvailableLearningUnits_returnsLearningUnitsWithProgress() {
+        UUID planId = UUID.randomUUID();
+        UUID roadmapId = UUID.randomUUID();
+        UUID activeVersionId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC", roadmapId);
+        ReflectionTestUtils.setField(plan, "id", planId);
+
+        UserAccount owner = UserAccount.create("owner@example.com", "Password@123", UserRole.USER, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(owner, "id", userId);
+        Roadmap roadmap = Roadmap.manualDraft(owner, "My Roadmap", "Desc");
+        ReflectionTestUtils.setField(roadmap, "id", roadmapId);
+        RoadmapVersion rVersion = RoadmapVersion.draft(roadmap, 1, com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin.MANUAL);
+        ReflectionTestUtils.setField(rVersion, "id", activeVersionId);
+        rVersion.activate(Instant.now());
+        roadmap.activateVersion(activeVersionId);
+
+        RoadmapItem milestone = RoadmapItem.milestone(rVersion, "Milestone 1", "Desc", 0);
+        ReflectionTestUtils.setField(milestone, "id", UUID.randomUUID());
+        RoadmapItem topic = RoadmapItem.topic(rVersion, milestone, "Topic 1", "Desc", 0, 60);
+        ReflectionTestUtils.setField(topic, "id", UUID.randomUUID());
+        RoadmapItem unit1 = RoadmapItem.learningUnit(rVersion, topic, "Unit 1", "Desc", 0, 30);
+        UUID unit1Id = UUID.randomUUID();
+        ReflectionTestUtils.setField(unit1, "id", unit1Id);
+
+        com.codegym.aiplanning.entity.roadmap.RoadmapItemProgress progress1 =
+                com.codegym.aiplanning.entity.roadmap.RoadmapItemProgress.create(userId, activeVersionId, unit1Id);
+        progress1.markInProgress(UUID.randomUUID());
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+        when(roadmapRepository.findByIdAndOwnerId(roadmapId, userId)).thenReturn(Optional.of(roadmap));
+        when(roadmapItemRepository.findAllByRoadmapVersionIds(List.of(activeVersionId)))
+                .thenReturn(List.of(milestone, topic, unit1));
+        when(roadmapItemProgressRepository.findByUserIdAndRoadmapVersionId(userId, activeVersionId))
+                .thenReturn(List.of(progress1));
+
+        List<com.codegym.aiplanning.controller.daily.dto.AvailableLearningUnitResponse> units =
+                dailyPlanService.getAvailableLearningUnits(planId, userJwt);
+
+        assertThat(units).hasSize(1);
+        var unitResponse = units.get(0);
+        assertThat(unitResponse.id()).isEqualTo(unit1Id);
+        assertThat(unitResponse.title()).isEqualTo("Unit 1");
+        assertThat(unitResponse.topicTitle()).isEqualTo("Topic 1");
+        assertThat(unitResponse.milestoneTitle()).isEqualTo("Milestone 1");
+        assertThat(unitResponse.progressStatus()).isEqualTo(com.codegym.aiplanning.entity.roadmap.RoadmapItemProgressStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void updateTask_withValidLearningUnit_updatesRoadmapItemIdAndEnrichesResponse() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID roadmapId = UUID.randomUUID();
+        UUID activeVersionId = UUID.randomUUID();
+        UUID targetRoadmapItemId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC", roadmapId);
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.MANUAL, 120, 60);
+        ReflectionTestUtils.setField(version, "id", versionId);
+
+        DailyPlanItem existingItem = DailyPlanItem.create(versionId, DailyTaskCategory.CUSTOM, "Old Title", "Old Desc", 30, 0);
+        ReflectionTestUtils.setField(existingItem, "id", itemId);
+
+        UserAccount owner = UserAccount.create("owner@example.com", "Password@123", UserRole.USER, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(owner, "id", userId);
+        Roadmap roadmap = Roadmap.manualDraft(owner, "My Roadmap", "Desc");
+        ReflectionTestUtils.setField(roadmap, "id", roadmapId);
+        RoadmapVersion rVersion = RoadmapVersion.draft(roadmap, 1, com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin.MANUAL);
+        ReflectionTestUtils.setField(rVersion, "id", activeVersionId);
+        rVersion.activate(Instant.now());
+        roadmap.activateVersion(activeVersionId);
+
+        RoadmapItem milestone = RoadmapItem.milestone(rVersion, "Milestone 1", null, 0);
+        RoadmapItem topic = RoadmapItem.topic(rVersion, milestone, "Topic 1", null, 0, 60);
+        RoadmapItem learningUnit = RoadmapItem.learningUnit(rVersion, topic, "Unit 1", null, 0, 30);
+        ReflectionTestUtils.setField(learningUnit, "id", targetRoadmapItemId);
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId)).thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId)).thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId))
+                .thenReturn(List.of(existingItem));
+        when(roadmapItemRepository.findOwnedById(targetRoadmapItemId, userId)).thenReturn(Optional.of(learningUnit));
+        when(roadmapItemRepository.findAllOwnedByIdsWithParent(any(), any()))
+                .thenReturn(List.of(learningUnit));
+
+        com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest request =
+                new com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest(
+                        "New Title", "New Desc", DailyTaskCategory.PRACTICE, 45, 0, targetRoadmapItemId);
+
+        DailyPlanVersionResponse response = dailyPlanService.updateTask(planId, versionId, itemId, request, userJwt);
+
+        assertThat(response).isNotNull();
+        assertThat(response.items()).hasSize(1);
+        DailyPlanItemResponse updatedItem = response.items().get(0);
+        assertThat(updatedItem.title()).isEqualTo("New Title");
+        assertThat(updatedItem.roadmapItemId()).isEqualTo(targetRoadmapItemId);
+        assertThat(updatedItem.roadmapItemTitle()).isEqualTo("Unit 1");
+        assertThat(updatedItem.parentTopicTitle()).isEqualTo("Topic 1");
+    }
+
+    @Test
+    void updateTask_withInvalidItemType_throwsException() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID roadmapId = UUID.randomUUID();
+        UUID activeVersionId = UUID.randomUUID();
+        UUID topicId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC", roadmapId);
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.MANUAL, 120, 60);
+        ReflectionTestUtils.setField(version, "id", versionId);
+
+        DailyPlanItem existingItem = DailyPlanItem.create(versionId, DailyTaskCategory.CUSTOM, "Old Title", "Old Desc", 30, 0);
+        ReflectionTestUtils.setField(existingItem, "id", itemId);
+
+        UserAccount owner = UserAccount.create("owner@example.com", "Password@123", UserRole.USER, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(owner, "id", userId);
+        Roadmap roadmap = Roadmap.manualDraft(owner, "My Roadmap", "Desc");
+        ReflectionTestUtils.setField(roadmap, "id", roadmapId);
+        RoadmapVersion rVersion = RoadmapVersion.draft(roadmap, 1, com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin.MANUAL);
+        ReflectionTestUtils.setField(rVersion, "id", activeVersionId);
+        rVersion.activate(Instant.now());
+        roadmap.activateVersion(activeVersionId);
+
+        RoadmapItem milestone = RoadmapItem.milestone(rVersion, "Milestone 1", null, 0);
+        RoadmapItem topic = RoadmapItem.topic(rVersion, milestone, "Topic 1", null, 0, 60);
+        ReflectionTestUtils.setField(topic, "id", topicId);
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId)).thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId)).thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId))
+                .thenReturn(List.of(existingItem));
+        when(roadmapItemRepository.findOwnedById(topicId, userId)).thenReturn(Optional.of(topic));
+
+        com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest request =
+                new com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest(
+                        "New Title", "New Desc", DailyTaskCategory.PRACTICE, 45, 0, topicId);
+
+        assertThatThrownBy(() -> dailyPlanService.updateTask(planId, versionId, itemId, request, userJwt))
+                .isInstanceOf(BusinessException.class);
     }
 }

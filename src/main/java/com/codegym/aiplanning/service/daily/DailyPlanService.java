@@ -17,7 +17,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 
+import com.codegym.aiplanning.controller.daily.dto.AvailableLearningUnitResponse;
+
 public interface DailyPlanService {
+
+    List<AvailableLearningUnitResponse> getAvailableLearningUnits(UUID planId, Jwt actorJwt);
 
     DailyPlanResponse createDailyPlan(CreateDailyPlanRequest request, Jwt actorJwt);
 

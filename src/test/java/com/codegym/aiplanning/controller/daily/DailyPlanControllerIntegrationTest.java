@@ -589,12 +589,87 @@ class DailyPlanControllerIntegrationTest {
                 }
                 """, learningUnit.getId());
 
-        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+        MvcResult addTaskResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
                         + "/versions/" + versionId + "/items")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(addTaskPayload))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.roadmapItemId").value(learningUnit.getId().toString()));
+                .andExpect(jsonPath("$.data.roadmapItemId").value(learningUnit.getId().toString()))
+                .andExpect(jsonPath("$.data.roadmapItemTitle").value(learningUnit.getTitle()))
+                .andExpect(jsonPath("$.data.parentTopicTitle").value(topic.getTitle()))
+                .andReturn();
+
+        String taskId = objectMapper.readTree(addTaskResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+
+        // 4. Query available learning units endpoint (RMP-PROG-02)
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId + "/available-learning-units")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data[0].id").value(learningUnit.getId().toString()))
+                .andExpect(jsonPath("$.data[0].title").value(learningUnit.getTitle()))
+                .andExpect(jsonPath("$.data[0].topicTitle").value(topic.getTitle()))
+                .andExpect(jsonPath("$.data[0].milestoneTitle").value(milestone.getTitle()))
+                .andExpect(jsonPath("$.data[0].progressStatus").value("NOT_STARTED"));
+
+        // 5. Update task and verify enriched response (RMP-PROG-02)
+        String updateTaskPayload = String.format("""
+                {
+                    "title": "Học Lập trình Java Core Module 1 - Đã cập nhật",
+                    "description": "Thực hành chuỗi và mảng nâng cao",
+                    "category": "PRACTICE",
+                    "plannedMinutes": 60,
+                    "orderIndex": 0,
+                    "roadmapItemId": "%s"
+                }
+                """, learningUnit.getId());
+
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId + "/items/" + taskId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateTaskPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].title").value("Học Lập trình Java Core Module 1 - Đã cập nhật"))
+                .andExpect(jsonPath("$.data.items[0].roadmapItemId").value(learningUnit.getId().toString()))
+                .andExpect(jsonPath("$.data.items[0].roadmapItemTitle").value(learningUnit.getTitle()))
+                .andExpect(jsonPath("$.data.items[0].parentTopicTitle").value(topic.getTitle()));
+
+        // 6. Activate version
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId + "/activate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].roadmapItemTitle").value(learningUnit.getTitle()))
+                .andExpect(jsonPath("$.data.items[0].parentTopicTitle").value(topic.getTitle()));
+
+        // 7. Record progress (RMP-PROG-03)
+        String progressPayload = """
+                {
+                    "status": "COMPLETED",
+                    "actualMinutes": 55,
+                    "actualResult": "Đã hoàn thành toàn bộ bài thực hành",
+                    "difficulty": 3,
+                    "understandingRating": 5,
+                    "note": "Nắm vững kiến thức"
+                }
+                """;
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/progress")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(progressPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.data.roadmapItemTitle").value(learningUnit.getTitle()))
+                .andExpect(jsonPath("$.data.parentTopicTitle").value(topic.getTitle()));
+
+        // 8. Verify available learning units reflects COMPLETED status
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId + "/available-learning-units")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].progressStatus").value("COMPLETED"));
     }
 }

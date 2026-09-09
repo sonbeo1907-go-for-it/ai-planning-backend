@@ -21,10 +21,19 @@ public record DailyPlanItemResponse(
         Instant completedAt,
         Instant createdAt,
         UUID roadmapItemId,
+        String roadmapItemTitle,
+        String parentTopicTitle,
         AiAdjustmentAction aiAdjustmentAction,
         String aiAdjustmentReason
 ) {
     public static DailyPlanItemResponse from(DailyPlanItem item) {
+        return from(item, null, null);
+    }
+
+    public static DailyPlanItemResponse from(
+            DailyPlanItem item,
+            String roadmapItemTitle,
+            String parentTopicTitle) {
         return new DailyPlanItemResponse(
                 item.getId(),
                 item.getDailyPlanVersionId(),
@@ -37,6 +46,8 @@ public record DailyPlanItemResponse(
                 item.getCompletedAt(),
                 item.getCreatedAt(),
                 item.getRoadmapItemId(),
+                roadmapItemTitle,
+                parentTopicTitle,
                 item.getAiAdjustmentAction(),
                 item.getAiAdjustmentReason()
         );

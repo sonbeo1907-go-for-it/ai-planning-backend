@@ -7,6 +7,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import java.util.UUID;
 
 @Schema(description = "Update a task belonging to one exact DRAFT Daily Plan version")
 public record UpdateDailyTaskRequest(
@@ -27,7 +28,18 @@ public record UpdateDailyTaskRequest(
 
         @NotNull(message = "Order index is required")
         @Min(value = 0, message = "Order index must not be negative")
-        Integer orderIndex) {
+        Integer orderIndex,
+
+        UUID roadmapItemId) {
+
+    public UpdateDailyTaskRequest(
+            String title,
+            String description,
+            DailyTaskCategory category,
+            Integer plannedMinutes,
+            Integer orderIndex) {
+        this(title, description, category, plannedMinutes, orderIndex, null);
+    }
 
     @Override
     public String toString() {

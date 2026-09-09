@@ -4,6 +4,7 @@ import com.codegym.aiplanning.common.api.ApiError;
 import com.codegym.aiplanning.common.api.ApiResponse;
 import com.codegym.aiplanning.common.constant.ApiConstant;
 import com.codegym.aiplanning.controller.ai.dto.AiExecutionResponse;
+import com.codegym.aiplanning.controller.daily.dto.AvailableLearningUnitResponse;
 import com.codegym.aiplanning.controller.daily.dto.CreateDailyPlanRequest;
 import com.codegym.aiplanning.controller.daily.dto.CreateDailyTaskRequest;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanItemResponse;
@@ -176,6 +177,16 @@ public class DailyPlanController {
             @AuthenticationPrincipal Jwt actorJwt) {
         return ApiResponse.of(aiExecutionService.getLatestDailyPlanExecution(
                 userId(actorJwt), planId));
+    }
+
+    @GetMapping(ApiConstant.DAILY_PLAN_AVAILABLE_LEARNING_UNITS)
+    @Operation(
+            summary = "Get available learning units from the active roadmap for daily plan task linkage (RMP-PROG-02)",
+            description = "Returns executable learning units along with their parent topic and milestone from the active roadmap linked to this plan.")
+    public ApiResponse<List<AvailableLearningUnitResponse>> getAvailableLearningUnits(
+            @PathVariable UUID planId,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(dailyPlanService.getAvailableLearningUnits(planId, actorJwt));
     }
 
     @PostMapping(ApiConstant.DAILY_PLAN_VERSION_ITEMS)

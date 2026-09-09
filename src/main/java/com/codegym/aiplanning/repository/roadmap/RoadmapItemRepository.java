@@ -46,6 +46,15 @@ public interface RoadmapItemRepository extends JpaRepository<RoadmapItem, UUID> 
             @Param("itemIds") List<UUID> itemIds,
             @Param("ownerId") UUID ownerId);
 
+    @Query("select item from RoadmapItem item "
+            + "join fetch item.roadmapVersion version "
+            + "join fetch version.roadmap roadmap "
+            + "left join fetch item.parent parent "
+            + "where item.id in :itemIds and roadmap.owner.id = :ownerId")
+    List<RoadmapItem> findAllOwnedByIdsWithParent(
+            @Param("itemIds") java.util.Collection<UUID> itemIds,
+            @Param("ownerId") UUID ownerId);
+
     long countByRoadmapVersionIdAndItemType(UUID versionId, RoadmapItemType itemType);
 
     void deleteAllByParentId(UUID parentId);

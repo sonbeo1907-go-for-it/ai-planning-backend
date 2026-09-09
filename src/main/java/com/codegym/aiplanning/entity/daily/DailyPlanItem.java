@@ -103,11 +103,26 @@ public class DailyPlanItem extends BaseEntity {
             String description,
             Integer plannedMinutes,
             Integer orderIndex) {
+        updateDraftDetails(category, title, description, plannedMinutes, orderIndex, this.roadmapItemId);
+    }
+
+    public void updateDraftDetails(
+            DailyTaskCategory category,
+            String title,
+            String description,
+            Integer plannedMinutes,
+            Integer orderIndex,
+            UUID roadmapItemId) {
         this.category = category;
         this.title = title;
         this.description = description;
         this.plannedMinutes = plannedMinutes;
         this.orderIndex = orderIndex;
+        this.roadmapItemId = roadmapItemId;
+    }
+
+    public void setRoadmapItemId(UUID roadmapItemId) {
+        this.roadmapItemId = roadmapItemId;
     }
 
     public UUID getDailyPlanVersionId() {

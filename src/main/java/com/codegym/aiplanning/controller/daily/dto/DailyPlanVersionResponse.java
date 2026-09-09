@@ -49,6 +49,26 @@ public record DailyPlanVersionResponse(
                 version.getRequiresUserDecision());
     }
 
+    public static DailyPlanVersionResponse of(
+            DailyPlanVersion version, List<DailyPlanItemResponse> items) {
+        return new DailyPlanVersionResponse(
+                version.getId(),
+                version.getVersion(),
+                version.getDailyPlanId(),
+                version.getVersionNumber(),
+                version.getStatus(),
+                version.getOrigin(),
+                version.getAvailableMinutes(),
+                version.getTotalPlannedMinutes(),
+                version.getActivatedAt(),
+                version.getSupersededAt(),
+                items == null ? List.of() : items,
+                version.getCreatedAt(),
+                version.getUpdatedAt(),
+                version.getAiExplanation(),
+                version.getRequiresUserDecision());
+    }
+
     @Override
     public String toString() {
         return "DailyPlanVersionResponse[id=" + id
