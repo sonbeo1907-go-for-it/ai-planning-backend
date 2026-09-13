@@ -30,7 +30,13 @@ public record UpdateDailyTaskRequest(
         @Min(value = 0, message = "Order index must not be negative")
         Integer orderIndex,
 
-        UUID roadmapItemId) {
+        @Schema(
+                description = "Deprecated compatibility alias for learningUnitId",
+                deprecated = true)
+        UUID roadmapItemId,
+
+        @Schema(description = "Learning Unit from the plan's ACTIVE RoadmapVersion")
+        UUID learningUnitId) {
 
     public UpdateDailyTaskRequest(
             String title,
@@ -38,7 +44,24 @@ public record UpdateDailyTaskRequest(
             DailyTaskCategory category,
             Integer plannedMinutes,
             Integer orderIndex) {
-        this(title, description, category, plannedMinutes, orderIndex, null);
+        this(title, description, category, plannedMinutes, orderIndex, null, null);
+    }
+
+    public UpdateDailyTaskRequest(
+            String title,
+            String description,
+            DailyTaskCategory category,
+            Integer plannedMinutes,
+            Integer orderIndex,
+            UUID roadmapItemId) {
+        this(
+                title,
+                description,
+                category,
+                plannedMinutes,
+                orderIndex,
+                roadmapItemId,
+                null);
     }
 
     @Override

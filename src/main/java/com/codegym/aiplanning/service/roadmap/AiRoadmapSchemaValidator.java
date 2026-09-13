@@ -9,7 +9,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import org.springframework.stereotype.Component;
 
@@ -58,14 +60,27 @@ public class AiRoadmapSchemaValidator {
                 JsonNode learningUnitsNode =
                         requireArray(topicNode, "learningUnits", "topic");
                 requireSize(learningUnitsNode, 1, 12, "learningUnits");
+                String topicTitle = requireText(topicNode, "title", 200, "topic");
+                Set<String> normalizedUnitTitles = new HashSet<>();
                 List<GeneratedLearningUnit> learningUnits = new ArrayList<>();
                 for (int unitIndex = 0; unitIndex < learningUnitsNode.size(); unitIndex++) {
                     JsonNode unitNode = learningUnitsNode.get(unitIndex);
                     requireExactFields(
                             unitNode, LEARNING_UNIT_FIELDS, "learningUnit");
                     requireOrderIndex(unitNode, unitIndex, "learningUnit");
+                    String unitTitle = requireText(
+                            unitNode, "title", 200, "learningUnit");
+                    String normalizedUnitTitle = normalizeTitle(unitTitle);
+                    if (normalizedUnitTitle.equals(normalizeTitle(topicTitle))) {
+                        throw invalid(
+                                "A Learning Unit must be more specific than its parent Topic.");
+                    }
+                    if (!normalizedUnitTitles.add(normalizedUnitTitle)) {
+                        throw invalid(
+                                "Learning Unit titles must be unique within a Topic.");
+                    }
                     learningUnits.add(new GeneratedLearningUnit(
-                            requireText(unitNode, "title", 200, "learningUnit"),
+                            unitTitle,
                             requireText(unitNode, "description", 4000, "learningUnit"),
                             unitIndex,
                             requireInteger(
@@ -76,7 +91,7 @@ public class AiRoadmapSchemaValidator {
                                     "learningUnit")));
                 }
                 topics.add(new GeneratedTopic(
-                        requireText(topicNode, "title", 200, "topic"),
+                        topicTitle,
                         requireText(topicNode, "description", 4000, "topic"),
                         topicIndex,
                         estimatedMinutes,
@@ -174,5 +189,11 @@ public class AiRoadmapSchemaValidator {
 
     private InvalidAiRoadmapResponseException invalid(String message) {
         return new InvalidAiRoadmapResponseException(message);
+    }
+
+    private String normalizeTitle(String title) {
+        return title.strip()
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^\\p{L}\\p{N}]", "");
     }
 }

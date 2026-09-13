@@ -24,6 +24,23 @@ public record CreateDailyTaskRequest(
         @Schema(description = "Estimated time in minutes", example = "30")
         Integer plannedMinutes,
 
-        @Schema(description = "Associated Roadmap Item ID", example = "594c4df0-7f4d-4cb4-81c4-70735b0db2bf")
-        UUID roadmapItemId
-) {}
+        @Schema(
+                description = "Deprecated compatibility alias for learningUnitId",
+                deprecated = true,
+                example = "594c4df0-7f4d-4cb4-81c4-70735b0db2bf")
+        UUID roadmapItemId,
+
+        @Schema(
+                description = "Learning Unit from the plan's ACTIVE RoadmapVersion",
+                example = "594c4df0-7f4d-4cb4-81c4-70735b0db2bf")
+        UUID learningUnitId
+) {
+    public CreateDailyTaskRequest(
+            String title,
+            String description,
+            DailyTaskCategory category,
+            Integer plannedMinutes,
+            UUID roadmapItemId) {
+        this(title, description, category, plannedMinutes, roadmapItemId, null);
+    }
+}

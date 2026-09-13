@@ -15,7 +15,8 @@ public record RoadmapItemResponse(
         int orderIndex,
         Integer estimatedMinutes,
         List<RoadmapItemResponse> topics,
-        List<RoadmapItemResponse> learningUnits) {
+        List<RoadmapItemResponse> learningUnits,
+        RoadmapItemProgressResponse progress) {
 
     public RoadmapItemResponse(
             UUID id,
@@ -37,18 +38,27 @@ public record RoadmapItemResponse(
                 orderIndex,
                 estimatedMinutes,
                 topics,
-                List.of());
+                List.of(),
+                null);
     }
 
     public static RoadmapItemResponse from(
             RoadmapItem item, List<RoadmapItemResponse> topics) {
-        return from(item, topics, List.of());
+        return from(item, topics, List.of(), null);
     }
 
     public static RoadmapItemResponse from(
             RoadmapItem item,
             List<RoadmapItemResponse> topics,
             List<RoadmapItemResponse> learningUnits) {
+        return from(item, topics, learningUnits, null);
+    }
+
+    public static RoadmapItemResponse from(
+            RoadmapItem item,
+            List<RoadmapItemResponse> topics,
+            List<RoadmapItemResponse> learningUnits,
+            RoadmapItemProgressResponse progress) {
         return new RoadmapItemResponse(
                 item.getId(),
                 item.getVersion(),
@@ -59,7 +69,8 @@ public record RoadmapItemResponse(
                 item.getOrderIndex(),
                 item.getEstimatedMinutes(),
                 topics == null ? List.of() : topics,
-                learningUnits == null ? List.of() : learningUnits);
+                learningUnits == null ? List.of() : learningUnits,
+                progress);
     }
 
     @Override

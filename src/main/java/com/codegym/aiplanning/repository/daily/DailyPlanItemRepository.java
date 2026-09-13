@@ -9,10 +9,16 @@ import org.springframework.data.repository.query.Param;
 
 public interface DailyPlanItemRepository extends JpaRepository<DailyPlanItem, UUID> {
 
-    List<DailyPlanItem> findByDailyPlanVersionIdOrderByOrderIndexAsc(UUID dailyPlanVersionId);
+    @Query("select item from DailyPlanItem item "
+            + "where item.dailyPlanVersionId = :versionId "
+            + "and item.removedAt is null "
+            + "order by item.orderIndex")
+    List<DailyPlanItem> findByDailyPlanVersionIdOrderByOrderIndexAsc(
+            @Param("versionId") UUID dailyPlanVersionId);
 
     @Query("select item from DailyPlanItem item "
             + "where item.dailyPlanVersionId in :versionIds "
+            + "and item.removedAt is null "
             + "order by item.dailyPlanVersionId, item.orderIndex")
     List<DailyPlanItem> findByDailyPlanVersionIds(
             @Param("versionIds") List<UUID> versionIds);

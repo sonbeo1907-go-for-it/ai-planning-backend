@@ -15,6 +15,7 @@ import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapItemProgressRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapSourceRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapVersionRepository;
@@ -48,10 +49,16 @@ class ManualRoadmapServiceTest {
     private RoadmapItemRepository roadmapItemRepository;
 
     @Mock
+    private RoadmapItemProgressRepository roadmapItemProgressRepository;
+
+    @Mock
     private RoadmapSourceRepository roadmapSourceRepository;
 
     @Mock
     private AuditLogService auditLogService;
+
+    @Mock
+    private RoadmapProgressService roadmapProgressService;
 
     private ManualRoadmapService service;
 
@@ -62,8 +69,10 @@ class ManualRoadmapServiceTest {
                 roadmapRepository,
                 roadmapVersionRepository,
                 roadmapItemRepository,
+                roadmapItemProgressRepository,
                 roadmapSourceRepository,
-                auditLogService);
+                auditLogService,
+                roadmapProgressService);
     }
 
     @Test

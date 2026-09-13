@@ -9,6 +9,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import java.util.UUID;
 
 @Entity
 @Table(name = "roadmap_items")
@@ -21,6 +22,10 @@ public class RoadmapItem extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_item_id")
     private RoadmapItem parent;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "parent_item_type", length = 30)
+    private RoadmapItemType parentItemType;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "item_type", nullable = false, length = 30)
@@ -38,6 +43,9 @@ public class RoadmapItem extends BaseEntity {
     @Column(name = "estimated_minutes")
     private Integer estimatedMinutes;
 
+    @Column(name = "lineage_id")
+    private UUID lineageId;
+
     protected RoadmapItem() {}
 
     public static RoadmapItem milestone(
@@ -48,6 +56,7 @@ public class RoadmapItem extends BaseEntity {
         RoadmapItem item = new RoadmapItem();
         item.roadmapVersion = version;
         item.itemType = RoadmapItemType.MILESTONE;
+        item.parentItemType = null;
         item.title = title;
         item.description = description;
         item.orderIndex = orderIndex;
@@ -61,9 +70,11 @@ public class RoadmapItem extends BaseEntity {
             String description,
             int orderIndex,
             int estimatedMinutes) {
+        requireParent(version, milestone, RoadmapItemType.MILESTONE, "Topic");
         RoadmapItem item = new RoadmapItem();
         item.roadmapVersion = version;
         item.parent = milestone;
+        item.parentItemType = RoadmapItemType.MILESTONE;
         item.itemType = RoadmapItemType.TOPIC;
         item.title = title;
         item.description = description;
@@ -79,21 +90,35 @@ public class RoadmapItem extends BaseEntity {
             String description,
             int orderIndex,
             int estimatedMinutes) {
-        if (topic == null || topic.getItemType() != RoadmapItemType.TOPIC) {
-            throw new IllegalArgumentException("A Learning Unit must belong to a Topic.");
-        }
-        if (!topic.getRoadmapVersion().getId().equals(version.getId())) {
-            throw new IllegalArgumentException(
-                    "A Learning Unit and its Topic must belong to the same Roadmap version.");
-        }
+        return learningUnit(
+                version,
+                topic,
+                title,
+                description,
+                orderIndex,
+                estimatedMinutes,
+                UUID.randomUUID());
+    }
+
+    public static RoadmapItem learningUnit(
+            RoadmapVersion version,
+            RoadmapItem topic,
+            String title,
+            String description,
+            int orderIndex,
+            int estimatedMinutes,
+            UUID lineageId) {
+        requireParent(version, topic, RoadmapItemType.TOPIC, "Learning Unit");
         RoadmapItem item = new RoadmapItem();
         item.roadmapVersion = version;
         item.parent = topic;
+        item.parentItemType = RoadmapItemType.TOPIC;
         item.itemType = RoadmapItemType.LEARNING_UNIT;
         item.title = title;
         item.description = description;
         item.orderIndex = orderIndex;
         item.estimatedMinutes = estimatedMinutes;
+        item.lineageId = lineageId != null ? lineageId : UUID.randomUUID();
         return item;
     }
 
@@ -107,6 +132,10 @@ public class RoadmapItem extends BaseEntity {
 
     public RoadmapItemType getItemType() {
         return itemType;
+    }
+
+    public RoadmapItemType getParentItemType() {
+        return parentItemType;
     }
 
     public String getTitle() {
@@ -125,14 +154,53 @@ public class RoadmapItem extends BaseEntity {
         return estimatedMinutes;
     }
 
+    public UUID getLineageId() {
+        return lineageId;
+    }
+
     public void update(
             String title, String description, int orderIndex, Integer estimatedMinutes) {
+        if (itemType == RoadmapItemType.LEARNING_UNIT
+                && learningContentChanged(title, description)) {
+            lineageId = UUID.randomUUID();
+        }
         this.title = title;
         this.description = description;
         this.orderIndex = orderIndex;
         if (itemType == RoadmapItemType.TOPIC
                 || itemType == RoadmapItemType.LEARNING_UNIT) {
             this.estimatedMinutes = estimatedMinutes;
+        }
+    }
+
+    private boolean learningContentChanged(String newTitle, String newDescription) {
+        return !sameNormalizedText(title, newTitle)
+                || !sameNormalizedText(description, newDescription);
+    }
+
+    private boolean sameNormalizedText(String first, String second) {
+        if (first == null || second == null) {
+            return first == second;
+        }
+        return first.strip().equalsIgnoreCase(second.strip());
+    }
+
+    private static void requireParent(
+            RoadmapVersion version,
+            RoadmapItem parent,
+            RoadmapItemType requiredType,
+            String childLabel) {
+        if (version == null || parent == null || parent.getItemType() != requiredType) {
+            throw new IllegalArgumentException(
+                    "A " + childLabel + " must belong to a " + requiredType + ".");
+        }
+        RoadmapVersion parentVersion = parent.getRoadmapVersion();
+        boolean samePersistedVersion = parentVersion != null
+                && parentVersion.getId() != null
+                && parentVersion.getId().equals(version.getId());
+        if (parentVersion != version && !samePersistedVersion) {
+            throw new IllegalArgumentException(
+                    "A " + childLabel + " and its parent must belong to the same Roadmap version.");
         }
     }
 

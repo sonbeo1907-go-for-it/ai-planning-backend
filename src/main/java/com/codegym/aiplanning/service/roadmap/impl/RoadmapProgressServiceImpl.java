@@ -12,11 +12,13 @@ import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItemProgress;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItemProgressStatus;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
+import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemProgressRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.service.roadmap.RoadmapProgressService;
-import java.time.Instant;
+import com.codegym.aiplanning.service.roadmap.progress.LearningUnitProgressProjection;
+import com.codegym.aiplanning.service.roadmap.progress.LearningUnitProgressProjector;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -32,14 +34,19 @@ public class RoadmapProgressServiceImpl implements RoadmapProgressService {
     private final RoadmapRepository roadmapRepository;
     private final RoadmapItemRepository roadmapItemRepository;
     private final RoadmapItemProgressRepository progressRepository;
+    private final ProgressEntryRepository progressEntryRepository;
+    private final LearningUnitProgressProjector progressProjector;
 
     public RoadmapProgressServiceImpl(
             RoadmapRepository roadmapRepository,
             RoadmapItemRepository roadmapItemRepository,
-            RoadmapItemProgressRepository progressRepository) {
+            RoadmapItemProgressRepository progressRepository,
+            ProgressEntryRepository progressEntryRepository) {
         this.roadmapRepository = roadmapRepository;
         this.roadmapItemRepository = roadmapItemRepository;
         this.progressRepository = progressRepository;
+        this.progressEntryRepository = progressEntryRepository;
+        this.progressProjector = new LearningUnitProgressProjector();
     }
 
     @Override
@@ -57,24 +64,24 @@ public class RoadmapProgressServiceImpl implements RoadmapProgressService {
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.RESOURCE_NOT_FOUND,
                         "The Roadmap item linked to this task no longer exists."));
-        if (item.getItemType() == RoadmapItemType.MILESTONE) {
+        if (item.getItemType() != RoadmapItemType.LEARNING_UNIT) {
             throw new BusinessException(
                     ErrorCode.INVALID_PLAN_TRANSITION,
-                    "Daily Plan tasks cannot record progress against a Milestone.");
+                    "Daily Plan outcomes can only record progress against a Learning Unit.");
         }
 
-        RoadmapItemProgress progress = progressRepository
-                .findByUserIdAndRoadmapItemId(userId, item.getId())
-                .orElseGet(() -> RoadmapItemProgress.create(
-                        userId,
-                        item.getRoadmapVersion().getId(),
-                        item.getId()));
-        applyOutcome(progress, progressEntry, outcome);
-        progressRepository.saveAndFlush(progress);
+        rebuildLearningUnitSnapshot(userId, item);
+    }
 
-        if (item.getItemType() == RoadmapItemType.LEARNING_UNIT) {
-            updateParentTopic(userId, item, progressEntry);
-        }
+    @Override
+    @Transactional
+    public void correctOutcome(
+            UUID userId,
+            UUID roadmapItemId,
+            ProgressEntry progressEntry,
+            ProgressEntryStatus outcome) {
+        RoadmapItem item = requireOwnedLearningUnit(userId, roadmapItemId);
+        rebuildLearningUnitSnapshot(userId, item);
     }
 
     @Override
@@ -129,58 +136,38 @@ public class RoadmapProgressServiceImpl implements RoadmapProgressService {
                 List.copyOf(topicResponses));
     }
 
-    private void applyOutcome(
-            RoadmapItemProgress progress,
-            ProgressEntry entry,
-            ProgressEntryStatus outcome) {
-        if (outcome == ProgressEntryStatus.COMPLETED) {
-            progress.markCompleted(
-                    entry.getId(), completionTime(entry));
-        } else if (outcome == ProgressEntryStatus.PARTIALLY_COMPLETED) {
-            progress.markInProgress(entry.getId());
-        } else {
-            progress.recordSkipped(entry.getId());
+    private RoadmapItem requireOwnedLearningUnit(UUID userId, UUID roadmapItemId) {
+        RoadmapItem item = roadmapItemRepository.findOwnedById(roadmapItemId, userId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.RESOURCE_NOT_FOUND,
+                        "The Learning Unit linked to this progress entry no longer exists."));
+        if (item.getItemType() != RoadmapItemType.LEARNING_UNIT) {
+            throw new BusinessException(
+                    ErrorCode.INVALID_PLAN_TRANSITION,
+                    "Progress corrections can only target a Learning Unit.");
         }
+        return item;
     }
 
-    private void updateParentTopic(
-            UUID userId, RoadmapItem unit, ProgressEntry latestEntry) {
-        RoadmapItem topic = unit.getParent();
-        if (topic == null || topic.getItemType() != RoadmapItemType.TOPIC) {
-            throw new BusinessException(
-                    ErrorCode.INTERNAL_ERROR,
-                    "A Learning Unit is not attached to a valid parent Topic.");
-        }
-
-        List<RoadmapItem> units = roadmapItemRepository
-                .findAllByRoadmapVersionIdAndParentIdOrderByOrderIndexAsc(
-                        topic.getRoadmapVersion().getId(), topic.getId())
-                .stream()
-                .filter(candidate -> candidate.getItemType() == RoadmapItemType.LEARNING_UNIT)
-                .toList();
-        List<RoadmapItemProgress> snapshots = units.isEmpty()
-                ? List.of()
-                : progressRepository.findByUserIdAndRoadmapItemIdIn(
-                        userId, units.stream().map(RoadmapItem::getId).toList());
-        long completedUnits = snapshots.stream()
-                .filter(snapshot -> snapshot.getStatus()
-                        == RoadmapItemProgressStatus.COMPLETED)
-                .count();
-        int percentage = units.isEmpty()
-                ? 0
-                : (int) Math.round(completedUnits * 100.0 / units.size());
-
-        RoadmapItemProgress topicProgress = progressRepository
-                .findByUserIdAndRoadmapItemId(userId, topic.getId())
+    private void rebuildLearningUnitSnapshot(UUID userId, RoadmapItem unit) {
+        RoadmapItemProgress progress = progressRepository
+                .findByUserIdAndRoadmapItemId(userId, unit.getId())
                 .orElseGet(() -> RoadmapItemProgress.create(
                         userId,
-                        topic.getRoadmapVersion().getId(),
-                        topic.getId()));
-        topicProgress.applyAggregate(
-                percentage,
-                latestEntry.getId(),
-                completionTime(latestEntry));
-        progressRepository.saveAndFlush(topicProgress);
+                        unit.getRoadmapVersion().getId(),
+                        unit.getId()));
+        List<ProgressEntry> history = progressEntryRepository
+                .findByUserIdAndLearningUnitIdOrderByRecordedAtAscIdAsc(
+                        userId, unit.getId());
+        LearningUnitProgressProjection projection = progressProjector.project(
+                history, progress);
+        progress.replaceProjection(
+                projection.status(),
+                projection.latestOutcome(),
+                projection.completionPercentage(),
+                projection.lastProgressEntryId(),
+                projection.completedAt());
+        progressRepository.saveAndFlush(progress);
     }
 
     private TopicProgress topicProgress(
@@ -195,24 +182,17 @@ public class RoadmapProgressServiceImpl implements RoadmapProgressService {
                 .filter(unit -> unit.status() == RoadmapItemProgressStatus.COMPLETED)
                 .count();
 
-        RoadmapItemProgress storedTopicProgress = progressByItemId.get(topic.getId());
-        int percentage;
-        RoadmapItemProgressStatus status;
-        if (units.isEmpty()) {
-            percentage = storedTopicProgress == null
-                    ? 0
-                    : storedTopicProgress.getCompletionPercentage();
-            status = storedTopicProgress == null
-                    ? RoadmapItemProgressStatus.NOT_STARTED
-                    : storedTopicProgress.getStatus();
-        } else {
-            percentage = (int) Math.round(completedUnits * 100.0 / units.size());
-            status = percentage == 100
-                    ? RoadmapItemProgressStatus.COMPLETED
-                    : percentage == 0
-                            ? RoadmapItemProgressStatus.NOT_STARTED
-                            : RoadmapItemProgressStatus.IN_PROGRESS;
-        }
+        int percentage = units.isEmpty()
+                ? 0
+                : (int) Math.round(completedUnits * 100.0 / units.size());
+        boolean hasRecordedProgress = unitResponses.stream()
+                .anyMatch(unit -> unit.status() != RoadmapItemProgressStatus.NOT_STARTED
+                        || unit.latestOutcome() != null);
+        RoadmapItemProgressStatus status = percentage == 100
+                ? RoadmapItemProgressStatus.COMPLETED
+                : hasRecordedProgress
+                        ? RoadmapItemProgressStatus.IN_PROGRESS
+                        : RoadmapItemProgressStatus.NOT_STARTED;
 
         return new TopicProgress(
                 topic.getId(),
@@ -232,6 +212,7 @@ public class RoadmapProgressServiceImpl implements RoadmapProgressService {
                 progress == null
                         ? RoadmapItemProgressStatus.NOT_STARTED
                         : progress.getStatus(),
+                progress == null ? null : progress.getLatestOutcome(),
                 progress == null ? 0 : progress.getCompletionPercentage());
     }
 
@@ -276,7 +257,4 @@ public class RoadmapProgressServiceImpl implements RoadmapProgressService {
                 topic.getParent().getId(), Integer.MAX_VALUE);
     }
 
-    private Instant completionTime(ProgressEntry entry) {
-        return entry.getRecordedAt() == null ? Instant.now() : entry.getRecordedAt();
-    }
 }

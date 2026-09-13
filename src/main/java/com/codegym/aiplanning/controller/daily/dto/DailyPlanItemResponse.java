@@ -22,17 +22,24 @@ public record DailyPlanItemResponse(
         Instant createdAt,
         UUID roadmapItemId,
         String roadmapItemTitle,
+        UUID learningUnitId,
+        String learningUnitTitle,
+        UUID parentTopicId,
         String parentTopicTitle,
+        RoadmapItemReferenceResponse roadmapItem,
+        StudyUnitReferenceResponse studyUnit,
         AiAdjustmentAction aiAdjustmentAction,
         String aiAdjustmentReason
 ) {
     public static DailyPlanItemResponse from(DailyPlanItem item) {
-        return from(item, null, null);
+        return from(item, null, null, null, null);
     }
 
     public static DailyPlanItemResponse from(
             DailyPlanItem item,
+            UUID learningUnitId,
             String roadmapItemTitle,
+            UUID parentTopicId,
             String parentTopicTitle) {
         return new DailyPlanItemResponse(
                 item.getId(),
@@ -47,7 +54,18 @@ public record DailyPlanItemResponse(
                 item.getCreatedAt(),
                 item.getRoadmapItemId(),
                 roadmapItemTitle,
+                learningUnitId,
+                learningUnitId == null ? null : roadmapItemTitle,
+                parentTopicId,
                 parentTopicTitle,
+                parentTopicId == null
+                        ? null
+                        : new RoadmapItemReferenceResponse(
+                                parentTopicId, parentTopicTitle),
+                learningUnitId == null
+                        ? null
+                        : new StudyUnitReferenceResponse(
+                                learningUnitId, roadmapItemTitle),
                 item.getAiAdjustmentAction(),
                 item.getAiAdjustmentReason()
         );

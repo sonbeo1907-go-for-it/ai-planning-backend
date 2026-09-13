@@ -34,6 +34,9 @@ public class RoadmapVersion extends BaseEntity {
     @Column(name = "draft_slot_roadmap_id")
     private UUID draftSlotRoadmapId;
 
+    @Column(name = "source_roadmap_version_id")
+    private UUID sourceRoadmapVersionId;
+
     @Column(name = "activated_at")
     private Instant activatedAt;
 
@@ -41,12 +44,33 @@ public class RoadmapVersion extends BaseEntity {
 
     public static RoadmapVersion draft(
             Roadmap roadmap, int versionNumber, RoadmapVersionOrigin origin) {
+        return draft(roadmap, versionNumber, origin, null);
+    }
+
+    public static RoadmapVersion derivedDraft(
+            Roadmap roadmap,
+            int versionNumber,
+            RoadmapVersionOrigin origin,
+            RoadmapVersion sourceVersion) {
+        if (sourceVersion == null || sourceVersion.getId() == null) {
+            throw new IllegalArgumentException(
+                    "A derived Roadmap version requires a persisted source version.");
+        }
+        return draft(roadmap, versionNumber, origin, sourceVersion.getId());
+    }
+
+    private static RoadmapVersion draft(
+            Roadmap roadmap,
+            int versionNumber,
+            RoadmapVersionOrigin origin,
+            UUID sourceRoadmapVersionId) {
         RoadmapVersion version = new RoadmapVersion();
         version.roadmap = roadmap;
         version.versionNumber = versionNumber;
         version.status = RoadmapVersionStatus.DRAFT;
         version.origin = origin;
         version.draftSlotRoadmapId = roadmap.getId();
+        version.sourceRoadmapVersionId = sourceRoadmapVersionId;
         return version;
     }
 
@@ -64,6 +88,10 @@ public class RoadmapVersion extends BaseEntity {
 
     public RoadmapVersionOrigin getOrigin() {
         return origin;
+    }
+
+    public UUID getSourceRoadmapVersionId() {
+        return sourceRoadmapVersionId;
     }
 
     public Instant getActivatedAt() {

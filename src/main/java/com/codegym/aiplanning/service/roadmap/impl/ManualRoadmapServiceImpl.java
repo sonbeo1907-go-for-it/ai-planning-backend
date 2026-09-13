@@ -7,6 +7,8 @@ import com.codegym.aiplanning.controller.roadmap.dto.CreateMilestoneRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.CreateRoadmapRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.CreateTopicRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapItemResponse;
+import com.codegym.aiplanning.controller.roadmap.dto.RoadmapItemProgressResponse;
+import com.codegym.aiplanning.controller.roadmap.dto.RoadmapProgressResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapSummaryResponse;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapVersionResponse;
@@ -17,6 +19,7 @@ import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemProgress;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import com.codegym.aiplanning.entity.roadmap.RoadmapSource;
 import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
@@ -25,17 +28,20 @@ import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersionStatus;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapItemProgressRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapSourceRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapVersionRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.roadmap.ManualRoadmapService;
+import com.codegym.aiplanning.service.roadmap.RoadmapProgressService;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,22 +55,28 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
     private final RoadmapRepository roadmapRepository;
     private final RoadmapVersionRepository roadmapVersionRepository;
     private final RoadmapItemRepository roadmapItemRepository;
+    private final RoadmapItemProgressRepository roadmapItemProgressRepository;
     private final RoadmapSourceRepository roadmapSourceRepository;
     private final AuditLogService auditLogService;
+    private final RoadmapProgressService roadmapProgressService;
 
     public ManualRoadmapServiceImpl(
             UserAccountRepository userAccountRepository,
             RoadmapRepository roadmapRepository,
             RoadmapVersionRepository roadmapVersionRepository,
             RoadmapItemRepository roadmapItemRepository,
+            RoadmapItemProgressRepository roadmapItemProgressRepository,
             RoadmapSourceRepository roadmapSourceRepository,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            RoadmapProgressService roadmapProgressService) {
         this.userAccountRepository = userAccountRepository;
         this.roadmapRepository = roadmapRepository;
         this.roadmapVersionRepository = roadmapVersionRepository;
         this.roadmapItemRepository = roadmapItemRepository;
+        this.roadmapItemProgressRepository = roadmapItemProgressRepository;
         this.roadmapSourceRepository = roadmapSourceRepository;
         this.auditLogService = auditLogService;
+        this.roadmapProgressService = roadmapProgressService;
     }
 
     @Override
@@ -148,11 +160,15 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
         Roadmap copy = roadmapRepository.saveAndFlush(Roadmap.editableCopyOf(
                 source,
                 copyTitle(source.getTitle())));
-        RoadmapVersion copyVersion = roadmapVersionRepository.saveAndFlush(
-                RoadmapVersion.draft(copy, 1, RoadmapVersionOrigin.MANUAL));
         RoadmapVersion activeSourceVersion = roadmapVersionRepository
                 .findByIdAndRoadmapId(source.getActiveVersionId(), source.getId())
                 .orElseThrow(this::roadmapDataIntegrityError);
+        RoadmapVersion copyVersion = roadmapVersionRepository.saveAndFlush(
+                RoadmapVersion.derivedDraft(
+                        copy,
+                        1,
+                        RoadmapVersionOrigin.MANUAL,
+                        activeSourceVersion));
 
         cloneItems(activeSourceVersion, copyVersion);
         copySourceLinks(source, copy);
@@ -388,6 +404,7 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
             throw invalidTransition("Only a draft Roadmap version can be activated.");
         }
         requireCompleteStructure(versionId);
+        carryForwardLearningUnitProgress(userId, version);
 
         Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         version.activate(now);
@@ -401,6 +418,75 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
                 "RoadmapVersion",
                 versionId.toString());
         return versionResponse(version);
+    }
+
+    private void carryForwardLearningUnitProgress(
+            UUID userId, RoadmapVersion targetVersion) {
+        UUID sourceVersionId = targetVersion.getSourceRoadmapVersionId();
+        if (sourceVersionId == null) {
+            return;
+        }
+
+        UUID targetVersionId = targetVersion.getId();
+        List<RoadmapItem> targetUnits = roadmapItemRepository
+                .findAllByRoadmapVersionIds(List.of(targetVersionId))
+                .stream()
+                .filter(item -> item.getItemType() == RoadmapItemType.LEARNING_UNIT)
+                .toList();
+        if (targetUnits.isEmpty()) {
+            return;
+        }
+
+        Set<UUID> existingTargetIds = roadmapItemProgressRepository
+                .findByUserIdAndRoadmapVersionId(userId, targetVersionId)
+                .stream()
+                .map(RoadmapItemProgress::getRoadmapItemId)
+                .collect(java.util.stream.Collectors.toSet());
+        Map<UUID, RoadmapItem> targetByLineage = new HashMap<>();
+        for (RoadmapItem unit : targetUnits) {
+            if (!existingTargetIds.contains(unit.getId())) {
+                targetByLineage.put(unit.getLineageId(), unit);
+            }
+        }
+        if (targetByLineage.isEmpty()) {
+            return;
+        }
+
+        List<RoadmapItemProgress> candidates = roadmapItemProgressRepository
+                .findByUserIdAndRoadmapVersionId(userId, sourceVersionId);
+        if (candidates.isEmpty()) {
+            return;
+        }
+
+        Map<UUID, UUID> lineageBySourceItemId = new HashMap<>();
+        for (RoadmapItem sourceItem : roadmapItemRepository
+                .findAllByRoadmapVersionIds(List.of(sourceVersionId))) {
+            if (sourceItem.getItemType() == RoadmapItemType.LEARNING_UNIT
+                    && sourceItem.getLineageId() != null) {
+                lineageBySourceItemId.put(sourceItem.getId(), sourceItem.getLineageId());
+            }
+        }
+
+        Map<UUID, RoadmapItemProgress> latestByLineage = new HashMap<>();
+        for (RoadmapItemProgress candidate : candidates) {
+            UUID lineageId = lineageBySourceItemId.get(candidate.getRoadmapItemId());
+            if (lineageId != null) {
+                latestByLineage.putIfAbsent(lineageId, candidate);
+            }
+        }
+
+        List<RoadmapItemProgress> carriedProgress = new ArrayList<>();
+        for (Map.Entry<UUID, RoadmapItem> target : targetByLineage.entrySet()) {
+            RoadmapItemProgress source = latestByLineage.get(target.getKey());
+            if (source != null) {
+                carriedProgress.add(RoadmapItemProgress.carryForward(
+                        userId,
+                        targetVersionId,
+                        target.getValue().getId(),
+                        source));
+            }
+        }
+        roadmapItemProgressRepository.saveAll(carriedProgress);
     }
 
     private void cloneItems(RoadmapVersion source, RoadmapVersion target) {
@@ -440,7 +526,8 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
                             learningUnit.getTitle(),
                             learningUnit.getDescription(),
                             learningUnit.getOrderIndex(),
-                            learningUnit.getEstimatedMinutes()));
+                            learningUnit.getEstimatedMinutes(),
+                            learningUnit.getLineageId()));
                 }
             }
         }
@@ -531,24 +618,43 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
                             item.getRoadmapVersion().getId(), ignored -> new ArrayList<>())
                     .add(item);
         }
-        return roadmapListResponse(roadmap, roadmapVersions, itemsByVersionId);
+        RoadmapProgressResponse progress = roadmap.getActiveVersionId() == null
+                ? null
+                : roadmapProgressService.getProgress(
+                        roadmap.getOwner().getId(), roadmap.getId());
+        return roadmapListResponse(
+                roadmap, roadmapVersions, itemsByVersionId, progress);
     }
 
     private RoadmapResponse roadmapListResponse(
             Roadmap roadmap,
             List<RoadmapVersion> versions,
-            Map<UUID, List<RoadmapItem>> itemsByVersionId) {
+            Map<UUID, List<RoadmapItem>> itemsByVersionId,
+            RoadmapProgressResponse progress) {
         return RoadmapResponse.from(
                 roadmap,
                 versions.stream()
                         .map(version -> versionListResponse(
                                 version,
-                                itemsByVersionId.getOrDefault(version.getId(), List.of())))
-                        .toList());
+                                itemsByVersionId.getOrDefault(version.getId(), List.of()),
+                                progress != null
+                                                && version.getId().equals(
+                                                        progress.roadmapVersionId())
+                                        ? progress
+                                        : null))
+                        .toList(),
+                progress);
     }
 
     private RoadmapVersionResponse versionListResponse(
             RoadmapVersion version, List<RoadmapItem> items) {
+        return versionListResponse(version, items, null);
+    }
+
+    private RoadmapVersionResponse versionListResponse(
+            RoadmapVersion version,
+            List<RoadmapItem> items,
+            RoadmapProgressResponse progress) {
         Map<UUID, List<RoadmapItem>> topicsByMilestoneId = new HashMap<>();
         Map<UUID, List<RoadmapItem>> unitsByTopicId = new HashMap<>();
         for (RoadmapItem item : items) {
@@ -564,6 +670,20 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
             }
         }
 
+        Map<UUID, RoadmapProgressResponse.TopicProgress> topicProgressById =
+                new HashMap<>();
+        Map<UUID, RoadmapProgressResponse.LearningUnitProgress> unitProgressById =
+                new HashMap<>();
+        if (progress != null) {
+            for (RoadmapProgressResponse.TopicProgress topicProgress : progress.topics()) {
+                topicProgressById.put(topicProgress.roadmapItemId(), topicProgress);
+                for (RoadmapProgressResponse.LearningUnitProgress unitProgress
+                        : topicProgress.learningUnits()) {
+                    unitProgressById.put(unitProgress.roadmapItemId(), unitProgress);
+                }
+            }
+        }
+
         List<RoadmapItemResponse> milestones = items.stream()
                 .filter(item -> item.getItemType() == RoadmapItemType.MILESTONE)
                 .map(milestone -> RoadmapItemResponse.from(
@@ -573,7 +693,9 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
                                 .stream()
                                 .map(topic -> topicResponse(
                                         topic,
-                                        unitsByTopicId.getOrDefault(topic.getId(), List.of())))
+                                        unitsByTopicId.getOrDefault(topic.getId(), List.of()),
+                                        topicProgressById,
+                                        unitProgressById))
                                 .toList()))
                 .toList();
         return RoadmapVersionResponse.from(version, milestones);
@@ -589,12 +711,33 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
         return RoadmapItemResponse.from(item, List.of(), List.of());
     }
 
+    private RoadmapItemResponse itemResponse(
+            RoadmapItem item,
+            Map<UUID, RoadmapProgressResponse.LearningUnitProgress> unitProgressById) {
+        return RoadmapItemResponse.from(
+                item,
+                List.of(),
+                List.of(),
+                RoadmapItemProgressResponse.from(unitProgressById.get(item.getId())));
+    }
+
     private RoadmapItemResponse topicResponse(
             RoadmapItem topic, List<RoadmapItem> learningUnits) {
+        return topicResponse(topic, learningUnits, Map.of(), Map.of());
+    }
+
+    private RoadmapItemResponse topicResponse(
+            RoadmapItem topic,
+            List<RoadmapItem> learningUnits,
+            Map<UUID, RoadmapProgressResponse.TopicProgress> topicProgressById,
+            Map<UUID, RoadmapProgressResponse.LearningUnitProgress> unitProgressById) {
         return RoadmapItemResponse.from(
                 topic,
                 List.of(),
-                learningUnits.stream().map(this::itemResponse).toList());
+                learningUnits.stream()
+                        .map(unit -> itemResponse(unit, unitProgressById))
+                        .toList(),
+                RoadmapItemProgressResponse.from(topicProgressById.get(topic.getId())));
     }
 
     private Map<UUID, List<RoadmapItem>> childrenByParent(

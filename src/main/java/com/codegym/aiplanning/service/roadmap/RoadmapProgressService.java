@@ -13,5 +13,11 @@ public interface RoadmapProgressService {
             ProgressEntry progressEntry,
             ProgressEntryStatus outcome);
 
+    void correctOutcome(
+            UUID userId,
+            UUID roadmapItemId,
+            ProgressEntry progressEntry,
+            ProgressEntryStatus outcome);
+
     RoadmapProgressResponse getProgress(UUID userId, UUID roadmapId);
 }

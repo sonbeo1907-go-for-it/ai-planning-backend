@@ -26,7 +26,9 @@ class ManualRoadmapDtoPrivacyTest {
                 privateDescription,
                 0,
                 60,
-                List.of());
+                List.of(),
+                List.of(),
+                null);
         RoadmapResponse response = new RoadmapResponse(
                 UUID.randomUUID(),
                 0,
@@ -35,6 +37,7 @@ class ManualRoadmapDtoPrivacyTest {
                 RoadmapStatus.DRAFT,
                 null,
                 List.of(),
+                null,
                 null,
                 null);
 

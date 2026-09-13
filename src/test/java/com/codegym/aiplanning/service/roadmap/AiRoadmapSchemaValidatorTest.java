@@ -78,6 +78,43 @@ class AiRoadmapSchemaValidatorTest {
     }
 
     @Test
+    void rejectsALearningUnitThatCopiesItsParentTopicTitle() throws Exception {
+        ObjectNode roadmap = validRoadmap();
+        ObjectNode firstTopic = (ObjectNode) roadmap
+                .withArray("milestones")
+                .get(0)
+                .withArray("topics")
+                .get(0);
+        String topicTitle = firstTopic.path("title").asText();
+        ((ObjectNode) firstTopic.withArray("learningUnits").get(0))
+                .put("title", topicTitle);
+
+        assertThrows(
+                InvalidAiRoadmapResponseException.class,
+                () -> validator.validate(objectMapper.writeValueAsString(roadmap)));
+    }
+
+    @Test
+    void rejectsDuplicateLearningUnitsWithinOneTopic() throws Exception {
+        ObjectNode roadmap = validRoadmap();
+        ObjectNode firstTopic = (ObjectNode) roadmap
+                .withArray("milestones")
+                .get(0)
+                .withArray("topics")
+                .get(0);
+        ArrayNode learningUnits = firstTopic.withArray("learningUnits");
+        ObjectNode duplicate = learningUnits.addObject();
+        duplicate.put("title", learningUnits.get(0).path("title").asText());
+        duplicate.put("description", "Another description");
+        duplicate.put("orderIndex", 1);
+        duplicate.put("estimatedMinutes", 30);
+
+        assertThrows(
+                InvalidAiRoadmapResponseException.class,
+                () -> validator.validate(objectMapper.writeValueAsString(roadmap)));
+    }
+
+    @Test
     void rejectsMilestoneCountOutsideTheSchema() throws Exception {
         ObjectNode roadmap = validRoadmap();
         roadmap.withArray("milestones").remove(2);

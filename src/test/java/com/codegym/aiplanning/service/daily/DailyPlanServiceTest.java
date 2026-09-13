@@ -562,7 +562,7 @@ class DailyPlanServiceTest {
     }
 
     @Test
-    void deleteTask_withProgressHistory_isRejected() {
+    void deleteTask_withProgressHistory_isSoftRemoved() {
         UUID planId = UUID.randomUUID();
         UUID versionId = UUID.randomUUID();
         UUID itemId = UUID.randomUUID();
@@ -581,13 +581,12 @@ class DailyPlanServiceTest {
         when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
                 .thenReturn(Optional.of(version));
         when(dailyPlanItemRepository.findById(itemId)).thenReturn(Optional.of(item));
-        when(progressEntryRepository.existsByDailyPlanItemId(itemId)).thenReturn(true);
 
-        assertThatThrownBy(() ->
-                        dailyPlanService.deleteTask(planId, versionId, itemId, userJwt))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("progress history");
+        dailyPlanService.deleteTask(planId, versionId, itemId, userJwt);
 
+        assertThat(item.isRemoved()).isTrue();
+        assertThat(version.getTotalPlannedMinutes()).isZero();
+        verify(dailyPlanItemRepository).saveAndFlush(item);
         verify(dailyPlanItemRepository, never()).delete(any());
     }
 
@@ -757,7 +756,7 @@ class DailyPlanServiceTest {
 
         com.codegym.aiplanning.entity.roadmap.RoadmapItemProgress progress1 =
                 com.codegym.aiplanning.entity.roadmap.RoadmapItemProgress.create(userId, activeVersionId, unit1Id);
-        progress1.markInProgress(UUID.randomUUID());
+        progress1.markInProgress(UUID.randomUUID(), 50);
 
         when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
         when(roadmapRepository.findByIdAndOwnerId(roadmapId, userId)).thenReturn(Optional.of(roadmap));

@@ -14,11 +14,19 @@ public record RoadmapResponse(
         RoadmapStatus status,
         UUID activeVersionId,
         List<RoadmapVersionResponse> versions,
+        RoadmapProgressSummaryResponse progress,
         Instant createdAt,
         Instant updatedAt) {
 
     public static RoadmapResponse from(
             Roadmap roadmap, List<RoadmapVersionResponse> versions) {
+        return from(roadmap, versions, null);
+    }
+
+    public static RoadmapResponse from(
+            Roadmap roadmap,
+            List<RoadmapVersionResponse> versions,
+            RoadmapProgressResponse progress) {
         return new RoadmapResponse(
                 roadmap.getId(),
                 roadmap.getVersion(),
@@ -27,6 +35,7 @@ public record RoadmapResponse(
                 roadmap.getStatus(),
                 roadmap.getActiveVersionId(),
                 versions == null ? List.of() : versions,
+                RoadmapProgressSummaryResponse.from(progress),
                 roadmap.getCreatedAt(),
                 roadmap.getUpdatedAt());
     }

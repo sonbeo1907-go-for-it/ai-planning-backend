@@ -1,6 +1,7 @@
 package com.codegym.aiplanning.service.roadmap;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -10,6 +11,7 @@ import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.entity.daily.ProgressEntry;
 import com.codegym.aiplanning.entity.daily.ProgressEntryStatus;
+import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItemProgress;
@@ -19,6 +21,7 @@ import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemProgressRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
+import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
 import com.codegym.aiplanning.service.roadmap.impl.RoadmapProgressServiceImpl;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -46,28 +49,26 @@ class RoadmapProgressServiceImplTest {
     @Mock
     private RoadmapItemProgressRepository progressRepository;
 
+    @Mock
+    private ProgressEntryRepository progressEntryRepository;
+
     private RoadmapProgressServiceImpl service;
     private Map<UUID, RoadmapItemProgress> storedProgress;
+    private Map<UUID, List<ProgressEntry>> historyByLearningUnitId;
 
     @BeforeEach
     void setUp() {
         service = new RoadmapProgressServiceImpl(
                 roadmapRepository,
                 roadmapItemRepository,
-                progressRepository);
+                progressRepository,
+                progressEntryRepository);
         storedProgress = new LinkedHashMap<>();
+        historyByLearningUnitId = new LinkedHashMap<>();
 
         when(progressRepository.findByUserIdAndRoadmapItemId(any(), any()))
                 .thenAnswer(invocation -> Optional.ofNullable(
                         storedProgress.get(invocation.getArgument(1, UUID.class))));
-        when(progressRepository.findByUserIdAndRoadmapItemIdIn(any(), any()))
-                .thenAnswer(invocation -> {
-                    List<UUID> itemIds = invocation.getArgument(1);
-                    return itemIds.stream()
-                            .map(storedProgress::get)
-                            .filter(java.util.Objects::nonNull)
-                            .toList();
-                });
         when(progressRepository.findByUserIdAndRoadmapVersionId(any(), any()))
                 .thenAnswer(invocation -> List.copyOf(storedProgress.values()));
         when(progressRepository.saveAndFlush(any(RoadmapItemProgress.class)))
@@ -76,6 +77,11 @@ class RoadmapProgressServiceImplTest {
                     storedProgress.put(progress.getRoadmapItemId(), progress);
                     return progress;
                 });
+        when(progressEntryRepository
+                        .findByUserIdAndLearningUnitIdOrderByRecordedAtAscIdAsc(
+                                any(), any()))
+                .thenAnswer(invocation -> historyByLearningUnitId.getOrDefault(
+                        invocation.getArgument(1), List.of()));
     }
 
     @Test
@@ -118,27 +124,24 @@ class RoadmapProgressServiceImplTest {
             when(roadmapItemRepository.findOwnedById(unit.getId(), userId))
                     .thenReturn(Optional.of(unit));
         }
-        when(roadmapItemRepository
-                        .findAllByRoadmapVersionIdAndParentIdOrderByOrderIndexAsc(
-                                version.getId(), topic.getId()))
-                .thenReturn(learningUnits);
+        when(roadmapItemRepository.findOwnedById(topic.getId(), userId))
+                .thenReturn(Optional.of(topic));
+        assertThatThrownBy(() -> service.recordOutcome(
+                        userId,
+                        topic.getId(),
+                        completedEntry(userId),
+                        ProgressEntryStatus.COMPLETED))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Learning Unit");
 
-        service.recordOutcome(
-                userId,
-                learningUnits.get(0).getId(),
-                completedEntry(userId),
-                ProgressEntryStatus.COMPLETED);
-
-        RoadmapItemProgress firstTopicSnapshot = storedProgress.get(topic.getId());
-        assertThat(firstTopicSnapshot.getStatus())
-                .isEqualTo(RoadmapItemProgressStatus.IN_PROGRESS);
-        assertThat(firstTopicSnapshot.getCompletionPercentage()).isEqualTo(25);
-
-        for (int index = 1; index < learningUnits.size(); index++) {
+        for (int index = 0; index < learningUnits.size(); index++) {
+            ProgressEntry completedEntry = completedEntry(userId);
+            historyByLearningUnitId.put(
+                    learningUnits.get(index).getId(), List.of(completedEntry));
             service.recordOutcome(
                     userId,
                     learningUnits.get(index).getId(),
-                    completedEntry(userId),
+                    completedEntry,
                     ProgressEntryStatus.COMPLETED);
         }
 
@@ -166,7 +169,8 @@ class RoadmapProgressServiceImplTest {
 
         RoadmapProgressResponse response = service.getProgress(userId, roadmap.getId());
 
-        assertThat(storedProgress.get(topic.getId()).getStatus())
+        assertThat(storedProgress).doesNotContainKey(topic.getId());
+        assertThat(storedProgress.get(learningUnits.get(0).getId()).getStatus())
                 .isEqualTo(RoadmapItemProgressStatus.COMPLETED);
         assertThat(response.completedTopics()).isEqualTo(1);
         assertThat(response.totalTopics()).isEqualTo(20);

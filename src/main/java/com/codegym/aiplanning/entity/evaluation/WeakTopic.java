@@ -73,6 +73,18 @@ public class WeakTopic extends BaseEntity {
             throw new IllegalArgumentException(
                     "A Weak Topic signal must target a Learning Unit.");
         }
+        if (roadmapVersion == null
+                || roadmapItem.getRoadmapVersion() == null
+                || !roadmapItem.getRoadmapVersion().getId().equals(roadmapVersion.getId())) {
+            throw new IllegalArgumentException(
+                    "A Weak Topic signal and its Learning Unit must belong to the same Roadmap version.");
+        }
+        if (roadmap == null
+                || roadmapVersion.getRoadmap() == null
+                || !roadmapVersion.getRoadmap().getId().equals(roadmap.getId())) {
+            throw new IllegalArgumentException(
+                    "A Weak Topic signal must belong to the Learning Unit's Roadmap.");
+        }
         WeakTopic weakTopic = new WeakTopic();
         weakTopic.user = user;
         weakTopic.roadmap = roadmap;

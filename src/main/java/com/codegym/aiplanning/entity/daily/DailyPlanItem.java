@@ -42,6 +42,9 @@ public class DailyPlanItem extends BaseEntity {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    @Column(name = "removed_at")
+    private Instant removedAt;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "ai_adjustment_action", length = 30)
     private AiAdjustmentAction aiAdjustmentAction;
@@ -125,6 +128,16 @@ public class DailyPlanItem extends BaseEntity {
         this.roadmapItemId = roadmapItemId;
     }
 
+    public void remove(Instant removalTime) {
+        if (removedAt == null) {
+            removedAt = removalTime;
+        }
+    }
+
+    public boolean isRemoved() {
+        return removedAt != null;
+    }
+
     public UUID getDailyPlanVersionId() {
         return dailyPlanVersionId;
     }
@@ -155,6 +168,10 @@ public class DailyPlanItem extends BaseEntity {
 
     public Instant getCompletedAt() {
         return completedAt;
+    }
+
+    public Instant getRemovedAt() {
+        return removedAt;
     }
 
     public UUID getRoadmapItemId() {

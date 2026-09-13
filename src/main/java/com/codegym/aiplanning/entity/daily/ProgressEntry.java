@@ -27,8 +27,17 @@ public class ProgressEntry {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
-    @Column(name = "daily_plan_item_id", nullable = false)
+    @Column(name = "daily_plan_item_id")
     private UUID dailyPlanItemId;
+
+    @Column(name = "roadmap_version_id")
+    private UUID roadmapVersionId;
+
+    @Column(name = "learning_unit_id")
+    private UUID learningUnitId;
+
+    @Column(name = "idempotency_key", length = 100)
+    private String idempotencyKey;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
@@ -72,9 +81,42 @@ public class ProgressEntry {
             Integer understandingRating,
             String note,
             UUID supersedesEntryId) {
+        return create(
+                userId,
+                dailyPlanItemId,
+                null,
+                null,
+                status,
+                actualMinutes,
+                completionPercentage,
+                actualResult,
+                difficulty,
+                understandingRating,
+                note,
+                supersedesEntryId,
+                null);
+    }
+
+    public static ProgressEntry create(
+            UUID userId,
+            UUID dailyPlanItemId,
+            UUID roadmapVersionId,
+            UUID learningUnitId,
+            ProgressEntryStatus status,
+            Integer actualMinutes,
+            Integer completionPercentage,
+            String actualResult,
+            Integer difficulty,
+            Integer understandingRating,
+            String note,
+            UUID supersedesEntryId,
+            String idempotencyKey) {
         ProgressEntry entry = new ProgressEntry();
         entry.userId = userId;
         entry.dailyPlanItemId = dailyPlanItemId;
+        entry.roadmapVersionId = roadmapVersionId;
+        entry.learningUnitId = learningUnitId;
+        entry.idempotencyKey = idempotencyKey;
         entry.status = status;
         entry.actualMinutes = actualMinutes != null ? actualMinutes : 0;
         entry.completionPercentage = completionPercentage != null ? completionPercentage : (status == ProgressEntryStatus.COMPLETED ? 100 : 0);
@@ -96,6 +138,18 @@ public class ProgressEntry {
 
     public UUID getDailyPlanItemId() {
         return dailyPlanItemId;
+    }
+
+    public UUID getRoadmapVersionId() {
+        return roadmapVersionId;
+    }
+
+    public UUID getLearningUnitId() {
+        return learningUnitId;
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
     }
 
     public Instant getRecordedAt() {

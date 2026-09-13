@@ -13,9 +13,13 @@ import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.entity.profile.UserProfile;
+import com.codegym.aiplanning.entity.daily.ProgressEntryStatus;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemProgress;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapSourceRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapItemProgressRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapVersionRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
@@ -52,11 +56,18 @@ class ManualRoadmapControllerIntegrationTest {
     private RoadmapSourceRepository roadmapSourceRepository;
 
     @Autowired
+    private RoadmapItemProgressRepository roadmapItemProgressRepository;
+
+    @Autowired
+    private RoadmapVersionRepository roadmapVersionRepository;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Test
     void userBuildsActivatesAndCopiesAnIndependentManualRoadmap() throws Exception {
-        String token = login(createAccount(UserRole.USER));
+        UserAccount account = createAccount(UserRole.USER);
+        String token = login(account);
         CreatedRoadmap created = createRoadmap(token, "Backend with Java");
 
         UUID weekTwo = addMilestone(token, created, "Week 2", 0);
@@ -114,6 +125,17 @@ class ManualRoadmapControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"))
                 .andExpect(jsonPath("$.data.activatedAt").isNotEmpty());
+
+        RoadmapItemProgress completedUnit = RoadmapItemProgress.create(
+                account.getId(),
+                created.versionId(),
+                encapsulation);
+        completedUnit.applyCorrection(
+                ProgressEntryStatus.COMPLETED,
+                100,
+                null,
+                Instant.now());
+        roadmapItemProgressRepository.saveAndFlush(completedUnit);
 
         mockMvc.perform(patch(itemPath(created, javaBasics))
                         .header("Authorization", bearer(token))
@@ -177,7 +199,29 @@ class ManualRoadmapControllerIntegrationTest {
                         .value("Understand encapsulation"))
                 .andReturn();
         UUID copiedRoadmapId = dataId(copyResult);
+        JsonNode copyData = objectMapper.readTree(copyResult.getResponse().getContentAsString())
+                .path("data");
+        UUID copiedVersionId = UUID.fromString(
+                copyData.path("versions").get(0).path("id").asText());
         assertThat(copiedRoadmapId).isNotEqualTo(created.roadmapId());
+        assertThat(roadmapVersionRepository.findById(copiedVersionId)
+                        .orElseThrow()
+                        .getSourceRoadmapVersionId())
+                .isEqualTo(created.versionId());
+
+        mockMvc.perform(post(ApiConstant.ROADMAPS + "/" + copiedRoadmapId
+                        + "/versions/" + copiedVersionId + "/activate")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk());
+
+        RoadmapItemProgress carriedUnit = roadmapItemProgressRepository
+                .findByUserIdAndRoadmapVersionId(account.getId(), copiedVersionId)
+                .stream()
+                .findFirst()
+                .orElseThrow();
+        assertThat(carriedUnit.getStatus().name()).isEqualTo("COMPLETED");
+        assertThat(carriedUnit.getLatestOutcome()).isEqualTo(ProgressEntryStatus.COMPLETED);
+        assertThat(carriedUnit.getCarriedFromProgressId()).isEqualTo(completedUnit.getId());
 
         mockMvc.perform(get(roadmapPath(created.roadmapId()))
                         .header("Authorization", bearer(token)))
@@ -189,6 +233,151 @@ class ManualRoadmapControllerIntegrationTest {
                 .andExpect(jsonPath("$.data.versions[0].status").value("ACTIVE"))
                 .andExpect(jsonPath("$.data.versions[0].id")
                         .value(created.versionId().toString()));
+    }
+
+    @Test
+    void copiedRoadmapCarriesProgressOnlyFromItsExactSourceVersion() throws Exception {
+        UserAccount account = createAccount(UserRole.USER);
+        String token = login(account);
+        CreatedRoadmap source = createRoadmap(token, "Source Roadmap");
+        UUID milestoneId = addMilestone(token, source, "Week 1", 0);
+        UUID topicId = addTopic(token, source, milestoneId, "OOP", 0, 60);
+        UUID sourceUnitId = addLearningUnit(
+                token,
+                source,
+                topicId,
+                "Encapsulation",
+                0,
+                30);
+        mockMvc.perform(post(versionPath(source) + "/activate")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk());
+
+        RoadmapItemProgress sourceProgress = RoadmapItemProgress.create(
+                account.getId(),
+                source.versionId(),
+                sourceUnitId);
+        sourceProgress.applyCorrection(
+                ProgressEntryStatus.COMPLETED,
+                100,
+                null,
+                Instant.now());
+        roadmapItemProgressRepository.saveAndFlush(sourceProgress);
+
+        MvcResult firstCopyResult = mockMvc.perform(post(
+                        roadmapPath(source.roadmapId()) + "/copy")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andReturn();
+        CreatedRoadmap firstCopy = copiedRoadmap(firstCopyResult);
+
+        MvcResult siblingCopyResult = mockMvc.perform(post(
+                        roadmapPath(source.roadmapId()) + "/copy")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andReturn();
+        CreatedRoadmap siblingCopy = copiedRoadmap(siblingCopyResult);
+
+        mockMvc.perform(post(versionPath(siblingCopy) + "/activate")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk());
+        RoadmapItemProgress siblingProgress = roadmapItemProgressRepository
+                .findByUserIdAndRoadmapVersionId(
+                        account.getId(), siblingCopy.versionId())
+                .stream()
+                .findFirst()
+                .orElseThrow();
+        siblingProgress.applyCorrection(
+                ProgressEntryStatus.SKIPPED,
+                0,
+                null,
+                Instant.now());
+        roadmapItemProgressRepository.saveAndFlush(siblingProgress);
+
+        mockMvc.perform(post(versionPath(firstCopy) + "/activate")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk());
+
+        RoadmapItemProgress firstCopyProgress = roadmapItemProgressRepository
+                .findByUserIdAndRoadmapVersionId(
+                        account.getId(), firstCopy.versionId())
+                .stream()
+                .findFirst()
+                .orElseThrow();
+        assertThat(firstCopyProgress.getStatus().name()).isEqualTo("COMPLETED");
+        assertThat(firstCopyProgress.getCarriedFromProgressId())
+                .isEqualTo(sourceProgress.getId());
+        assertThat(firstCopyProgress.getCarriedFromProgressId())
+                .isNotEqualTo(siblingProgress.getId());
+    }
+
+    @Test
+    void semanticallyEditedLearningUnitDoesNotInheritSourceCompletion()
+            throws Exception {
+        UserAccount account = createAccount(UserRole.USER);
+        String token = login(account);
+        CreatedRoadmap source = createRoadmap(token, "Source Roadmap");
+        UUID milestoneId = addMilestone(token, source, "Week 1", 0);
+        UUID topicId = addTopic(token, source, milestoneId, "OOP", 0, 60);
+        UUID sourceUnitId = addLearningUnit(
+                token,
+                source,
+                topicId,
+                "Encapsulation",
+                0,
+                30);
+        mockMvc.perform(post(versionPath(source) + "/activate")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk());
+
+        RoadmapItemProgress sourceProgress = RoadmapItemProgress.create(
+                account.getId(),
+                source.versionId(),
+                sourceUnitId);
+        sourceProgress.applyCorrection(
+                ProgressEntryStatus.COMPLETED,
+                100,
+                null,
+                Instant.now());
+        roadmapItemProgressRepository.saveAndFlush(sourceProgress);
+
+        MvcResult copyResult = mockMvc.perform(post(
+                        roadmapPath(source.roadmapId()) + "/copy")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andReturn();
+        CreatedRoadmap copy = copiedRoadmap(copyResult);
+        UUID copiedUnitId = UUID.fromString(data(copyResult)
+                .path("versions")
+                .get(0)
+                .path("milestones")
+                .get(0)
+                .path("topics")
+                .get(0)
+                .path("learningUnits")
+                .get(0)
+                .path("id")
+                .asText());
+
+        mockMvc.perform(patch(itemPath(copy, copiedUnitId))
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "Advanced polymorphism",
+                                  "description": "A different learning objective",
+                                  "orderIndex": 0,
+                                  "estimatedMinutes": 30
+                                }
+                                """))
+                .andExpect(status().isOk());
+        mockMvc.perform(post(versionPath(copy) + "/activate")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk());
+
+        assertThat(roadmapItemProgressRepository.findByUserIdAndRoadmapVersionId(
+                        account.getId(), copy.versionId()))
+                .isEmpty();
     }
 
     @Test
@@ -583,6 +772,17 @@ class ManualRoadmapControllerIntegrationTest {
 
     private UUID dataId(MvcResult result) throws Exception {
         return UUID.fromString(data(result).path("id").asText());
+    }
+
+    private CreatedRoadmap copiedRoadmap(MvcResult result) throws Exception {
+        JsonNode copiedData = data(result);
+        return new CreatedRoadmap(
+                UUID.fromString(copiedData.path("id").asText()),
+                UUID.fromString(copiedData
+                        .path("versions")
+                        .get(0)
+                        .path("id")
+                        .asText()));
     }
 
     private String roadmapPath(UUID roadmapId) {

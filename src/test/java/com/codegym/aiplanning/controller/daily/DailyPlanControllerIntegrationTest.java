@@ -1,7 +1,6 @@
 package com.codegym.aiplanning.controller.daily;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -14,7 +13,10 @@ import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.entity.profile.UserProfile;
+import com.codegym.aiplanning.entity.daily.ProgressEntry;
+import com.codegym.aiplanning.entity.daily.ProgressEntryStatus;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
 import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapVersionRepository;
@@ -28,6 +30,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -64,6 +67,9 @@ class DailyPlanControllerIntegrationTest {
 
     @Autowired
     private RoadmapItemRepository roadmapItemRepository;
+
+    @Autowired
+    private ProgressEntryRepository progressEntryRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -284,7 +290,7 @@ class DailyPlanControllerIntegrationTest {
 
     @Test
     void versionLifecycle_preservesHistoryAndOnlyDraftIsEditable() throws Exception {
-        createUser("daily-version-user", "Daily Version User");
+        UserAccount user = createUser("daily-version-user", "Daily Version User");
         String token = login("daily-version-user");
 
         MvcResult createResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS)
@@ -425,10 +431,100 @@ class DailyPlanControllerIntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("DAILY_PLAN_LOCKED"));
 
-        assertThatThrownBy(() -> jdbcTemplate.update(
-                        "DELETE FROM daily_plan_items WHERE id = ?",
-                        java.util.UUID.fromString(copiedTaskId)))
-                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        int historyBeforeTaskRemoval = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM progress_entries WHERE daily_plan_item_id = ?",
+                Integer.class,
+                UUID.fromString(copiedTaskId));
+        assertThat(historyBeforeTaskRemoval).isEqualTo(1);
+
+        jdbcTemplate.update(
+                "DELETE FROM daily_plan_items WHERE id = ?",
+                UUID.fromString(copiedTaskId));
+
+        int retainedHistory = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM progress_entries "
+                        + "WHERE user_id = ? AND daily_plan_item_id IS NULL",
+                Integer.class,
+                user.getId());
+        assertThat(retainedHistory).isEqualTo(1);
+    }
+
+    @Test
+    void deletingDraftTask_softRemovesItAndPreservesOwnerProgressHistory()
+            throws Exception {
+        UserAccount user = createUser(
+                "daily-soft-remove-user",
+                "Daily Soft Remove User");
+        String token = login("daily-soft-remove-user");
+
+        MvcResult createResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(String.format(
+                                "{\"planDate\": \"%s\", \"availableMinutes\": 60}",
+                                LocalDate.now().plusDays(2))))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode createdPlan = objectMapper
+                .readTree(createResult.getResponse().getContentAsString())
+                .path("data");
+        String planId = createdPlan.path("id").asText();
+        String versionId = createdPlan.path("latestVersionId").asText();
+
+        MvcResult taskResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId + "/items")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Removable task\",\"plannedMinutes\":30}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        UUID taskId = UUID.fromString(objectMapper
+                .readTree(taskResult.getResponse().getContentAsString())
+                .path("data")
+                .path("id")
+                .asText());
+
+        ProgressEntry history = ProgressEntry.create(
+                user.getId(),
+                taskId,
+                ProgressEntryStatus.PARTIALLY_COMPLETED,
+                15,
+                50,
+                "Half complete",
+                3,
+                3,
+                null,
+                null);
+        progressEntryRepository.saveAndFlush(history);
+
+        mockMvc.perform(delete(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId + "/items/" + taskId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty())
+                .andExpect(jsonPath("$.data.totalPlannedMinutes").value(0));
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty());
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/items/" + taskId + "/progress")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].status")
+                        .value("PARTIALLY_COMPLETED"))
+                .andExpect(jsonPath("$.data[0].completionPercentage").value(50));
+
+        Boolean removed = jdbcTemplate.queryForObject(
+                "SELECT removed_at IS NOT NULL FROM daily_plan_items WHERE id = ?",
+                Boolean.class,
+                taskId);
+        assertThat(removed).isTrue();
+        assertThat(progressEntryRepository.findById(history.getId())).isPresent();
     }
 
     @Test
@@ -451,6 +547,18 @@ class DailyPlanControllerIntegrationTest {
                 .path("data").path("id").asText();
         String ownerVersionId = objectMapper.readTree(createResult.getResponse().getContentAsString())
                 .path("data").path("latestVersionId").asText();
+        MvcResult ownerTaskResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/"
+                        + ownerPlanId + "/versions/" + ownerVersionId + "/items")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Owner Task\", \"plannedMinutes\":30}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        String ownerTaskId = objectMapper
+                .readTree(ownerTaskResult.getResponse().getContentAsString())
+                .path("data")
+                .path("id")
+                .asText();
 
         mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + ownerPlanId)
                         .header("Authorization", "Bearer " + attackerToken))
@@ -458,6 +566,25 @@ class DailyPlanControllerIntegrationTest {
 
         mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + ownerPlanId + "/versions")
                         .header("Authorization", "Bearer " + attackerToken))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
+                        + "/available-learning-units")
+                        .header("Authorization", "Bearer " + attackerToken))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
+                        + "/items/" + ownerTaskId + "/progress")
+                        .header("Authorization", "Bearer " + attackerToken))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
+                        + "/items/" + ownerTaskId + "/progress/"
+                        + UUID.randomUUID() + "/corrections")
+                        .header("Authorization", "Bearer " + attackerToken)
+                        .header("Idempotency-Key", "attacker-correction")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"SKIPPED\"}"))
                 .andExpect(status().isNotFound());
 
         mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
@@ -480,6 +607,13 @@ class DailyPlanControllerIntegrationTest {
         String adminToken = login("daily-admin");
 
         mockMvc.perform(get(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/"
+                        + java.util.UUID.randomUUID()
+                        + "/available-learning-units")
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
@@ -598,6 +732,10 @@ class DailyPlanControllerIntegrationTest {
                 .andExpect(jsonPath("$.data.roadmapItemId").value(learningUnit.getId().toString()))
                 .andExpect(jsonPath("$.data.roadmapItemTitle").value(learningUnit.getTitle()))
                 .andExpect(jsonPath("$.data.parentTopicTitle").value(topic.getTitle()))
+                .andExpect(jsonPath("$.data.roadmapItem.id").value(topic.getId().toString()))
+                .andExpect(jsonPath("$.data.roadmapItem.title").value(topic.getTitle()))
+                .andExpect(jsonPath("$.data.studyUnit.id").value(learningUnit.getId().toString()))
+                .andExpect(jsonPath("$.data.studyUnit.title").value(learningUnit.getTitle()))
                 .andReturn();
 
         String taskId = objectMapper.readTree(addTaskResult.getResponse().getContentAsString())
@@ -659,6 +797,7 @@ class DailyPlanControllerIntegrationTest {
 
         mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/progress")
                         .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", "complete-learning-unit-once")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(progressPayload))
                 .andExpect(status().isOk())
@@ -666,10 +805,83 @@ class DailyPlanControllerIntegrationTest {
                 .andExpect(jsonPath("$.data.roadmapItemTitle").value(learningUnit.getTitle()))
                 .andExpect(jsonPath("$.data.parentTopicTitle").value(topic.getTitle()));
 
-        // 8. Verify available learning units reflects COMPLETED status
+        // Retrying with the same key must not append duplicate progress history.
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/progress")
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", "complete-learning-unit-once")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(progressPayload))
+                .andExpect(status().isOk());
+
+        MvcResult historyResult = mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/"
+                        + planId + "/items/" + taskId + "/progress")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].learningUnitId")
+                        .value(learningUnit.getId().toString()))
+                .andReturn();
+        UUID completedEntryId = UUID.fromString(objectMapper
+                .readTree(historyResult.getResponse().getContentAsString())
+                .path("data")
+                .get(0)
+                .path("id")
+                .asText());
+
+        mockMvc.perform(get(ApiConstant.ROADMAPS + "/" + roadmap.getId())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.progress.completionPercentage").value(100.0))
+                .andExpect(jsonPath("$.data.versions[0].milestones[0].topics[0]"
+                        + ".progress.completionState").value("COMPLETED"))
+                .andExpect(jsonPath("$.data.versions[0].milestones[0].topics[0]"
+                        + ".learningUnits[0].progress.completionState")
+                        .value("COMPLETED"));
+
+        String correctionPayload = """
+                {
+                    "status": "PARTIALLY_COMPLETED",
+                    "actualMinutes": 40,
+                    "actualResult": "Needs more practice",
+                    "difficulty": 4,
+                    "understandingRating": 2,
+                    "note": "Corrected outcome"
+                }
+                """;
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/items/" + taskId + "/progress/"
+                        + completedEntryId + "/corrections")
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", "correct-learning-unit-once")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(correctionPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PARTIALLY_COMPLETED"))
+                .andExpect(jsonPath("$.data.supersedesEntryId")
+                        .value(completedEntryId.toString()));
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/"
+                        + planId + "/items/" + taskId + "/progress")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2));
+
+        // 8. The append-only correction updates the current snapshot without deleting history.
         mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId + "/available-learning-units")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].progressStatus").value("COMPLETED"));
+                .andExpect(jsonPath("$.data[0].progressStatus").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.data[0].latestOutcome")
+                        .value("PARTIALLY_COMPLETED"));
+
+        mockMvc.perform(get(ApiConstant.ROADMAPS + "/" + roadmap.getId())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.progress.completionPercentage").value(0.0))
+                .andExpect(jsonPath("$.data.versions[0].milestones[0].topics[0]"
+                        + ".progress.completionState").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.data.versions[0].milestones[0].topics[0]"
+                        + ".learningUnits[0].progress.latestOutcome")
+                        .value("PARTIALLY_COMPLETED"));
     }
 }

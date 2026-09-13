@@ -153,15 +153,40 @@ class V2FoundationMigrationTest {
                             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                         )
                         """.formatted(milestoneId, roadmapVersionId));
+                UUID topicId = UUID.randomUUID();
                 statement.executeUpdate("""
                         INSERT INTO roadmap_items (
-                            id, roadmap_version_id, parent_item_id, item_type, title,
+                            id, roadmap_version_id, parent_item_id, parent_item_type,
+                            item_type, title,
                             order_index, estimated_minutes, created_at, updated_at
                         ) VALUES (
-                            RANDOM_UUID(), '%s', '%s', 'TOPIC', 'Java basics',
+                            '%s', '%s', '%s', 'MILESTONE', 'TOPIC', 'Java basics',
                             0, 60, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                         )
-                        """.formatted(roadmapVersionId, milestoneId));
+                        """.formatted(topicId, roadmapVersionId, milestoneId));
+                statement.executeUpdate("""
+                        INSERT INTO roadmap_items (
+                            id, roadmap_version_id, parent_item_id, parent_item_type,
+                            item_type, title, order_index, estimated_minutes, lineage_id,
+                            created_at, updated_at
+                        ) VALUES (
+                            RANDOM_UUID(), '%s', '%s', 'TOPIC', 'LEARNING_UNIT',
+                            'Java syntax exercise', 0, 30, RANDOM_UUID(),
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """.formatted(roadmapVersionId, topicId));
+                assertThatThrownBy(() -> statement.executeUpdate("""
+                                INSERT INTO roadmap_items (
+                                    id, roadmap_version_id, parent_item_id, parent_item_type,
+                                    item_type, title, order_index, estimated_minutes, lineage_id,
+                                    created_at, updated_at
+                                ) VALUES (
+                                    RANDOM_UUID(), '%s', '%s', 'TOPIC', 'LEARNING_UNIT',
+                                    'Invalid direct child', 1, 30, RANDOM_UUID(),
+                                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                                )
+                                """.formatted(roadmapVersionId, milestoneId)))
+                        .isInstanceOf(java.sql.SQLException.class);
 
                 statement.executeUpdate("""
                         INSERT INTO roadmap_versions (

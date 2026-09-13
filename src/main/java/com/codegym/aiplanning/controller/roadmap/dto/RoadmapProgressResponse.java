@@ -1,6 +1,7 @@
 package com.codegym.aiplanning.controller.roadmap.dto;
 
 import com.codegym.aiplanning.entity.roadmap.RoadmapItemProgressStatus;
+import com.codegym.aiplanning.entity.daily.ProgressEntryStatus;
 import java.util.List;
 import java.util.UUID;
 
@@ -25,5 +26,6 @@ public record RoadmapProgressResponse(
             UUID roadmapItemId,
             String title,
             RoadmapItemProgressStatus status,
+            ProgressEntryStatus latestOutcome,
             int completionPercentage) {}
 }

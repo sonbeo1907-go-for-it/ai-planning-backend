@@ -6,6 +6,7 @@ import com.codegym.aiplanning.controller.daily.dto.DailyPlanItemResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
+import com.codegym.aiplanning.controller.daily.dto.ProgressEntryResponse;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -66,7 +67,31 @@ public interface DailyPlanService {
 
     DailyPlanResponse activateVersion(UUID planId, UUID versionId, Jwt actorJwt);
 
-    DailyPlanItemResponse recordProgress(UUID planId, UUID itemId, com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest request, Jwt actorJwt);
+    DailyPlanItemResponse recordProgress(
+            UUID planId,
+            UUID itemId,
+            com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest request,
+            String idempotencyKey,
+            Jwt actorJwt);
+
+    default DailyPlanItemResponse recordProgress(
+            UUID planId,
+            UUID itemId,
+            com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest request,
+            Jwt actorJwt) {
+        return recordProgress(planId, itemId, request, null, actorJwt);
+    }
+
+    java.util.List<ProgressEntryResponse> getProgressHistory(
+            UUID planId, UUID itemId, Jwt actorJwt);
+
+    ProgressEntryResponse correctProgress(
+            UUID planId,
+            UUID itemId,
+            UUID progressEntryId,
+            com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest request,
+            String idempotencyKey,
+            Jwt actorJwt);
 
     DailyPlanItemResponse recordPomodoroSession(UUID planId, UUID itemId, RecordPomodoroSessionRequest request, Jwt actorJwt);
 

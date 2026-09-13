@@ -1,6 +1,7 @@
 package com.codegym.aiplanning.controller.daily.dto;
 
 import com.codegym.aiplanning.entity.roadmap.RoadmapItemProgressStatus;
+import com.codegym.aiplanning.entity.daily.ProgressEntryStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.UUID;
 
@@ -15,5 +16,6 @@ public record AvailableLearningUnitResponse(
         String topicTitle,
         UUID milestoneId,
         String milestoneTitle,
-        RoadmapItemProgressStatus progressStatus
+        RoadmapItemProgressStatus progressStatus,
+        ProgressEntryStatus latestOutcome
 ) {}

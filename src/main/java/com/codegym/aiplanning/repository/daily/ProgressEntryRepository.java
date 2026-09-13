@@ -2,9 +2,10 @@ package com.codegym.aiplanning.repository.daily;
 
 import com.codegym.aiplanning.entity.daily.ProgressEntry;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
-import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ProgressEntryRepository extends JpaRepository<ProgressEntry, UUID> {
 
@@ -12,12 +13,21 @@ public interface ProgressEntryRepository extends JpaRepository<ProgressEntry, UU
 
     List<ProgressEntry> findByUserIdOrderByRecordedAtDesc(UUID userId, Pageable pageable);
 
-    List<ProgressEntry> findByDailyPlanItemIdOrderByRecordedAtDesc(UUID dailyPlanItemId);
+    List<ProgressEntry> findByUserIdAndDailyPlanItemIdOrderByRecordedAtDesc(
+            UUID userId, UUID dailyPlanItemId);
+
+    List<ProgressEntry> findByUserIdAndLearningUnitIdOrderByRecordedAtAscIdAsc(
+            UUID userId, UUID learningUnitId);
 
     List<ProgressEntry> findByDailyPlanItemIdInOrderByRecordedAtDesc(List<UUID> dailyPlanItemIds);
 
     List<ProgressEntry> findByUserIdAndDailyPlanItemIdInOrderByRecordedAtDesc(
             UUID userId, List<UUID> dailyPlanItemIds);
 
-    boolean existsByDailyPlanItemId(UUID dailyPlanItemId);
+    Optional<ProgressEntry> findByIdAndUserId(UUID id, UUID userId);
+
+    Optional<ProgressEntry> findByUserIdAndIdempotencyKey(
+            UUID userId, String idempotencyKey);
+
+    boolean existsBySupersedesEntryId(UUID supersedesEntryId);
 }

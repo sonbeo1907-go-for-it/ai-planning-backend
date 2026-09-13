@@ -12,6 +12,7 @@ import com.codegym.aiplanning.controller.daily.dto.DailyPlanResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanSummaryResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest;
+import com.codegym.aiplanning.controller.daily.dto.ProgressEntryResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
 import com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest;
 import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
@@ -233,8 +234,46 @@ public class DailyPlanController {
             @PathVariable UUID planId,
             @PathVariable UUID itemId,
             @Valid @RequestBody RecordProgressRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false)
+                    String idempotencyKey,
             @AuthenticationPrincipal Jwt actorJwt) {
-        return ApiResponse.of(dailyPlanService.recordProgress(planId, itemId, request, actorJwt));
+        return ApiResponse.of(dailyPlanService.recordProgress(
+                planId,
+                itemId,
+                request,
+                idempotencyKey,
+                actorJwt));
+    }
+
+    @GetMapping(ApiConstant.DAILY_PLAN_ITEM_PROGRESS)
+    @Operation(summary = "Read immutable progress history for one Daily Plan task")
+    public ApiResponse<List<ProgressEntryResponse>> getProgressHistory(
+            @PathVariable UUID planId,
+            @PathVariable UUID itemId,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(dailyPlanService.getProgressHistory(
+                planId,
+                itemId,
+                actorJwt));
+    }
+
+    @PostMapping(ApiConstant.DAILY_PLAN_ITEM_PROGRESS_CORRECTION)
+    @Operation(summary = "Append a correction that supersedes one progress entry")
+    public ApiResponse<ProgressEntryResponse> correctProgress(
+            @PathVariable UUID planId,
+            @PathVariable UUID itemId,
+            @PathVariable UUID progressEntryId,
+            @Valid @RequestBody RecordProgressRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false)
+                    String idempotencyKey,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(dailyPlanService.correctProgress(
+                planId,
+                itemId,
+                progressEntryId,
+                request,
+                idempotencyKey,
+                actorJwt));
     }
 
     @PostMapping(ApiConstant.DAILY_PLAN_ITEM_POMODORO)
@@ -251,8 +290,8 @@ public class DailyPlanController {
 
     @DeleteMapping(ApiConstant.DAILY_PLAN_VERSION_ITEM_BY_ID)
     @Operation(
-            summary = "Delete manual task from daily plan (US-TSK-01-MANUAL)",
-            description = "Deletes a manual task and returns the updated daily plan with recalculated percentage.")
+            summary = "Remove manual task from daily plan (US-TSK-01-MANUAL)",
+            description = "Removes a task from a DRAFT version while preserving any progress history, then returns the updated version.")
     public ApiResponse<DailyPlanVersionResponse> deleteTask(
             @PathVariable UUID planId,
             @PathVariable UUID versionId,
