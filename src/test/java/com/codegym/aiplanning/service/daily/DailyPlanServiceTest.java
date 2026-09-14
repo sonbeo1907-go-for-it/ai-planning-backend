@@ -874,4 +874,103 @@ class DailyPlanServiceTest {
         assertThatThrownBy(() -> dailyPlanService.updateTask(planId, versionId, itemId, request, userJwt))
                 .isInstanceOf(BusinessException.class);
     }
+
+    @Test
+    void updateTask_withClearLearningUnit_removesTheLink() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID learningUnitId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC", null);
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(
+                planId, 1, DailyPlanVersionOrigin.MANUAL, 120, 30);
+        ReflectionTestUtils.setField(version, "id", versionId);
+        DailyPlanItem item = DailyPlanItem.create(
+                versionId,
+                DailyTaskCategory.CUSTOM,
+                "Linked task",
+                null,
+                30,
+                0,
+                learningUnitId);
+        ReflectionTestUtils.setField(item, "id", itemId);
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
+                .thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId))
+                .thenReturn(List.of(item));
+
+        var request = new com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest(
+                "Linked task",
+                null,
+                DailyTaskCategory.CUSTOM,
+                30,
+                0,
+                null,
+                null,
+                true);
+
+        DailyPlanVersionResponse response = dailyPlanService.updateTask(
+                planId, versionId, itemId, request, userJwt);
+
+        assertThat(response.items()).hasSize(1);
+        assertThat(response.items().get(0).roadmapItemId()).isNull();
+    }
+
+    @Test
+    void getPlanProgressHistory_includesRemovedTasks() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC", null);
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(
+                planId, 1, DailyPlanVersionOrigin.MANUAL, 120, 30);
+        ReflectionTestUtils.setField(version, "id", versionId);
+        DailyPlanItem removedItem = DailyPlanItem.create(
+                versionId,
+                DailyTaskCategory.CUSTOM,
+                "Removed task",
+                null,
+                30,
+                0);
+        ReflectionTestUtils.setField(removedItem, "id", itemId);
+        removedItem.remove(Instant.now());
+
+        ProgressEntry entry = ProgressEntry.create(
+                userId,
+                itemId,
+                ProgressEntryStatus.COMPLETED,
+                25,
+                100,
+                "Done",
+                2,
+                5,
+                null,
+                null);
+        ReflectionTestUtils.setField(entry, "id", UUID.randomUUID());
+        ReflectionTestUtils.setField(entry, "recordedAt", Instant.now());
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByDailyPlanIdOrderByVersionNumberDesc(planId))
+                .thenReturn(List.of(version));
+        when(dailyPlanItemRepository.findIncludingRemovedByDailyPlanVersionIds(List.of(versionId)))
+                .thenReturn(List.of(removedItem));
+        when(progressEntryRepository.findByUserIdAndDailyPlanItemIdInOrderByRecordedAtDesc(
+                        userId, List.of(itemId)))
+                .thenReturn(List.of(entry));
+
+        var history = dailyPlanService.getPlanProgressHistory(planId, userJwt);
+
+        assertThat(history).hasSize(1);
+        assertThat(history.get(0).dailyPlanItemId()).isEqualTo(itemId);
+        assertThat(history.get(0).removedAt()).isNotNull();
+        assertThat(history.get(0).entries()).hasSize(1);
+    }
 }

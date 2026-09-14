@@ -76,6 +76,8 @@ public final class ApiConstant {
             DAILY_PLAN_BY_ID + "/ai-executions/current";
     public static final String DAILY_PLAN_AVAILABLE_LEARNING_UNITS =
             DAILY_PLAN_BY_ID + "/available-learning-units";
+    public static final String DAILY_PLAN_PROGRESS_HISTORY =
+            DAILY_PLAN_BY_ID + "/progress-history";
     public static final String ROADMAPS = API_V1 + "/roadmaps";
     public static final String ROADMAP_BY_ID = "/{roadmapId}";
     public static final String ROADMAP_COPY = ROADMAP_BY_ID + "/copy";

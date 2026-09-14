@@ -7,6 +7,7 @@ import com.codegym.aiplanning.controller.daily.dto.DailyPlanResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
 import com.codegym.aiplanning.controller.daily.dto.ProgressEntryResponse;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanTaskProgressHistoryResponse;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -84,6 +85,9 @@ public interface DailyPlanService {
 
     java.util.List<ProgressEntryResponse> getProgressHistory(
             UUID planId, UUID itemId, Jwt actorJwt);
+
+    List<DailyPlanTaskProgressHistoryResponse> getPlanProgressHistory(
+            UUID planId, Jwt actorJwt);
 
     ProgressEntryResponse correctProgress(
             UUID planId,

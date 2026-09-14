@@ -23,4 +23,10 @@ public interface DailyPlanItemRepository extends JpaRepository<DailyPlanItem, UU
     List<DailyPlanItem> findByDailyPlanVersionIds(
             @Param("versionIds") List<UUID> versionIds);
 
+    @Query("select item from DailyPlanItem item "
+            + "where item.dailyPlanVersionId in :versionIds "
+            + "order by item.createdAt desc")
+    List<DailyPlanItem> findIncludingRemovedByDailyPlanVersionIds(
+            @Param("versionIds") List<UUID> versionIds);
+
 }

@@ -36,7 +36,10 @@ public record UpdateDailyTaskRequest(
         UUID roadmapItemId,
 
         @Schema(description = "Learning Unit from the plan's ACTIVE RoadmapVersion")
-        UUID learningUnitId) {
+        UUID learningUnitId,
+
+        @Schema(description = "Explicitly remove the current Learning Unit link from this DRAFT task")
+        Boolean clearLearningUnit) {
 
     public UpdateDailyTaskRequest(
             String title,
@@ -44,7 +47,7 @@ public record UpdateDailyTaskRequest(
             DailyTaskCategory category,
             Integer plannedMinutes,
             Integer orderIndex) {
-        this(title, description, category, plannedMinutes, orderIndex, null, null);
+        this(title, description, category, plannedMinutes, orderIndex, null, null, false);
     }
 
     public UpdateDailyTaskRequest(
@@ -61,7 +64,8 @@ public record UpdateDailyTaskRequest(
                 plannedMinutes,
                 orderIndex,
                 roadmapItemId,
-                null);
+                null,
+                false);
     }
 
     @Override

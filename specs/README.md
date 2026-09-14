@@ -23,7 +23,10 @@ manual-roadmap.md
 learning-source.md
 roadmap.md
 daily-plan.md
+task-step-decomposition.md
 progress.md
+weak-topic-mastery.md
+ai-task-guidance.md
 ai-review.md
 ai-provider.md
 ```

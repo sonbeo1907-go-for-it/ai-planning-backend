@@ -10,7 +10,6 @@ import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,7 +43,7 @@ class QuizGeneratorServiceImplTest {
         UUID userId = UUID.randomUUID();
         UUID ownedTopicId = UUID.randomUUID();
         UUID foreignTopicId = UUID.randomUUID();
-        when(roadmapItemRepository.findAllOwnedByIds(
+        when(roadmapItemRepository.findAllOwnedByIdsWithHierarchy(
                         List.of(ownedTopicId, foreignTopicId),
                         userId))
                 .thenReturn(List.of(roadmapItem));
@@ -65,8 +64,10 @@ class QuizGeneratorServiceImplTest {
     void masteryQuizRejectsAQuestionTopicOutsideTheOwnerScope() {
         UUID userId = UUID.randomUUID();
         UUID roadmapItemId = UUID.randomUUID();
-        when(roadmapItemRepository.findOwnedById(roadmapItemId, userId))
-                .thenReturn(Optional.empty());
+        when(roadmapItemRepository.findAllOwnedByIdsWithHierarchy(
+                        List.of(roadmapItemId),
+                        userId))
+                .thenReturn(List.of());
 
         assertThatThrownBy(() -> service.generateMasteryCheckQuestions(
                         userId,
@@ -85,7 +86,9 @@ class QuizGeneratorServiceImplTest {
     void dailyQuizRejectsTopicLevelTargets() {
         UUID userId = UUID.randomUUID();
         UUID topicId = UUID.randomUUID();
-        when(roadmapItemRepository.findAllOwnedByIds(List.of(topicId), userId))
+        when(roadmapItemRepository.findAllOwnedByIdsWithHierarchy(
+                        List.of(topicId),
+                        userId))
                 .thenReturn(List.of(roadmapItem));
         when(roadmapItem.getItemType())
                 .thenReturn(RoadmapItemType.TOPIC);

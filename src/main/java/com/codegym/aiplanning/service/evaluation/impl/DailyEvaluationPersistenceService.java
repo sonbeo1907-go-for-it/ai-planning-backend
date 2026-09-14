@@ -280,7 +280,7 @@ public class DailyEvaluationPersistenceService {
             UUID userId,
             UUID dailyPlanId,
             UUID quizId) {
-        Quiz quiz = getOwnedQuizForUpdate(quizId, userId);
+        Quiz quiz = getOwnedQuiz(quizId, userId);
         if (quiz.getDailyPlan() == null
                 || !dailyPlanId.equals(quiz.getDailyPlan().getId())) {
             throw notFound("Quiz was not found.");

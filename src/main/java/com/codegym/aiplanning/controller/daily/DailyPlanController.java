@@ -10,6 +10,7 @@ import com.codegym.aiplanning.controller.daily.dto.CreateDailyTaskRequest;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanItemResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanSummaryResponse;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanTaskProgressHistoryResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest;
 import com.codegym.aiplanning.controller.daily.dto.ProgressEntryResponse;
@@ -188,6 +189,16 @@ public class DailyPlanController {
             @PathVariable UUID planId,
             @AuthenticationPrincipal Jwt actorJwt) {
         return ApiResponse.of(dailyPlanService.getAvailableLearningUnits(planId, actorJwt));
+    }
+
+    @GetMapping(ApiConstant.DAILY_PLAN_PROGRESS_HISTORY)
+    @Operation(
+            summary = "Read progress history for all tasks in one Daily Plan",
+            description = "Includes progress belonging to tasks that were later removed from a DRAFT version.")
+    public ApiResponse<List<DailyPlanTaskProgressHistoryResponse>> getPlanProgressHistory(
+            @PathVariable UUID planId,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(dailyPlanService.getPlanProgressHistory(planId, actorJwt));
     }
 
     @PostMapping(ApiConstant.DAILY_PLAN_VERSION_ITEMS)

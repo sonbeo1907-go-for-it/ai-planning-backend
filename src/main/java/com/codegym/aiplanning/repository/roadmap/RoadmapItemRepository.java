@@ -46,6 +46,16 @@ public interface RoadmapItemRepository extends JpaRepository<RoadmapItem, UUID> 
             @Param("itemIds") List<UUID> itemIds,
             @Param("ownerId") UUID ownerId);
 
+    @Query("select distinct item from RoadmapItem item "
+            + "join fetch item.roadmapVersion version "
+            + "join fetch version.roadmap roadmap "
+            + "left join fetch item.parent topic "
+            + "left join fetch topic.parent milestone "
+            + "where item.id in :itemIds and roadmap.owner.id = :ownerId")
+    List<RoadmapItem> findAllOwnedByIdsWithHierarchy(
+            @Param("itemIds") java.util.Collection<UUID> itemIds,
+            @Param("ownerId") UUID ownerId);
+
     @Query("select item from RoadmapItem item "
             + "join fetch item.roadmapVersion version "
             + "join fetch version.roadmap roadmap "

@@ -10,6 +10,7 @@ import com.codegym.aiplanning.controller.daily.dto.DailyPlanResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanSummaryResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
 import com.codegym.aiplanning.controller.daily.dto.ProgressEntryResponse;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanTaskProgressHistoryResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
 import com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
@@ -551,6 +552,14 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         int targetIndex = Math.min(request.orderIndex(), items.size());
 
         UUID roadmapItemId = item.getRoadmapItemId();
+        if (Boolean.TRUE.equals(request.clearLearningUnit())) {
+            if (request.learningUnitId() != null || request.roadmapItemId() != null) {
+                throw new BusinessException(
+                        ErrorCode.VALIDATION_FAILED,
+                        "A task cannot clear and replace its Learning Unit in the same request.");
+            }
+            roadmapItemId = null;
+        }
         UUID requestedLearningUnitId = resolveLearningUnitId(
                 request.learningUnitId(), request.roadmapItemId());
         if (requestedLearningUnitId != null) {
@@ -787,6 +796,46 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                         userId, itemId)
                 .stream()
                 .map(ProgressEntryResponse::from)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<DailyPlanTaskProgressHistoryResponse> getPlanProgressHistory(
+            UUID planId, Jwt actorJwt) {
+        UUID userId = extractUserId(actorJwt);
+        requirePlanForUser(planId, userId);
+
+        List<UUID> versionIds = dailyPlanVersionRepository
+                .findByDailyPlanIdOrderByVersionNumberDesc(planId)
+                .stream()
+                .map(DailyPlanVersion::getId)
+                .toList();
+        if (versionIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<DailyPlanItem> items = dailyPlanItemRepository
+                .findIncludingRemovedByDailyPlanVersionIds(versionIds);
+        if (items.isEmpty()) {
+            return List.of();
+        }
+
+        List<UUID> itemIds = items.stream().map(DailyPlanItem::getId).toList();
+        Map<UUID, List<ProgressEntryResponse>> entriesByItemId = progressEntryRepository
+                .findByUserIdAndDailyPlanItemIdInOrderByRecordedAtDesc(userId, itemIds)
+                .stream()
+                .map(ProgressEntryResponse::from)
+                .collect(Collectors.groupingBy(ProgressEntryResponse::dailyPlanItemId));
+
+        return items.stream()
+                .filter(item -> entriesByItemId.containsKey(item.getId()))
+                .map(item -> new DailyPlanTaskProgressHistoryResponse(
+                        item.getId(),
+                        item.getDailyPlanVersionId(),
+                        item.getTitle(),
+                        item.getRemovedAt(),
+                        entriesByItemId.get(item.getId())))
                 .toList();
     }
 

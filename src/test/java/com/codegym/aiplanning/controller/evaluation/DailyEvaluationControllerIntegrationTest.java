@@ -116,6 +116,21 @@ class DailyEvaluationControllerIntegrationTest {
     }
 
     @Test
+    void newlyGeneratedQuizCanBeReadByIdWithoutTakingAWriteLock() throws Exception {
+        EvaluationFixture fixture = createFixture("eval-read-quiz@example.com");
+        Quiz quiz = createFiveQuestionQuiz(fixture);
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + fixture.plan().getId()
+                        + "/quiz/" + quiz.getId())
+                        .header("Authorization", "Bearer " + fixture.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(quiz.getId().toString()))
+                .andExpect(jsonPath("$.data.dailyPlanId")
+                        .value(fixture.plan().getId().toString()))
+                .andExpect(jsonPath("$.data.questions.length()").value(5));
+    }
+
+    @Test
     void quizSubmissionRejectsIncompleteAnswers() throws Exception {
         EvaluationFixture fixture = createFixture("eval-incomplete@example.com");
         Quiz quiz = createFiveQuestionQuiz(fixture);

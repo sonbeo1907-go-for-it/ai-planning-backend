@@ -43,7 +43,7 @@ public class QuizGeneratorServiceImpl implements QuizGeneratorService {
             UUID dailyPlanId,
             List<UUID> completedLearningUnitIds,
             AiProviderConfig providerConfig) {
-        List<RoadmapItem> items = roadmapItemRepository.findAllOwnedByIds(
+        List<RoadmapItem> items = roadmapItemRepository.findAllOwnedByIdsWithHierarchy(
                 completedLearningUnitIds,
                 userId);
         long requestedLearningUnitCount = completedLearningUnitIds.stream()
@@ -79,7 +79,11 @@ public class QuizGeneratorServiceImpl implements QuizGeneratorService {
             UUID weakTopicId,
             UUID roadmapItemId,
             AiProviderConfig providerConfig) {
-        RoadmapItem item = roadmapItemRepository.findOwnedById(roadmapItemId, userId)
+        RoadmapItem item = roadmapItemRepository.findAllOwnedByIdsWithHierarchy(
+                        List.of(roadmapItemId),
+                        userId)
+                .stream()
+                .findFirst()
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.RESOURCE_NOT_FOUND,
                         "Roadmap Learning Unit was not found."));

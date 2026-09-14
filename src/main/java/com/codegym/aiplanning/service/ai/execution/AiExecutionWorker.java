@@ -75,6 +75,7 @@ public class AiExecutionWorker {
                     exception.errorCode().name(),
                     sanitizedMessage(exception));
         } catch (RuntimeException exception) {
+            logUnexpectedFailure(context.executionId(), exception);
             completeWithFailure(
                     context,
                     ErrorCode.AI_GENERATION_FAILED.name(),
@@ -203,6 +204,21 @@ public class AiExecutionWorker {
             return "AI execution failed.";
         }
         return message.length() <= 500 ? message : message.substring(0, 500);
+    }
+
+    private void logUnexpectedFailure(UUID executionId, RuntimeException exception) {
+        StackTraceElement origin = java.util.Arrays.stream(exception.getStackTrace())
+                .filter(frame -> frame.getClassName().startsWith("com.codegym.aiplanning"))
+                .findFirst()
+                .orElseGet(() -> exception.getStackTrace().length == 0
+                        ? null
+                        : exception.getStackTrace()[0]);
+
+        log.error(
+                "AI execution {} failed unexpectedly: exceptionType={}, origin={}.",
+                executionId,
+                exception.getClass().getName(),
+                origin == null ? "unavailable" : origin);
     }
 
     private record JobContext(

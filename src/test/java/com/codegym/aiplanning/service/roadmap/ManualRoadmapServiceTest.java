@@ -1,15 +1,18 @@
 package com.codegym.aiplanning.service.roadmap;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.codegym.aiplanning.controller.roadmap.dto.CreateLearningUnitRequest;
 import com.codegym.aiplanning.controller.roadmap.dto.RoadmapSummaryResponse;
 import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
 import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
@@ -161,6 +164,86 @@ class ManualRoadmapServiceTest {
         verify(roadmapRepository, never()).findByOwnerId(userId, pageable);
         verify(roadmapRepository, never()).findByOwnerIdAndStatus(
                 userId, RoadmapStatus.ACTIVE, pageable);
+    }
+
+    @Test
+    void addLearningUnit_rejectsTheParentTopicTitle() {
+        UUID userId = UUID.randomUUID();
+        UUID roadmapId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID topicId = UUID.randomUUID();
+        UserAccount owner = UserAccount.create(
+                "owner@example.com", "Password1", UserRole.USER, AccountStatus.ACTIVE);
+        setId(owner, userId);
+        Roadmap roadmap = Roadmap.manualDraft(owner, "Backend", null);
+        setId(roadmap, roadmapId);
+        RoadmapVersion version = RoadmapVersion.draft(
+                roadmap, 1, RoadmapVersionOrigin.MANUAL);
+        setId(version, versionId);
+        RoadmapItem milestone = RoadmapItem.milestone(
+                version, "OOP", null, 0);
+        setId(milestone, UUID.randomUUID());
+        RoadmapItem topic = RoadmapItem.topic(
+                version, milestone, "Learn four OOP principles", null, 0, 120);
+        setId(topic, topicId);
+
+        when(roadmapRepository.findOwnedByIdForUpdate(roadmapId, userId))
+                .thenReturn(java.util.Optional.of(roadmap));
+        when(roadmapVersionRepository.findByIdAndRoadmapIdForUpdate(versionId, roadmapId))
+                .thenReturn(java.util.Optional.of(version));
+        when(roadmapItemRepository.findByIdAndRoadmapVersionId(topicId, versionId))
+                .thenReturn(java.util.Optional.of(topic));
+        when(roadmapItemRepository.findAllByRoadmapVersionIdAndParentIdOrderByOrderIndexAsc(
+                        versionId, topicId))
+                .thenReturn(List.of());
+
+        CreateLearningUnitRequest request = new CreateLearningUnitRequest(
+                " Learn four OOP principles ", null, 0, 30);
+
+        assertThatThrownBy(() -> service.addLearningUnit(
+                        userId, roadmapId, versionId, topicId, request))
+                .isInstanceOf(com.codegym.aiplanning.common.exception.BusinessException.class)
+                .hasMessageContaining("smaller action");
+    }
+
+    @Test
+    void activate_rejectsPlaceholderLearningUnitThatCopiesItsTopic() {
+        UUID userId = UUID.randomUUID();
+        UUID roadmapId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UserAccount owner = UserAccount.create(
+                "owner@example.com", "Password1", UserRole.USER, AccountStatus.ACTIVE);
+        setId(owner, userId);
+        Roadmap roadmap = Roadmap.manualDraft(owner, "Backend", null);
+        setId(roadmap, roadmapId);
+        RoadmapVersion version = RoadmapVersion.draft(
+                roadmap, 1, RoadmapVersionOrigin.MANUAL);
+        setId(version, versionId);
+        RoadmapItem milestone = RoadmapItem.milestone(
+                version, "OOP", null, 0);
+        setId(milestone, UUID.randomUUID());
+        RoadmapItem topic = RoadmapItem.topic(
+                version, milestone, "Learn four OOP principles", null, 0, 120);
+        setId(topic, UUID.randomUUID());
+        RoadmapItem placeholder = RoadmapItem.learningUnit(
+                version,
+                topic,
+                "Learn four OOP principles",
+                null,
+                0,
+                120);
+        setId(placeholder, UUID.randomUUID());
+
+        when(roadmapRepository.findOwnedByIdForUpdate(roadmapId, userId))
+                .thenReturn(java.util.Optional.of(roadmap));
+        when(roadmapVersionRepository.findByIdAndRoadmapIdForUpdate(versionId, roadmapId))
+                .thenReturn(java.util.Optional.of(version));
+        when(roadmapItemRepository.findAllByRoadmapVersionIds(List.of(versionId)))
+                .thenReturn(List.of(milestone, topic, placeholder));
+
+        assertThatThrownBy(() -> service.activate(userId, roadmapId, versionId))
+                .isInstanceOf(com.codegym.aiplanning.common.exception.BusinessException.class)
+                .hasMessageContaining("smaller action");
     }
 
     private void setId(Object entity, UUID id) {

@@ -314,13 +314,15 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
         }
 
         List<RoadmapItem> siblings = learningUnits(versionId, topicId);
+        String title = normalizeRequired(request.title());
+        requireSpecificLearningUnitTitle(topic, siblings, null, title);
         int position = insertionPosition(request.orderIndex(), siblings.size());
         shiftForInsertion(siblings, position);
         RoadmapItem learningUnit = roadmapItemRepository.saveAndFlush(
                 RoadmapItem.learningUnit(
                         editable.version(),
                         topic,
-                        normalizeRequired(request.title()),
+                        title,
                         normalizeOptional(request.description()),
                         position,
                         request.estimatedMinutes()));
@@ -355,10 +357,15 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
         List<RoadmapItem> siblings = item.getParent() == null
                 ? milestones(versionId)
                 : topics(versionId, item.getParent().getId());
+        String title = normalizeRequired(request.title());
+        if (item.getItemType() == RoadmapItemType.LEARNING_UNIT) {
+            requireSpecificLearningUnitTitle(
+                    item.getParent(), siblings, item.getId(), title);
+        }
         siblings.removeIf(sibling -> sibling.getId().equals(itemId));
         int position = Math.min(request.orderIndex(), siblings.size());
         item.update(
-                normalizeRequired(request.title()),
+                title,
                 normalizeOptional(request.description()),
                 position,
                 request.estimatedMinutes());
@@ -600,6 +607,20 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
                     ErrorCode.ROADMAP_STRUCTURE_INCOMPLETE,
                     "Every Topic requires at least one Learning Unit before activation.");
         }
+
+        topicsByMilestoneId.values().stream()
+                .flatMap(List::stream)
+                .forEach(topic -> {
+                    List<RoadmapItem> learningUnits =
+                            unitsByTopicId.getOrDefault(topic.getId(), List.of());
+                    for (RoadmapItem learningUnit : learningUnits) {
+                        requireSpecificLearningUnitTitle(
+                                topic,
+                                learningUnits,
+                                learningUnit.getId(),
+                                learningUnit.getTitle().trim());
+                    }
+                });
     }
 
     private RoadmapResponse roadmapResponse(Roadmap roadmap) {
@@ -836,6 +857,27 @@ public class ManualRoadmapServiceImpl implements ManualRoadmapService {
             siblings.get(index).moveTo(index);
         }
         roadmapItemRepository.saveAll(siblings);
+    }
+
+    private void requireSpecificLearningUnitTitle(
+            RoadmapItem topic,
+            List<RoadmapItem> siblings,
+            UUID currentItemId,
+            String learningUnitTitle) {
+        if (topic != null && learningUnitTitle.equalsIgnoreCase(topic.getTitle().trim())) {
+            throw validation(
+                    "A Learning Unit must describe a smaller action than its parent Topic.");
+        }
+        boolean duplicateSibling = siblings.stream()
+                .filter(sibling -> currentItemId == null
+                        || !sibling.getId().equals(currentItemId))
+                .map(RoadmapItem::getTitle)
+                .filter(java.util.Objects::nonNull)
+                .map(String::trim)
+                .anyMatch(learningUnitTitle::equalsIgnoreCase);
+        if (duplicateSibling) {
+            throw validation("Learning Unit titles must be unique within a Topic.");
+        }
     }
 
     private String normalizeRequired(String value) {
