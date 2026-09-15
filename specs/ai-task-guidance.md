@@ -2,45 +2,56 @@
 
 ## Status
 
-Proposed. The current backend supports Daily Plan Items and AI-generated Daily
-Plans, but it does not provide a separate, version-safe Task Detail guidance
-resource containing actionable steps and provenance-aware references.
+Proposed and revised after completion of `task-step-decomposition.md`.
 
-This specification builds on `task-step-decomposition.md`. It does not replace
-Roadmap Learning Units or turn generated links into trusted sources.
+The backend already provides version-owned Daily Plan Items, persisted Task
+Steps, runtime Task Step completion, Learning Unit linkage, and AI-generated
+Task Step decomposition. Task Steps are therefore the one canonical executable
+checklist for a Daily Plan Item.
+
+This specification adds optional AI guidance that explains how to carry out
+those existing Task Steps and supplies provenance-aware references. It does
+not create a second checklist, replace Task Steps, or change learning progress.
 
 ## Improvised user story
 
-As a `USER`, I want to open a Daily Plan Item and ask AI for focused execution
-guidance, so that I receive a small actionable checklist and relevant references
-without AI silently modifying my plan or presenting unverified links as facts.
+As a `USER`, I want to open a Daily Plan Item and receive focused AI guidance
+for each existing Task Step, so that I understand how to execute my checklist
+and can find relevant references without AI changing my plan or progress.
 
-## Why the original story needs refinement
+For a valid simple task without Task Steps, the USER may still request concise
+task-level guidance and references.
 
-The original story mixes three different concerns:
+## Relationship to the original story
 
-1. Viewing the persisted Daily Plan Item.
-2. Generating advisory instructions and checklist steps.
-3. Presenting references with different levels of provenance.
+The original story requires a Task Detail view containing:
 
-These concerns need separate state and authorization boundaries. AI output is a
-draft suggestion. The USER chooses whether to apply suggested steps to an
-editable Daily Plan version.
+- a short description;
+- a small action checklist;
+- relevant material or links;
+- a `Gợi ý chưa xác minh` label for links introduced by AI outside the
+  original learning material.
 
-The system cannot call arbitrary AI-provided URLs "verified." A reference is
-source-backed only when it points to a known owner-owned Learning Source or
-Material supplied to the model. Any URL introduced by the provider is labelled
-`UNVERIFIED_EXTERNAL` until a future verification capability explicitly changes
-that status.
+Task Step decomposition now owns the checklist requirement. This story owns
+the explanation and reference requirements:
+
+```text
+Task Step decomposition decides WHAT actions exist.
+Task Guidance explains HOW to perform those actions.
+Task Step completion records WHAT the USER actually did.
+Weak Topic mastery remains a separate Quiz-based decision.
+```
 
 ## Scope and actors
 
 - An authenticated `USER` may generate and view guidance only for Daily Plan
   Items owned by that USER.
-- AI generation is optional. The USER can still view and manually maintain
-  Task Steps when AI is unavailable.
-- `ADMIN` manages provider configuration only and has no access to Task Detail
-  content, prompts, references, or personal Learning Sources.
+- AI guidance is optional. Existing Daily Plan Items and Task Steps remain
+  usable when AI is unavailable.
+- `ADMIN` manages provider configuration only and has no access to Task
+  Guidance, personal Task Steps, prompts, references, or learning content.
+- This story does not apply, insert, reorder, delete, or complete Task Steps.
+- This story does not create ProgressEntry records or change Weak Topic state.
 
 ## Domain boundaries
 
@@ -48,150 +59,236 @@ that status.
 DailyPlan
 `-- DailyPlanVersion
     `-- DailyPlanItem -> optional Learning Unit
-        |-- persisted Task Steps
+        |-- persisted Task Steps (the executable checklist)
         `-- Task Guidance
             `-- Task Guidance Revision
-                |-- suggested steps
-                `-- suggested references
+                |-- task-level summary
+                |-- guidance for exact existing Task Steps
+                `-- provenance-aware references
 ```
 
 ### Daily Plan Item
 
 - Remains the scheduled and progress-bearing task.
 - Belongs to one exact `DailyPlanVersion`.
-- May reference one Learning Unit from the associated active
-  `RoadmapVersion`.
-- Is not overwritten when Task Guidance is generated or regenerated.
+- May reference one Learning Unit from the associated RoadmapVersion.
+- Owns the persisted Task Steps displayed as the executable checklist.
+- Is never overwritten by Task Guidance generation or regeneration.
+
+### Task Step
+
+- Remains the canonical executable action beneath a Daily Plan Item.
+- Its title, planned guidance, order, estimate, required flag, and runtime
+  completion keep the meaning defined by `task-step-decomposition.md`.
+- Its existing optional `guidance` is concise planned content. AI Task Detail
+  guidance may expand on it but never replaces it.
+- Only the explicit Task Step completion endpoint changes its runtime checkbox
+  state.
 
 ### Task Guidance
 
 - Belongs to one USER-owned Daily Plan Item and exact DailyPlanVersion.
-- Is advisory content, not an approval decision and not learning progress.
-- Has one or more immutable revisions.
-- Generation or regeneration creates a new revision rather than overwriting an
-  earlier revision.
-- A generated revision starts as `DRAFT`.
+- Is advisory content, not planned content, an approval decision, or learning
+  progress.
+- Has one or more immutable revisions when generation is repeated.
+- Every generated revision starts as `DRAFT`.
+- The latest non-archived revision is the default revision shown by the UI.
 
-### Suggested Task Step
+### Task Step Guidance
 
-- Is proposed execution detail scoped to the parent Daily Plan Item.
-- Does not become a persisted executable Task Step until the USER explicitly
-  applies it.
-- Does not directly create ProgressEntry or Roadmap progress.
+- Belongs to one Task Guidance revision.
+- References an exact stable Task Step ID captured in that revision's context.
+- Explains how to perform that Task Step and what observable result it should
+  produce.
+- May contain tips, cautions, prerequisites, and relevant references.
+- Has no completion state and is not an alternative Task Step.
+- Cannot be applied to, merged into, or substituted for a persisted Task Step
+  in this story.
 
-### Suggested reference
+### Task-level fallback guidance
 
-Every reference has an explicit provenance type:
+A Daily Plan Item may legitimately contain no Task Steps. In that case, a
+guidance revision may contain:
 
-- `LEARNING_SOURCE`: points to an owner-owned Learning Source or Material that
-  was actually supplied in the generation context.
-- `ROADMAP_CONTEXT`: points to the relevant Roadmap Learning Unit without
-  claiming an external source.
-- `UNVERIFIED_EXTERNAL`: a provider-suggested HTTP(S) URL not derived from an
-  owner-owned source.
+- a concise objective;
+- a short execution description;
+- one recommended starting action expressed as advisory text;
+- zero or more references.
 
-Only `UNVERIFIED_EXTERNAL` references receive the required USER-facing badge:
+The starting action is not persisted as a Task Step. Adding a Task Step remains
+an explicit DRAFT DailyPlanVersion editing operation outside this story.
+
+## Reference provenance
+
+Every reference has exactly one provenance type:
+
+- `MATERIAL`: points to an owner-owned Material that was supplied in the
+  generation context.
+- `LEARNING_SOURCE`: points to an owner-owned LearningSource that was supplied
+  in the generation context.
+- `ROADMAP_CONTEXT`: points to the relevant owner-owned Roadmap Learning Unit
+  without claiming an external source.
+- `UNVERIFIED_EXTERNAL`: an HTTP(S) URL introduced by the AI provider and not
+  derived from supplied owner-owned content.
+
+The persistence and API representation must distinguish `MATERIAL` from
+`LEARNING_SOURCE`; one ambiguous source UUID must not be interpreted against
+both tables.
+
+Only `UNVERIFIED_EXTERNAL` receives the USER-facing badge:
 `Gợi ý chưa xác minh`.
+
+Whether a reference is unverified is derived from its provenance type. A
+separate mutable `unverified` value must not be allowed to contradict that
+type.
 
 ## Generation context
 
 The backend builds a bounded context from:
 
-- the exact Daily Plan Item title, description, category, and planned minutes;
+- the exact Daily Plan Item title, description, category, status, and planned
+  minutes;
 - its exact DailyPlanVersion;
-- its Learning Unit, parent Topic, and parent Milestone when linked;
-- owner-owned RoadmapSource/LearningSource content relevant to that Learning
-  Unit, when available and ready;
-- existing USER-authored Task Steps, which are authoritative and must not be
-  overwritten;
-- current task status only when it helps avoid irrelevant advice.
+- the ordered Task Steps and their planned-content entity versions;
+- each Task Step's title, concise planned guidance, order, estimate, and
+  required flag;
+- the linked Learning Unit, parent Topic, and parent Milestone when available;
+- owner-owned RoadmapSource, Material, or LearningSource content relevant to
+  that Learning Unit when it is available and ready.
 
 The backend must not send unrelated Roadmap content, full progress history, or
-all Learning Sources merely because they share an owner. Context selection is
-bounded by exact relationships and token limits.
+all owner-owned sources. Context selection is bounded by exact relationships
+and token limits.
 
-Uploaded text, extracted document content, task text, and Roadmap text are
-untrusted data. They are wrapped as data and never treated as system or tool
-instructions.
+Uploaded text, extracted document content, Task Step text, task text, and
+Roadmap text are untrusted data. They are delimited as data and never treated
+as system, developer, tool, or provider instructions.
 
 ## Guidance requirements
 
-A valid Task Guidance revision contains:
+When the Daily Plan Item has Task Steps, a valid Task Guidance revision
+contains:
 
-- a concise objective;
-- a short execution description;
-- two to eight ordered suggested steps when decomposition is useful;
-- zero or more references;
-- optional cautions or prerequisites;
-- the exact Daily Plan Item and version identifiers used as context.
+- a concise task objective;
+- a short task-level execution summary;
+- the exact DailyPlanVersion and DailyPlanItem identifiers used as context;
+- a context snapshot containing the ordered Task Step IDs and their
+  planned-content entity versions;
+- one Task Step Guidance entry for every Task Step included in the snapshot;
+- zero or more task-level references.
 
-Suggested steps must:
+Each Task Step Guidance entry contains:
 
-- be independently checkable actions;
-- produce an observable result;
-- fit within the parent task's planned time;
-- remain within the Learning Unit scope when one is linked;
-- avoid repeating the task, Learning Unit, or Topic title as the entire step;
-- avoid pretending to modify code, submit work, or complete learning on the
-  USER's behalf.
+- the exact Task Step ID;
+- concise execution instructions;
+- an observable expected result;
+- optional tips, cautions, or prerequisites;
+- zero or more references.
 
-Simple tasks may return one concise action instead of artificial boilerplate.
+Guidance must:
+
+- remain within the scope of the parent Daily Plan Item and linked Learning
+  Unit;
+- fit the intent and planned time of the referenced Task Step;
+- avoid merely repeating the Task Step, Daily Plan Item, Learning Unit, or
+  Topic title;
+- avoid inventing another curriculum outcome;
+- avoid pretending to modify code, submit work, browse a website, or complete
+  learning on the USER's behalf;
+- use the USER-facing locale when available.
+
+The system generates guidance for all current Task Steps in one bounded AI
+request. Expanding an individual step in the frontend must not automatically
+create a separate provider request.
 
 ## Reference and link safety
 
-- The first implementation does not fetch, crawl, preview, or execute
+- The first implementation does not fetch, crawl, preview, execute, or test
   AI-provided external URLs.
 - External URLs must use `https`, or `http` only when explicitly allowed by the
-  environment policy. Other schemes are rejected.
-- Credentials, local filesystem paths, loopback/private-network addresses, and
-  embedded authentication information are rejected.
-- URL text and labels are sanitized before rendering.
-- Frontend external links open with safe browser attributes such as
-  `noopener` and `noreferrer`.
-- Link existence, safety, correctness, and licensing are not implied by the
-  `UNVERIFIED_EXTERNAL` record.
-- A Learning Source reference is accepted only when the referenced source is
-  owner-owned, not archived for normal use, and was included in generation
-  context.
-- Source-backed references should include a stable source ID and optional page,
-  section, or excerpt locator. They do not expose raw storage paths.
-- The backend rejects references to another USER's materials even if the AI
-  returns a syntactically valid UUID.
+  deployment policy. Other schemes are rejected.
+- Credentials, embedded authentication, local filesystem paths, loopback
+  addresses, and literal private-network addresses are rejected.
+- URL labels and display text are sanitized before rendering.
+- Frontend external links open with `noopener` and `noreferrer`.
+- Link existence, correctness, safety, and licensing are not implied by an
+  `UNVERIFIED_EXTERNAL` reference.
+- A Material or LearningSource reference is accepted only when the referenced
+  resource is owner-owned, available for normal use, and was included in the
+  exact generation context.
+- Source-backed references expose stable resource IDs and optional safe page,
+  section, or excerpt locators, never storage paths.
+- A provider-returned source ID is treated as an untrusted claim and must be
+  validated against the allow-list supplied to that request.
 
-## State and version rules
+## State, revision, and stale-context rules
 
 ```text
-No Guidance --generate--> DRAFT revision
-DRAFT revision --regenerate--> newer DRAFT revision
-DRAFT revision --apply selected steps--> explicit USER application
-DRAFT revision --archive--> ARCHIVED revision
+No Guidance --generate--> DRAFT revision 1
+
+DRAFT revision 1 --regenerate--> SUPERSEDED revision 1
+                                  + DRAFT revision 2
+
+DRAFT or SUPERSEDED --archive--> ARCHIVED
 ```
 
-- Generation never changes the Daily Plan Item or its Task Steps.
-- If the DailyPlanVersion is `DRAFT`, the USER may explicitly apply selected
-  suggestions as persisted Task Steps in that version.
-- Applying suggestions is idempotent and preserves USER-authored steps.
-- If the DailyPlanVersion is `ACTIVE`, its planned content is immutable.
-  Guidance remains viewable and advisory; applying it requires an explicit new
-  editable DailyPlanVersion according to Daily Plan version rules.
-- Regeneration records another guidance revision and preserves earlier output.
-- A guidance revision belongs to the exact item version it analyzed. It does
-  not automatically move to a newer DailyPlanVersion.
-- Completing suggested or persisted steps does not independently complete the
-  Learning Unit; parent-task outcome rules from
-  `task-step-decomposition.md` remain authoritative.
+- Revision content is immutable after persistence.
+- Regeneration creates a new revision and preserves every earlier revision.
+- At most one revision per Task Guidance root is the latest `DRAFT` revision.
+- `SUPERSEDED` means a newer revision exists; it does not delete or invalidate
+  historical content.
+- Archiving hides a revision from the normal view but does not delete it.
+- A revision belongs to the exact item/version and Task Step context it
+  analyzed. It never moves automatically to another DailyPlanVersion.
+- Guidance generation never changes Task Step content or completion state.
+- An `ACTIVE` DailyPlanVersion may generate and view advisory guidance because
+  guidance does not mutate its frozen planned content.
+
+For a DRAFT version, Task Steps can change after generation. A guidance
+revision is `STALE` for display purposes when the current ordered Task Step IDs
+or their entity versions differ from the stored context snapshot.
+
+- A stale revision remains readable as history.
+- Stale guidance must not be silently mapped to replacement Task Steps.
+- Regenerating against the new Task Step snapshot creates another revision.
+- `STALE` may be derived rather than stored as a mutable revision state.
+- ACTIVE-version Task Step content is immutable, so an existing revision's
+  mapping remains stable after activation.
+
+## Progress and Weak Topic independence
+
+- Viewing guidance does not complete a Task Step.
+- Completing the actions described by guidance does not automatically complete
+  a Task Step.
+- Only the USER's explicit Task Step completion action changes the checklist
+  state.
+- Task Step Guidance has no runtime progress state of its own.
+- Completing all Task Steps does not by itself record a Learning Unit outcome;
+  parent-task outcome rules remain authoritative.
+- Generating, viewing, or regenerating guidance does not create ProgressEntry,
+  update Roadmap progress, or create, reopen, review, or master a Weak Topic.
+- A Weak Topic may target only an exact Learning Unit.
+- Only the dedicated Weak Topic mastery-check rules may change a Weak Topic to
+  `MASTERED`.
 
 ## Asynchronous AI execution
 
 - Guidance generation uses `AiExecution` rather than holding the HTTP request
   open for provider latency.
-- Introduce a distinct purpose such as `TASK_GUIDANCE_GENERATION`.
-- The execution target is the exact `DAILY_PLAN_ITEM`.
-- Success references the created Task Guidance revision.
-- One active execution is permitted per item and idempotency key.
+- Add purpose `TASK_GUIDANCE_GENERATION`.
+- Add target type `DAILY_PLAN_ITEM`; the target ID is the exact item.
+- Add result type `TASK_GUIDANCE_REVISION`.
+- Success references the created revision by result ID.
+- Only one QUEUED or RUNNING guidance execution may exist for the same item and
+  purpose, regardless of whether competing requests use different idempotency
+  keys.
+- An idempotency key makes a repeated request return the same execution.
+- Resource-level concurrency protection prevents different keys from creating
+  multiple active executions for the same item.
 - No automatic provider failover is introduced by this story.
-- Provider failure leaves the Daily Plan and manual Task Steps usable.
-- Failure responses never contain raw provider output.
+- Provider failure changes only the AiExecution; the Daily Plan, Task Steps,
+  progress, and earlier guidance revisions remain unchanged.
+- Failure responses never contain prompt content or raw provider output.
 
 ## Proposed API
 
@@ -199,97 +296,116 @@ Exact endpoint strings must be added to `ApiConstant` during implementation.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/v1/daily-plans/{planId}/versions/{versionId}/items/{itemId}/guidance` | Read guidance revisions for the exact item |
-| `POST` | `/api/v1/daily-plans/{planId}/versions/{versionId}/items/{itemId}/guidance/generate` | Queue first guidance generation |
-| `POST` | `/api/v1/daily-plans/{planId}/versions/{versionId}/items/{itemId}/guidance/regenerate` | Queue a new guidance revision |
-| `POST` | `/api/v1/daily-plans/{planId}/versions/{versionId}/items/{itemId}/guidance/{revisionId}/apply` | Apply selected suggested steps to an editable version |
+| `GET` | `/api/v1/daily-plans/{planId}/versions/{versionId}/items/{itemId}/guidance` | Return the latest revision and paginated revision summaries |
+| `GET` | `/api/v1/daily-plans/{planId}/versions/{versionId}/items/{itemId}/guidance/{revisionId}` | Read one exact guidance revision |
+| `POST` | `/api/v1/daily-plans/{planId}/versions/{versionId}/items/{itemId}/guidance/generate` | Queue initial guidance generation |
+| `POST` | `/api/v1/daily-plans/{planId}/versions/{versionId}/items/{itemId}/guidance/regenerate` | Queue a new revision against the current Task Step snapshot |
+| `GET` | `/api/v1/daily-plans/{planId}/versions/{versionId}/items/{itemId}/guidance/execution/current` | Recover the current active generation after modal close or reload |
 | `GET` | `/api/v1/ai-executions/{executionId}` | Poll owner-scoped execution status |
 
-The apply request contains only selected suggested-step IDs and an idempotency
-key. It never accepts an owner ID or a replacement Daily Plan Item payload.
+The generation request contains an idempotency key and may contain one bounded
+USER adjustment instruction for regeneration. The adjustment is untrusted
+data. Requests never accept an owner ID, replacement Task Steps, completion
+state, or replacement Daily Plan content.
 
-Every lookup scopes plan, version, item, guidance revision, source, and actor in
-the repository query. A foreign or mismatched nested ID returns
-`RESOURCE_NOT_FOUND`.
+Every repository lookup scopes plan, version, item, revision, Task Step,
+Material, LearningSource, and actor through the authenticated owner. Foreign or
+mismatched nested IDs return `RESOURCE_NOT_FOUND` without disclosing resource
+existence.
 
 ## Response requirements
 
-A Task Guidance response contains:
+A Task Guidance revision response contains:
 
-- guidance and revision IDs;
+- guidance root and revision IDs;
 - exact DailyPlanVersion and DailyPlanItem IDs;
 - revision number and state;
-- concise objective and description;
-- ordered suggested steps;
-- references with provenance, display label, safe URL or source locator, and
-  `unverified` boolean;
+- whether the revision is latest and whether its context is stale;
+- concise objective and task-level summary;
+- ordered Task Step Guidance entries keyed by exact Task Step IDs;
+- task-level and step-level references with discriminated provenance;
 - generation time;
-- whether the current version permits applying suggestions.
+- the ordered Task Step context snapshot or an opaque context fingerprint
+  sufficient for stale detection.
 
-Responses never include prompts, provider raw output, answer keys, secret
-references, storage paths, or content belonging to another USER.
+Responses never include prompts, provider raw output, provider secrets, secret
+references, raw source excerpts, storage paths, or another USER's identifiers
+or content.
 
 ## Strict AI output validation
 
 The generated JSON schema is closed and bounded. The backend validates:
 
-- required objective and description fields;
-- step count, order, title length, uniqueness, estimates, and total time;
-- exact Daily Plan Item scope;
-- reference count and allowed provenance values;
-- source IDs against the supplied owner-scoped context;
-- safe external URL syntax and scheme;
+- required objective and task summary;
+- exact DailyPlanVersion and DailyPlanItem scope;
+- the returned Task Step ID set against the supplied allow-list;
+- exactly one guidance entry per supplied Task Step when Task Steps exist;
+- absence of Task Step Guidance entries when the item has no Task Steps;
+- instructions and expected-result length and content bounds;
 - no unknown fields;
-- no duplicated references after canonicalization.
+- reference count and allowed provenance types;
+- Material and LearningSource IDs against their separate supplied owner-scoped
+  allow-lists;
+- safe external URL syntax and schemes;
+- no duplicate references after canonicalization;
+- absence of instructions that attempt to mutate completion, progress,
+  Roadmap, Weak Topic, or Quiz state.
 
 Invalid output retries at most twice after the original request. No partial
-guidance is persisted. Deterministic backend checks, not prompt wording alone,
-enforce IDs, bounds, provenance, and URL safety.
+guidance revision is persisted. Deterministic backend checks, not prompt
+wording alone, enforce identifiers, bounds, provenance, and URL safety.
 
 ## UI behavior
 
 - Clicking a Daily Plan Item opens an accessible Task Detail modal or page.
-- The UI distinguishes:
+- The UI clearly distinguishes:
   - scheduled task information;
   - Learning Unit and parent Topic context;
-  - persisted executable Task Steps;
-  - AI suggestions not yet applied;
-  - references.
-- Generation shows asynchronous queued/running/succeeded/failed states and may
+  - persisted executable Task Steps and their checkboxes;
+  - advisory AI guidance for each Task Step;
+  - task-level and step-level references.
+- Expanding a Task Step displays already-generated guidance locally and does
+  not make another AI request.
+- Generation displays queued, running, succeeded, and failed states and may
   continue after the modal closes.
-- Reopening recovers the active execution or latest persisted guidance.
-- The USER selects which suggested steps to apply; there is no automatic
-  mutation.
-- Every `UNVERIFIED_EXTERNAL` link displays `Gợi ý chưa xác minh` next to the
+- Reopening the modal recovers the active execution or latest persisted
+  revision.
+- Stale guidance is visibly labelled and is never presented as guidance for a
+  newly replaced Task Step.
+- Every `UNVERIFIED_EXTERNAL` link displays `Gợi ý chưa xác minh` beside that
   link, not only in a page-level disclaimer.
-- Source-backed references use a distinct label such as `Từ tài liệu của bạn`.
-- Dirty USER edits require confirmation before closing.
+- Material and LearningSource references display their distinct provenance.
+- Guidance has no checkbox and cannot visually appear to be a second
+  executable checklist.
 - Keyboard focus, Escape behavior, focus restoration, and screen-reader labels
   follow the shared modal accessibility contract.
 
 ## Failure and exception flows
 
-- No provider configured: show manual guidance/step editing and preserve task
-  data.
-- Provider timeout: fail only the execution; permit explicit retry.
+- No provider configured: retain the normal Task Detail and manual Task Step
+  experience.
+- Provider timeout or unavailable: fail only the execution and permit an
+  explicit retry.
 - Invalid AI output: retry within policy, then fail without partial writes.
-- Archived or unavailable Learning Source: omit it from new context and reject
-  any returned reference to it.
-- Active DailyPlanVersion: allow viewing guidance but reject in-place apply.
-- Version changed while generation was running: persist guidance against the
-  originally targeted item/version and do not apply it to the newer version.
-- Duplicate apply: return the prior result without duplicating Task Steps.
-- External link rejected by URL policy: reject or omit it according to the
-  closed-schema validation policy; never fetch it to test validity.
+- Archived or unavailable Material/LearningSource: omit it from new context
+  and reject a returned reference to it.
+- Task Steps changed while generation was running: persist the revision against
+  the captured context, return it as stale when compared with the current
+  DRAFT, and never remap it silently.
+- DailyPlanVersion changed while generation was running: persist against the
+  originally targeted item/version only.
+- Duplicate generation request: return the existing active or idempotent
+  execution.
+- Rejected external link: reject the AI output under the closed-schema retry
+  policy; never fetch the link to test it.
 
 ## Error categories
 
 - `RESOURCE_NOT_FOUND`
-- `DAILY_PLAN_VERSION_NOT_EDITABLE`
 - `TASK_GUIDANCE_NOT_FOUND`
 - `TASK_GUIDANCE_ALREADY_RUNNING`
+- `TASK_GUIDANCE_CONTEXT_STALE`
 - `TASK_GUIDANCE_INVALID_REFERENCE`
-- `TASK_STEP_TIME_EXCEEDED`
 - `AI_PROVIDER_NOT_CONFIGURED`
 - `AI_PROVIDER_UNAVAILABLE`
 - `AI_OUTPUT_INVALID`
@@ -298,115 +414,139 @@ enforce IDs, bounds, provenance, and URL safety.
 
 ## Persistence considerations
 
-- Guidance and revisions require version-owned persistence separate from
-  DailyPlanItem planned fields.
-- Suggested steps remain separate from applied Task Steps so regeneration
-  cannot overwrite USER choices.
-- References store provenance and stable owner-scoped source IDs where
-  available. Raw document content is not duplicated into reference rows.
-- External URLs are stored as untrusted display data, never as executable
-  callbacks or server-fetch instructions.
-- A unique revision number per guidance root and an idempotent apply constraint
-  prevent duplicates.
-- Foreign-key deletion behavior preserves activated Daily Plan history and
-  applied Task Step lineage.
+- A Task Guidance root is unique per Daily Plan Item.
+- Revisions use immutable version-owned persistence separate from
+  DailyPlanItem and TaskStep planned fields.
+- Revision numbers are unique and monotonically increasing within the root.
+- Task Step Guidance rows reference the exact Task Step IDs captured in the
+  revision context.
+- The context snapshot preserves ordered Task Step IDs and their planned
+  entity versions without duplicating personal text unnecessarily.
+- References store discriminated provenance and stable owner-scoped source IDs
+  where applicable. Raw document content is not copied into reference rows.
+- External URLs remain untrusted display data, never callbacks or server-fetch
+  instructions.
+- One active-execution constraint and idempotency constraints prevent duplicate
+  generation.
+- Foreign-key behavior preserves activated Daily Plan history and guidance
+  history.
 - Hard deletion is limited to unreferenced draft data under an explicitly
   approved retention operation.
 
 ## Privacy, logging, and audit
 
-- Guidance, steps, source excerpts, and references are personal learning data.
+- Task content, Task Steps, guidance, source excerpts, and references are
+  personal learning data.
 - Prompt context and provider response content do not enter application logs,
   audit metadata, or `AiExecution.failureMessage`.
 - Provider secrets and secret references are never part of guidance records or
   responses.
-- Audit events contain actor, action, resource type, resource ID, and request ID
-  only.
-- Suggested audit categories are guidance generation queued/succeeded/failed,
-  revision archived, and suggestions applied.
-- ADMIN cannot retrieve guidance content through operational or audit APIs.
+- Audit metadata contains actor, action, resource type, resource ID, and
+  request ID only.
+- Suggested audit categories are guidance generation queued, succeeded,
+  failed, regenerated, and revision archived.
+- `ADMIN` cannot retrieve guidance content through operational or audit APIs.
 
 ## Required tests
 
 ### Domain and service tests
 
 - Guidance is attached to the exact DailyPlanVersion and DailyPlanItem.
-- Generation and regeneration preserve previous revisions.
-- USER-authored task fields and Task Steps are never overwritten.
-- Suggestions can be applied only to an editable DRAFT version.
-- Applying selected steps is idempotent and respects the parent time budget.
-- Completing a suggestion alone does not change Roadmap progress.
+- Every Task Step Guidance entry references a Task Step from that exact item.
+- Guidance generation never creates, edits, reorders, deletes, or completes a
+  Task Step.
+- Regeneration preserves earlier revisions and marks the former latest revision
+  superseded.
+- Existing USER-authored and AI-generated Task Steps remain unchanged.
+- A no-step item receives only the documented task-level fallback.
+- A changed DRAFT Task Step snapshot makes old guidance stale.
+- Guidance remains stable for immutable ACTIVE-version Task Steps.
+- Guidance operations do not create progress or change Weak Topic state.
 
 ### AI contract and security tests
 
+- One generation request covers all current Task Steps.
 - Prompt context contains only related owner-owned data.
 - Personal content is treated as untrusted data.
 - Invalid shapes retry at most twice and persist nothing.
-- Cross-owner source IDs and task IDs are rejected.
-- Unsafe URL schemes, credentials, local paths, and private-network targets are
-  rejected without making an outbound request.
+- Missing, duplicate, foreign, or invented Task Step IDs are rejected.
+- Cross-owner Material, LearningSource, task, and revision IDs are rejected.
+- Unsafe URL schemes, credentials, local paths, and literal private-network
+  targets are rejected without an outbound request.
 - Every provider-introduced URL is `UNVERIFIED_EXTERNAL`.
-- Source-backed provenance is accepted only for a source supplied in context.
+- Material and LearningSource provenance is accepted only for the matching
+  source type supplied in context.
 
 ### Repository and controller tests
 
-- Owner USER can generate, poll, read, regenerate, and explicitly apply.
+- Owner USER can generate, recover, poll, read, and regenerate guidance.
 - Another USER receives `RESOURCE_NOT_FOUND`.
 - ADMIN receives `403 Forbidden`.
-- Concurrent generation and apply operations remain idempotent.
-- Daily Plan detail retrieval does not create an N+1 query per Task Step or
+- Concurrent requests produce at most one active execution for an item.
+- Daily Plan detail and guidance retrieval avoid an N+1 query per Task Step or
   reference.
-- Responses and logs contain no prompt, raw provider output, source content, or
-  storage key.
+- Responses and logs contain no prompt, raw provider output, source content,
+  storage key, or secret reference.
 
 ### Frontend acceptance tests
 
-- Clicking a task opens its exact guidance.
-- Loading and asynchronous recovery states are visible.
-- Checklist suggestions are visually distinct from applied steps.
+- Clicking a task opens the exact Task Detail.
+- Existing Task Steps remain the only interactive checklist.
+- Every displayed step can reveal its corresponding AI guidance.
+- Expanding steps does not issue one provider-generation request per step.
+- Queued, running, recovery, failure, stale, and success states are visible.
 - External suggestions display `Gợi ý chưa xác minh` per link.
-- Source-backed references display their provenance.
-- Apply and discard actions require explicit USER intent.
+- Material, LearningSource, and Roadmap context references are visually
+  distinguishable.
+- No guidance action silently changes task or progress state.
 
 ## Dependencies
 
-- DailyPlan and DailyPlanVersion ownership/version rules.
-- Learning Unit linkage for Roadmap-backed tasks.
-- `task-step-decomposition.md` for persisted executable steps.
-- Learning Source/Material ownership and RoadmapSource relationships.
-- AI provider selection and `AiExecution` infrastructure.
-- Shared modal accessibility and async polling behavior in the frontend.
+- Versioned Daily Plan Items.
+- Implemented Task Step decomposition and completion.
+- ACTIVE RoadmapVersion and Learning Unit linkage for Roadmap-backed tasks.
+- LearningSource, Material, and RoadmapSource ownership relationships.
+- AI provider selection extended for `TASK_GUIDANCE_GENERATION`.
+- AiExecution extended for `DAILY_PLAN_ITEM` and
+  `TASK_GUIDANCE_REVISION`.
+- Shared accessible modal and asynchronous recovery behavior in the frontend.
 
 ## Acceptance criteria
 
-1. A USER can open one Daily Plan Item and request guidance scoped to that exact
-   item and version.
-2. Valid guidance contains a concise objective, actionable suggested steps, and
-   provenance-aware references.
-3. AI output is saved as a new `DRAFT` guidance revision and never overwrites
-   the Daily Plan Item or USER-authored steps.
-4. The USER explicitly selects suggestions to apply to an editable DRAFT
-   DailyPlanVersion.
-5. Source-backed references resolve only to owner-owned sources supplied in the
-   prompt context.
-6. Every provider-introduced external URL displays `Gợi ý chưa xác minh` and is
-   never fetched by the backend in the first implementation.
-7. Invalid or unsafe output is rejected deterministically and retries at most
-   twice.
-8. AI failure leaves manual Task Step authoring and task execution available.
-9. Guidance and application operations are owner-scoped; ADMIN has no access.
-10. Prompt content, source content, raw AI output, and secrets never enter logs
+1. A USER can open one owned Daily Plan Item and see its existing ordered Task
+   Steps as the only executable checklist.
+2. The USER can request one asynchronous AI generation operation that produces
+   focused guidance for each existing Task Step.
+3. Each guidance entry references an exact Task Step and contains execution
+   instructions and an observable expected result.
+4. A valid item without Task Steps receives concise task-level fallback
+   guidance without automatically creating Task Steps.
+5. AI guidance never creates, replaces, reorders, deletes, or completes Task
+   Steps and never changes Daily Plan, Roadmap, progress, Quiz, or Weak Topic
+   state.
+6. Material-backed and LearningSource-backed references resolve only to
+   owner-owned resources of the correct type supplied in prompt context.
+7. Every provider-introduced external URL is labelled
+   `Gợi ý chưa xác minh` and is never fetched by the backend.
+8. Regeneration creates a new DRAFT revision, preserves the previous revision,
+   and associates both with their exact Task Step context snapshots.
+9. Guidance generated against changed DRAFT Task Steps is visibly stale and is
+   never silently remapped.
+10. AI failure leaves the normal Task Detail and Task Step workflows usable.
+11. Every operation is owner-scoped and unavailable to ADMIN.
+12. Prompt content, source content, raw AI output, and secrets never enter logs
     or audit metadata.
 
 ## Explicitly out of scope
 
-- Automatic browsing, crawling, or safety verification of external links.
+- A second AI-generated executable checklist parallel to Task Steps.
+- Automatically adding or applying suggested Task Steps.
+- Replacing, reordering, deleting, or completing Task Steps through guidance.
+- Per-step provider calls triggered automatically when a UI section expands.
+- Treating Task Guidance or Task Steps as a Weak Topic or mastery target.
+- Quiz generation or mastery state changes from Task Guidance.
+- Automatic browsing, crawling, previewing, or verification of external URLs.
 - Claiming that provider-suggested URLs are correct or authoritative.
-- Automatically applying suggestions or completing Task Steps.
-- Replacing Learning Units with generated checklist steps.
-- Automatic mastery, Weak Topic state changes, or quiz generation from Task
-  Guidance.
-- Sharing Task Guidance with other users.
+- Sharing Task Guidance with another USER.
 - Provider automatic failover.
 - Backend Pomodoro sessions.
-
