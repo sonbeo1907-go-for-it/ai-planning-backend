@@ -8,6 +8,7 @@ import com.codegym.aiplanning.controller.daily.dto.CreateDailyTaskRequest;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanItemResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanSummaryResponse;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanTaskStepsResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
 import com.codegym.aiplanning.controller.daily.dto.ProgressEntryResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanTaskProgressHistoryResponse;
@@ -18,6 +19,8 @@ import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.entity.daily.DailyPlan;
 import com.codegym.aiplanning.entity.daily.DailyPlanItem;
 import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
+import com.codegym.aiplanning.entity.daily.DailyPlanTaskStep;
+import com.codegym.aiplanning.entity.daily.DailyPlanTaskStepState;
 import com.codegym.aiplanning.entity.daily.DailyPlanVersion;
 import com.codegym.aiplanning.entity.daily.DailyPlanVersionOrigin;
 import com.codegym.aiplanning.entity.daily.DailyPlanVersionStatus;
@@ -33,6 +36,8 @@ import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
 import com.codegym.aiplanning.repository.daily.DailyPlanItemRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanTaskStepRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanTaskStepStateRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanVersionRepository;
 import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
 import com.codegym.aiplanning.repository.profile.UserProfileRepository;
@@ -46,6 +51,8 @@ import com.codegym.aiplanning.service.daily.ai.DailyPlanAiGenerator;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanAiResponse;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext;
 import com.codegym.aiplanning.service.daily.ai.PlanningContextBuilder;
+import com.codegym.aiplanning.service.daily.step.TaskStepReadModelBuilder;
+import com.codegym.aiplanning.service.daily.step.TaskStepValidator;
 import com.codegym.aiplanning.service.evaluation.WeakTopicService;
 import com.codegym.aiplanning.service.roadmap.RoadmapProgressService;
 import com.codegym.aiplanning.service.roadmap.progress.ProgressHistoryResolver;
@@ -74,6 +81,8 @@ public class DailyPlanServiceImpl implements DailyPlanService {
     private final DailyPlanRepository dailyPlanRepository;
     private final DailyPlanVersionRepository dailyPlanVersionRepository;
     private final DailyPlanItemRepository dailyPlanItemRepository;
+    private final DailyPlanTaskStepRepository taskStepRepository;
+    private final DailyPlanTaskStepStateRepository taskStepStateRepository;
     private final ProgressEntryRepository progressEntryRepository;
     private final UserProfileRepository userProfileRepository;
     private final RoadmapRepository roadmapRepository;
@@ -85,11 +94,15 @@ public class DailyPlanServiceImpl implements DailyPlanService {
     private final DailyPlanPersistenceService persistenceService;
     private final WeakTopicService weakTopicService;
     private final RoadmapProgressService roadmapProgressService;
+    private final TaskStepReadModelBuilder taskStepReadModelBuilder;
+    private final TaskStepValidator taskStepValidator;
 
     public DailyPlanServiceImpl(
             DailyPlanRepository dailyPlanRepository,
             DailyPlanVersionRepository dailyPlanVersionRepository,
             DailyPlanItemRepository dailyPlanItemRepository,
+            DailyPlanTaskStepRepository taskStepRepository,
+            DailyPlanTaskStepStateRepository taskStepStateRepository,
             ProgressEntryRepository progressEntryRepository,
             UserProfileRepository userProfileRepository,
             RoadmapRepository roadmapRepository,
@@ -100,10 +113,14 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             DailyPlanAiGenerator aiGenerator,
             DailyPlanPersistenceService persistenceService,
             WeakTopicService weakTopicService,
-            RoadmapProgressService roadmapProgressService) {
+            RoadmapProgressService roadmapProgressService,
+            TaskStepReadModelBuilder taskStepReadModelBuilder,
+            TaskStepValidator taskStepValidator) {
         this.dailyPlanRepository = dailyPlanRepository;
         this.dailyPlanVersionRepository = dailyPlanVersionRepository;
         this.dailyPlanItemRepository = dailyPlanItemRepository;
+        this.taskStepRepository = taskStepRepository;
+        this.taskStepStateRepository = taskStepStateRepository;
         this.progressEntryRepository = progressEntryRepository;
         this.userProfileRepository = userProfileRepository;
         this.roadmapRepository = roadmapRepository;
@@ -115,6 +132,8 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         this.persistenceService = persistenceService;
         this.weakTopicService = weakTopicService;
         this.roadmapProgressService = roadmapProgressService;
+        this.taskStepReadModelBuilder = taskStepReadModelBuilder;
+        this.taskStepValidator = taskStepValidator;
     }
 
     @Override
@@ -320,9 +339,9 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                         active.getAvailableMinutes(),
                         active.getTotalPlannedMinutes()));
 
-        List<DailyPlanItem> copies = dailyPlanItemRepository
-                .findByDailyPlanVersionIdOrderByOrderIndexAsc(active.getId())
-                .stream()
+        List<DailyPlanItem> sourceItems = dailyPlanItemRepository
+                .findByDailyPlanVersionIdOrderByOrderIndexAsc(active.getId());
+        List<DailyPlanItem> copies = sourceItems.stream()
                 .map(item -> DailyPlanItem.create(
                         draft.getId(),
                         item.getCategory(),
@@ -334,6 +353,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 .toList();
         List<DailyPlanItem> savedCopies = dailyPlanItemRepository.saveAll(copies);
         dailyPlanItemRepository.flush();
+        copyTaskSteps(sourceItems, savedCopies);
 
         auditLogService.logAction(
                 userId,
@@ -597,6 +617,10 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 request.plannedMinutes(),
                 targetIndex,
                 roadmapItemId);
+        taskStepValidator.validateAll(
+                taskStepRepository.findByDailyPlanItemIdOrderByOrderIndex(itemId),
+                item.getPlannedMinutes(),
+                item.getTitle());
         items.add(targetIndex, item);
 
         int totalPlannedMinutes = 0;
@@ -656,6 +680,8 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                     "Cannot activate a version with no tasks.");
         }
         validateRoadmapBackedTasks(plan, items, userId);
+        validateTaskSteps(items);
+        initializeTaskStepStates(items);
 
         Instant now = Instant.now();
         if (plan.getActiveVersionId() != null) {
@@ -1140,6 +1166,78 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         return topic != null ? topic.getOrderIndex() : Integer.MAX_VALUE;
     }
 
+    private void copyTaskSteps(
+            List<DailyPlanItem> sourceItems,
+            List<DailyPlanItem> targetItems) {
+        if (sourceItems.isEmpty()) {
+            return;
+        }
+
+        Map<UUID, UUID> targetItemIdBySourceItemId = new HashMap<>();
+        for (int index = 0; index < sourceItems.size(); index++) {
+            targetItemIdBySourceItemId.put(
+                    sourceItems.get(index).getId(),
+                    targetItems.get(index).getId());
+        }
+
+        List<DailyPlanTaskStep> sourceSteps = taskStepRepository
+                .findByDailyPlanItemIdInOrderByItemAndOrder(
+                        new ArrayList<>(targetItemIdBySourceItemId.keySet()));
+        List<DailyPlanTaskStep> copiedSteps = sourceSteps.stream()
+                .map(step -> step.copyForItem(
+                        targetItemIdBySourceItemId.get(step.getDailyPlanItemId())))
+                .toList();
+        if (!copiedSteps.isEmpty()) {
+            taskStepRepository.saveAll(copiedSteps);
+            taskStepRepository.flush();
+        }
+    }
+
+    private void initializeTaskStepStates(List<DailyPlanItem> items) {
+        if (items.isEmpty()) {
+            return;
+        }
+        List<DailyPlanTaskStep> steps = taskStepRepository
+                .findByDailyPlanItemIdInOrderByItemAndOrder(
+                        items.stream().map(DailyPlanItem::getId).toList());
+        if (steps.isEmpty()) {
+            return;
+        }
+
+        Set<UUID> initializedStepIds = taskStepStateRepository
+                .findByTaskStepIdIn(steps.stream()
+                        .map(DailyPlanTaskStep::getId)
+                        .toList())
+                .stream()
+                .map(DailyPlanTaskStepState::getTaskStepId)
+                .collect(Collectors.toSet());
+        List<DailyPlanTaskStepState> missingStates = steps.stream()
+                .filter(step -> !initializedStepIds.contains(step.getId()))
+                .map(step -> DailyPlanTaskStepState.create(step.getId()))
+                .toList();
+        if (!missingStates.isEmpty()) {
+            taskStepStateRepository.saveAll(missingStates);
+            taskStepStateRepository.flush();
+        }
+    }
+
+    private void validateTaskSteps(List<DailyPlanItem> items) {
+        if (items.isEmpty()) {
+            return;
+        }
+        List<DailyPlanTaskStep> steps = taskStepRepository
+                .findByDailyPlanItemIdInOrderByItemAndOrder(
+                        items.stream().map(DailyPlanItem::getId).toList());
+        Map<UUID, List<DailyPlanTaskStep>> stepsByItemId = steps.stream()
+                .collect(Collectors.groupingBy(DailyPlanTaskStep::getDailyPlanItemId));
+        for (DailyPlanItem item : items) {
+            taskStepValidator.validateAll(
+                    stepsByItemId.getOrDefault(item.getId(), List.of()),
+                    item.getPlannedMinutes(),
+                    item.getTitle());
+        }
+    }
+
     private List<DailyPlanItemResponse> enrichTaskResponses(List<DailyPlanItem> items, UUID userId) {
         if (items == null || items.isEmpty()) {
             return List.of();
@@ -1153,6 +1251,9 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 ? Map.of()
                 : roadmapItemRepository.findAllOwnedByIdsWithParent(roadmapItemIds, userId).stream()
                         .collect(Collectors.toMap(RoadmapItem::getId, Function.identity(), (existing, replacing) -> existing));
+        Map<UUID, DailyPlanTaskStepsResponse> taskStepsByItemId =
+                taskStepReadModelBuilder.buildForItems(
+                        items.stream().map(DailyPlanItem::getId).toList());
 
         return items.stream()
                 .map(item -> {
@@ -1175,7 +1276,8 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                             learningUnitId,
                             roadmapItemTitle,
                             parentTopicId,
-                            parentTopicTitle);
+                            parentTopicTitle,
+                            taskStepsByItemId.get(item.getId()));
                 })
                 .toList();
     }
@@ -1185,7 +1287,13 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             return null;
         }
         if (item.getRoadmapItemId() == null) {
-            return DailyPlanItemResponse.from(item, null, null, null, null);
+            return DailyPlanItemResponse.from(
+                    item,
+                    null,
+                    null,
+                    null,
+                    null,
+                    taskStepReadModelBuilder.buildForItem(item.getId()));
         }
         RoadmapItem roadmapItem = roadmapItemRepository
                 .findOwnedById(item.getRoadmapItemId(), userId)
@@ -1206,7 +1314,8 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 learningUnitId,
                 roadmapItemTitle,
                 parentTopicId,
-                parentTopicTitle);
+                parentTopicTitle,
+                taskStepReadModelBuilder.buildForItem(item.getId()));
     }
 
     private DailyPlan requirePlanForUser(UUID planId, UUID userId) {

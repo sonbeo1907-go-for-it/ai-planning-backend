@@ -5,16 +5,21 @@ import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.daily.DailyPlan;
 import com.codegym.aiplanning.entity.daily.DailyPlanItem;
+import com.codegym.aiplanning.entity.daily.DailyPlanTaskStep;
 import com.codegym.aiplanning.entity.daily.DailyPlanVersion;
 import com.codegym.aiplanning.entity.daily.DailyPlanVersionOrigin;
 import com.codegym.aiplanning.entity.daily.DailyPlanVersionStatus;
 import com.codegym.aiplanning.repository.daily.DailyPlanItemRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanTaskStepRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanVersionRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.daily.DailyPlanPersistenceService;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanAiResponse;
+import com.codegym.aiplanning.service.daily.step.TaskStepValidator;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,16 +32,22 @@ public class DailyPlanPersistenceServiceImpl implements DailyPlanPersistenceServ
     private final DailyPlanRepository dailyPlanRepository;
     private final DailyPlanVersionRepository dailyPlanVersionRepository;
     private final DailyPlanItemRepository dailyPlanItemRepository;
+    private final DailyPlanTaskStepRepository taskStepRepository;
+    private final TaskStepValidator taskStepValidator;
     private final AuditLogService auditLogService;
 
     public DailyPlanPersistenceServiceImpl(
             DailyPlanRepository dailyPlanRepository,
             DailyPlanVersionRepository dailyPlanVersionRepository,
             DailyPlanItemRepository dailyPlanItemRepository,
+            DailyPlanTaskStepRepository taskStepRepository,
+            TaskStepValidator taskStepValidator,
             AuditLogService auditLogService) {
         this.dailyPlanRepository = dailyPlanRepository;
         this.dailyPlanVersionRepository = dailyPlanVersionRepository;
         this.dailyPlanItemRepository = dailyPlanItemRepository;
+        this.taskStepRepository = taskStepRepository;
+        this.taskStepValidator = taskStepValidator;
         this.auditLogService = auditLogService;
     }
 
@@ -93,7 +104,7 @@ public class DailyPlanPersistenceServiceImpl implements DailyPlanPersistenceServ
         DailyPlanVersion savedDraft = dailyPlanVersionRepository.saveAndFlush(draft);
 
         // Build and save items
-        List<DailyPlanItem> itemsToSave = new java.util.ArrayList<>();
+        List<DailyPlanItem> itemsToSave = new ArrayList<>();
         int orderIndex = 0;
         for (DailyPlanAiResponse.AiPlanItemDto aiItem : aiItems) {
             DailyPlanItem item = DailyPlanItem.create(
@@ -110,8 +121,9 @@ public class DailyPlanPersistenceServiceImpl implements DailyPlanPersistenceServ
             }
             itemsToSave.add(item);
         }
-        dailyPlanItemRepository.saveAll(itemsToSave);
+        List<DailyPlanItem> savedItems = dailyPlanItemRepository.saveAll(itemsToSave);
         dailyPlanItemRepository.flush();
+        persistGeneratedTaskSteps(aiItems, savedItems);
 
         auditLogService.logAction(
                 userId,
@@ -121,5 +133,45 @@ public class DailyPlanPersistenceServiceImpl implements DailyPlanPersistenceServ
                 savedDraft.getId().toString());
 
         return savedDraft;
+    }
+
+    private void persistGeneratedTaskSteps(
+            List<DailyPlanAiResponse.AiPlanItemDto> aiItems,
+            List<DailyPlanItem> savedItems) {
+        List<DailyPlanTaskStep> allSteps = new ArrayList<>();
+        for (int itemIndex = 0; itemIndex < aiItems.size(); itemIndex++) {
+            DailyPlanAiResponse.AiPlanItemDto aiItem = aiItems.get(itemIndex);
+            DailyPlanItem savedItem = savedItems.get(itemIndex);
+            if (aiItem.steps() == null || aiItem.steps().isEmpty()) {
+                throw new BusinessException(
+                        ErrorCode.AI_OUTPUT_INVALID,
+                        "An AI-generated Daily Plan task must contain Task Steps.");
+            }
+            List<DailyPlanAiResponse.AiTaskStepDto> orderedSteps = new ArrayList<>(
+                    aiItem.steps());
+            orderedSteps.sort(Comparator.comparing(
+                    DailyPlanAiResponse.AiTaskStepDto::orderIndex));
+
+            List<DailyPlanTaskStep> itemSteps = new ArrayList<>();
+            for (int stepIndex = 0; stepIndex < orderedSteps.size(); stepIndex++) {
+                DailyPlanAiResponse.AiTaskStepDto aiStep = orderedSteps.get(stepIndex);
+                itemSteps.add(DailyPlanTaskStep.create(
+                        savedItem.getId(),
+                        taskStepValidator.normalizeRequiredTitle(aiStep.title()),
+                        taskStepValidator.normalizeOptionalGuidance(aiStep.guidance()),
+                        stepIndex,
+                        aiStep.estimatedMinutes(),
+                        aiStep.required()));
+            }
+            taskStepValidator.validateAll(
+                    itemSteps,
+                    savedItem.getPlannedMinutes(),
+                    savedItem.getTitle());
+            allSteps.addAll(itemSteps);
+        }
+        if (!allSteps.isEmpty()) {
+            taskStepRepository.saveAll(allSteps);
+            taskStepRepository.flush();
+        }
     }
 }

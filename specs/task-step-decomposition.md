@@ -2,10 +2,14 @@
 
 ## Status
 
-Proposed. The current implementation stores a flat list of `DailyPlanItem`
-records. It can turn a Roadmap Learning Unit into a differently worded daily
-task, but it does not yet persist or execute smaller checklist steps beneath
-that task.
+Backend implementation complete. V17 provides version-owned planned Task Steps
+and separate runtime completion state. Owner-scoped manual CRUD, ACTIVE-version
+completion, version cloning, batch-enriched Daily Plan read models,
+activation-time state initialization, and structurally strict AI-generated decomposition are
+implemented. Generated steps use an action enum, a source-grounded scope anchor,
+and a deterministic paraphrase guard; these checks reject ungrounded evidence
+without claiming perfect free-text semantic proof. The accessible Task Step
+editor and checklist presentation remain frontend work.
 
 ## Problem statement
 
@@ -203,11 +207,17 @@ A planned Task Step representation contains:
 - `orderIndex`
 - optional `estimatedMinutes`
 - `required`
+- planned-content `entityVersion`
 - runtime `completed`
 - optional `completedAt`
+- optional runtime `stateVersion`
 
 Mutation requests must not accept owner IDs, Daily Plan IDs, version IDs, or
 parent item IDs in the body when those values are already fixed by the path.
+Planned-content updates carry the expected `entityVersion`; deletion carries it
+as a query parameter. Completion updates carry the last observed `stateVersion`.
+Setting an already-current completion value remains idempotent even when the
+submitted runtime version is stale.
 
 ## AI output contract
 
@@ -225,7 +235,9 @@ items[]
     |-- guidance
     |-- orderIndex
     |-- estimatedMinutes
-    `-- required
+    |-- required
+    |-- actionType
+    `-- scopeAnchor
 ```
 
 Strict server-side validation must verify:
@@ -238,6 +250,12 @@ Strict server-side validation must verify:
 - Step order values can be normalized into a stable contiguous sequence.
 - Step estimates obey the parent time limit.
 - The number of steps is bounded.
+- `actionType` is one of the documented observable actions.
+- `scopeAnchor` is an exact phrase from the referenced Learning Unit context and
+  is used by the step title or guidance.
+- A deterministic similarity guard rejects title-only repetitions and likely
+  paraphrases. This guard verifies grounded evidence; it does not claim to prove
+  arbitrary natural-language semantics.
 
 Malformed AI output follows the existing schema-retry policy: the original
 attempt plus at most two retries. Failure leaves manual Daily Plan and Task Step
@@ -282,7 +300,9 @@ authoring available. No partially validated AI steps are persisted.
   content.
 - The database should enforce parent ownership indirectly through foreign keys
   and enforce unique order positions per Daily Plan Item where practical.
-- Optimistic locking protects concurrent step edits and checkbox updates.
+- Expected planned-content and runtime-state versions protect step edits and
+  checkbox updates from stale-client overwrites. Collection reordering is also
+  serialized through the owning Daily Plan Version lock.
 - Foreign-key deletion behavior must preserve existing Daily Plan and Roadmap
   progress history. A Task Step must never cascade-delete a parent
   `ProgressEntry`.

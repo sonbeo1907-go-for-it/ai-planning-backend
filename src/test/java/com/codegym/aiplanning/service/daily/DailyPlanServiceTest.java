@@ -31,6 +31,8 @@ import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.entity.auth.AccountStatus;
 import com.codegym.aiplanning.repository.daily.DailyPlanItemRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanTaskStepRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanTaskStepStateRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanVersionRepository;
 import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
 import com.codegym.aiplanning.repository.profile.UserProfileRepository;
@@ -38,6 +40,8 @@ import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.daily.impl.DailyPlanServiceImpl;
+import com.codegym.aiplanning.service.daily.step.TaskStepReadModelBuilder;
+import com.codegym.aiplanning.service.daily.step.TaskStepValidator;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -76,6 +80,10 @@ class DailyPlanServiceTest {
     @Mock
     private DailyPlanItemRepository dailyPlanItemRepository;
     @Mock
+    private DailyPlanTaskStepRepository taskStepRepository;
+    @Mock
+    private DailyPlanTaskStepStateRepository taskStepStateRepository;
+    @Mock
     private ProgressEntryRepository progressEntryRepository;
     @Mock
     private UserProfileRepository userProfileRepository;
@@ -109,6 +117,8 @@ class DailyPlanServiceTest {
                 dailyPlanRepository,
                 dailyPlanVersionRepository,
                 dailyPlanItemRepository,
+                taskStepRepository,
+                taskStepStateRepository,
                 progressEntryRepository,
                 userProfileRepository,
                 roadmapRepository,
@@ -119,7 +129,11 @@ class DailyPlanServiceTest {
                 aiGenerator,
                 persistenceService,
                 weakTopicService,
-                roadmapProgressService);
+                roadmapProgressService,
+                new TaskStepReadModelBuilder(
+                        taskStepRepository,
+                        taskStepStateRepository),
+                new TaskStepValidator());
 
         userId = UUID.randomUUID();
         userJwt = Jwt.withTokenValue("mock-token")
@@ -607,7 +621,13 @@ class DailyPlanServiceTest {
                         DailyTaskCategory.PRACTICE,
                         30,
                         null,
-                        null)),
+                        null,
+                        List.of(new DailyPlanAiResponse.AiTaskStepDto(
+                                "Solve one focused exercise",
+                                null,
+                                0,
+                                15,
+                                true)))),
                 List.of());
 
         DailyPlanVersion savedDraft = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.AI_GENERATED, 60, 0);

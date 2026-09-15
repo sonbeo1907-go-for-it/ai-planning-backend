@@ -6,6 +6,7 @@ import com.codegym.aiplanning.entity.daily.DailyTaskStatus;
 import com.codegym.aiplanning.entity.daily.AiAdjustmentAction;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Schema(description = "Daily plan task item details (US-TSK-01-MANUAL)")
@@ -29,10 +30,12 @@ public record DailyPlanItemResponse(
         RoadmapItemReferenceResponse roadmapItem,
         StudyUnitReferenceResponse studyUnit,
         AiAdjustmentAction aiAdjustmentAction,
-        String aiAdjustmentReason
+        String aiAdjustmentReason,
+        List<DailyPlanTaskStepResponse> steps,
+        TaskStepProgressResponse stepProgress
 ) {
     public static DailyPlanItemResponse from(DailyPlanItem item) {
-        return from(item, null, null, null, null);
+        return from(item, null, null, null, null, null);
     }
 
     public static DailyPlanItemResponse from(
@@ -41,6 +44,22 @@ public record DailyPlanItemResponse(
             String roadmapItemTitle,
             UUID parentTopicId,
             String parentTopicTitle) {
+        return from(
+                item,
+                learningUnitId,
+                roadmapItemTitle,
+                parentTopicId,
+                parentTopicTitle,
+                null);
+    }
+
+    public static DailyPlanItemResponse from(
+            DailyPlanItem item,
+            UUID learningUnitId,
+            String roadmapItemTitle,
+            UUID parentTopicId,
+            String parentTopicTitle,
+            DailyPlanTaskStepsResponse taskSteps) {
         return new DailyPlanItemResponse(
                 item.getId(),
                 item.getDailyPlanVersionId(),
@@ -67,7 +86,21 @@ public record DailyPlanItemResponse(
                         : new StudyUnitReferenceResponse(
                                 learningUnitId, roadmapItemTitle),
                 item.getAiAdjustmentAction(),
-                item.getAiAdjustmentReason()
+                item.getAiAdjustmentReason(),
+                taskSteps == null ? List.of() : taskSteps.steps(),
+                taskSteps == null
+                        ? new TaskStepProgressResponse(0, 0, 0.0, false)
+                        : taskSteps.progress()
         );
+    }
+
+    @Override
+    public String toString() {
+        return "DailyPlanItemResponse[id=" + id
+                + ", versionId=" + versionId
+                + ", category=" + category
+                + ", status=" + status
+                + ", stepCount=" + (steps == null ? 0 : steps.size())
+                + ", personalLearningData=<redacted>]";
     }
 }

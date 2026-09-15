@@ -52,7 +52,8 @@ class DailyPlanValidatorTest {
                         DailyTaskCategory.CUSTOM,
                         30,
                         null,
-                        null)),
+                        null,
+                        steps("Complete the custom exercise"))),
                 List.of());
 
         assertThatThrownBy(() -> validator.validateResponse(response, context))
@@ -128,6 +129,85 @@ class DailyPlanValidatorTest {
                 .hasMessageContaining("only as REVIEW");
     }
 
+    @Test
+    void validateResponse_rejectsAiTaskWithoutSteps() {
+        DailyPlanAiResponse.AiPlanItemDto item = new DailyPlanAiResponse.AiPlanItemDto(
+                roadmapItemId,
+                "Practice Spring",
+                null,
+                DailyTaskCategory.PRACTICE,
+                30,
+                null,
+                null,
+                List.of());
+        DailyPlanAiResponse response = new DailyPlanAiResponse(
+                "Plan",
+                List.of(item),
+                List.of());
+
+        assertThatThrownBy(() -> validator.validateResponse(response, context))
+                .isInstanceOf(InvalidAiDailyPlanResponseException.class)
+                .hasMessageContaining("between 1 and 8 Task Steps");
+    }
+
+    @Test
+    void validateResponse_rejectsStepThatRepeatsLearningUnitTitle() {
+        DailyPlanAiResponse.AiPlanItemDto item = new DailyPlanAiResponse.AiPlanItemDto(
+                roadmapItemId,
+                "Practice Spring",
+                null,
+                DailyTaskCategory.PRACTICE,
+                30,
+                null,
+                null,
+                steps("Topic"));
+        DailyPlanAiResponse response = new DailyPlanAiResponse(
+                "Plan",
+                List.of(item),
+                List.of());
+
+        assertThatThrownBy(() -> validator.validateResponse(response, context))
+                .isInstanceOf(InvalidAiDailyPlanResponseException.class)
+                .hasMessageContaining("Learning Unit");
+    }
+
+    @Test
+    void validateResponse_rejectsStepEstimatesAboveParentTaskBudget() {
+        DailyPlanAiResponse.AiPlanItemDto item = new DailyPlanAiResponse.AiPlanItemDto(
+                roadmapItemId,
+                "Practice Spring",
+                null,
+                DailyTaskCategory.PRACTICE,
+                30,
+                null,
+                null,
+                List.of(
+                        new DailyPlanAiResponse.AiTaskStepDto(
+                                "Write one Topic example",
+                                null,
+                                0,
+                                20,
+                                true,
+                                AiTaskStepAction.WRITE,
+                                "Topic"),
+                        new DailyPlanAiResponse.AiTaskStepDto(
+                                "Run Topic tests",
+                                null,
+                                1,
+                                20,
+                                true,
+                                AiTaskStepAction.RUN,
+                                "Topic")));
+        DailyPlanAiResponse response = new DailyPlanAiResponse(
+                "Plan",
+                List.of(item),
+                List.of());
+
+        assertThatThrownBy(() -> validator.validateResponse(response, context))
+                .isInstanceOf(InvalidAiDailyPlanResponseException.class)
+                .hasMessageContaining("parent AI task");
+    }
+
     private DailyPlanAiResponse response(int plannedMinutes, UUID itemId) {
         return new DailyPlanAiResponse(
                 "Plan",
@@ -138,7 +218,8 @@ class DailyPlanValidatorTest {
                         DailyTaskCategory.PRACTICE,
                         plannedMinutes,
                         null,
-                        null)),
+                        null,
+                        steps("Solve one focused exercise"))),
                 List.of());
     }
 
@@ -153,7 +234,19 @@ class DailyPlanValidatorTest {
                 category,
                 plannedMinutes,
                 null,
-                null);
+                null,
+                steps("Complete one focused action for " + title));
+    }
+
+    private List<DailyPlanAiResponse.AiTaskStepDto> steps(String title) {
+        return List.of(new DailyPlanAiResponse.AiTaskStepDto(
+                title,
+                "Apply Topic while completing this action.",
+                0,
+                null,
+                true,
+                AiTaskStepAction.SOLVE,
+                "Topic"));
     }
 
     private DailyPlanningContext context(int availableMinutes) {

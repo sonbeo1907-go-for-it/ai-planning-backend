@@ -62,6 +62,12 @@ public final class ApiConstant {
             DAILY_PLAN_VERSION_BY_ID + "/items";
     public static final String DAILY_PLAN_VERSION_ITEM_BY_ID =
             DAILY_PLAN_VERSION_ITEMS + "/{itemId}";
+    public static final String DAILY_PLAN_ITEM_STEPS =
+            DAILY_PLAN_VERSION_ITEM_BY_ID + "/steps";
+    public static final String DAILY_PLAN_ITEM_STEP_BY_ID =
+            DAILY_PLAN_ITEM_STEPS + "/{stepId}";
+    public static final String DAILY_PLAN_ITEM_STEP_COMPLETION =
+            DAILY_PLAN_ITEM_STEP_BY_ID + "/completion";
     public static final String DAILY_PLAN_ITEM_PROGRESS =
             DAILY_PLAN_BY_ID + "/items/{itemId}/progress";
     public static final String DAILY_PLAN_ITEM_PROGRESS_CORRECTION =

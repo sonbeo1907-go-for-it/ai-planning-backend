@@ -63,7 +63,13 @@ class DailyPlanConstraintEvaluatorTest {
                 DailyTaskCategory.PRACTICE,
                 30,
                 action,
-                action == null ? null : "Continue important unfinished work.");
+                action == null ? null : "Continue important unfinished work.",
+                List.of(new DailyPlanAiResponse.AiTaskStepDto(
+                        "Solve one focused exercise",
+                        null,
+                        0,
+                        15,
+                        true)));
     }
 
     private DailyPlanningContext context() {

@@ -3,6 +3,7 @@ package com.codegym.aiplanning.service.daily.ai;
 import com.codegym.aiplanning.entity.daily.AiAdjustmentAction;
 import com.codegym.aiplanning.entity.daily.DailyTaskCategory;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
@@ -11,6 +12,9 @@ import org.springframework.stereotype.Component;
 public class DailyPlanValidator {
 
     static final int MAX_REVIEW_PERCENT = 30;
+    static final int MAX_TASK_STEPS = 8;
+    private final AiTaskStepQualityValidator stepQualityValidator =
+            new AiTaskStepQualityValidator();
 
     public void validateResponse(DailyPlanAiResponse response, DailyPlanningContext context) {
         Set<UUID> activeRoadmapItemIds = context.roadmap().topics().stream()
@@ -19,11 +23,20 @@ public class DailyPlanValidator {
         Set<UUID> unfinishedIds = context.unfinishedTasks().stream()
                 .map(DailyPlanningContext.UnfinishedTask::dailyPlanItemId)
                 .collect(java.util.stream.Collectors.toSet());
+        Map<UUID, StepReferenceTitles> referenceTitles = context.roadmap().topics().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        DailyPlanningContext.RoadmapTopic::roadmapItemId,
+                        topic -> new StepReferenceTitles(
+                                topic.title(),
+                                topic.description(),
+                                topic.parentTopicTitle())));
         validateResponse(
                 response,
                 context.availableMinutes(),
                 activeRoadmapItemIds,
-                unfinishedIds);
+                unfinishedIds,
+                Set.of(),
+                referenceTitles);
     }
 
     public void validateResponse(DailyPlanAiResponse response, DailyPlanPromptContext context) {
@@ -37,25 +50,20 @@ public class DailyPlanValidator {
                 .filter(DailyPlanPromptContext.RelevantTopic::completed)
                 .map(DailyPlanPromptContext.RelevantTopic::roadmapItemId)
                 .collect(java.util.stream.Collectors.toSet());
+        Map<UUID, StepReferenceTitles> referenceTitles = context.relevantTopics().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        DailyPlanPromptContext.RelevantTopic::roadmapItemId,
+                        topic -> new StepReferenceTitles(
+                                topic.title(),
+                                topic.description(),
+                                topic.parentTopicTitle())));
         validateResponse(
                 response,
                 context.availableMinutes(),
                 suppliedRoadmapItemIds,
                 suppliedUnfinishedIds,
-                completedReviewIds);
-    }
-
-    private void validateResponse(
-            DailyPlanAiResponse response,
-            int availableMinutes,
-            Set<UUID> allowedRoadmapItemIds,
-            Set<UUID> allowedUnfinishedIds) {
-        validateResponse(
-                response,
-                availableMinutes,
-                allowedRoadmapItemIds,
-                allowedUnfinishedIds,
-                Set.of());
+                completedReviewIds,
+                referenceTitles);
     }
 
     private void validateResponse(
@@ -63,7 +71,8 @@ public class DailyPlanValidator {
             int availableMinutes,
             Set<UUID> allowedRoadmapItemIds,
             Set<UUID> allowedUnfinishedIds,
-            Set<UUID> completedReviewIds) {
+            Set<UUID> completedReviewIds,
+            Map<UUID, StepReferenceTitles> referenceTitles) {
         if (response == null
                 || response.summary() == null
                 || response.summary().isBlank()
@@ -115,6 +124,7 @@ public class DailyPlanValidator {
             } else if (item.aiAdjustmentReason() != null && !item.aiAdjustmentReason().isBlank()) {
                 throw invalid("item.aiAdjustmentReason requires an adjustment action.");
             }
+            validateSteps(item, referenceTitles.get(item.roadmapItemId()));
             String itemKey = item.title().trim().toLowerCase(java.util.Locale.ROOT)
                     + "|"
                     + item.roadmapItemId();
@@ -157,6 +167,86 @@ public class DailyPlanValidator {
         }
     }
 
+    private void validateSteps(
+            DailyPlanAiResponse.AiPlanItemDto item,
+            StepReferenceTitles referenceTitles) {
+        if (item.steps() == null
+                || item.steps().isEmpty()
+                || item.steps().size() > MAX_TASK_STEPS) {
+            throw invalid("Each AI Daily Plan item must contain between 1 and 8 Task Steps.");
+        }
+
+        Set<String> normalizedTitles = new HashSet<>();
+        String normalizedItemTitle = normalizeTitle(item.title());
+        String normalizedLearningUnitTitle = referenceTitles == null
+                ? ""
+                : normalizeTitle(referenceTitles.learningUnitTitle());
+        String normalizedParentTopicTitle = referenceTitles == null
+                ? ""
+                : normalizeTitle(referenceTitles.parentTopicTitle());
+        int estimatedTotal = 0;
+        int requiredCount = 0;
+
+        for (DailyPlanAiResponse.AiTaskStepDto step : item.steps()) {
+            if (step == null) {
+                throw invalid("Task Step entries must be JSON objects.");
+            }
+            requireText(step.title(), 255, "step.title");
+            requireOptionalText(step.guidance(), 4000, "step.guidance");
+            if (step.orderIndex() == null || step.orderIndex() < 0) {
+                throw invalid("step.orderIndex must not be negative.");
+            }
+            if (step.estimatedMinutes() != null) {
+                if (step.estimatedMinutes() <= 0
+                        || step.estimatedMinutes() > 1440) {
+                    throw invalid("step.estimatedMinutes must be between 1 and 1440 when present.");
+                }
+                estimatedTotal += step.estimatedMinutes();
+            }
+            if (step.required() == null) {
+                throw invalid("step.required is required.");
+            }
+            if (step.required()) {
+                requiredCount++;
+            }
+
+            String normalizedStepTitle = normalizeTitle(step.title());
+            if (!normalizedTitles.add(normalizedStepTitle)) {
+                throw invalid("Task Step titles must be unique within one AI task.");
+            }
+            if (normalizedStepTitle.equals(normalizedItemTitle)
+                    || (!normalizedLearningUnitTitle.isEmpty()
+                            && normalizedStepTitle.equals(normalizedLearningUnitTitle))
+                    || (!normalizedParentTopicTitle.isEmpty()
+                            && normalizedStepTitle.equals(normalizedParentTopicTitle))) {
+                throw invalid(
+                        "A Task Step must not repeat its task, Learning Unit, or parent Topic title.");
+            }
+            stepQualityValidator.validate(
+                    step,
+                    item.title(),
+                    referenceTitles == null ? null : referenceTitles.learningUnitTitle(),
+                    referenceTitles == null ? null : referenceTitles.learningUnitDescription(),
+                    referenceTitles == null ? null : referenceTitles.parentTopicTitle());
+        }
+
+        if (requiredCount == 0) {
+            throw invalid("An AI task must contain at least one required Task Step.");
+        }
+        if (estimatedTotal > item.plannedMinutes()) {
+            throw invalid("Task Step estimates exceed their parent AI task's planned minutes.");
+        }
+    }
+
+    private String normalizeTitle(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim()
+                .replaceAll("\\s+", " ")
+                .toLowerCase(java.util.Locale.ROOT);
+    }
+
     private void requireText(String value, int maxLength, String field) {
         if (value == null || value.isBlank() || value.trim().length() > maxLength) {
             throw invalid(field + " must be a non-blank string within its length limit.");
@@ -172,4 +262,9 @@ public class DailyPlanValidator {
     private InvalidAiDailyPlanResponseException invalid(String message) {
         return new InvalidAiDailyPlanResponseException(message);
     }
+
+    private record StepReferenceTitles(
+            String learningUnitTitle,
+            String learningUnitDescription,
+            String parentTopicTitle) {}
 }

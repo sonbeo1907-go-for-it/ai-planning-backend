@@ -17,8 +17,35 @@ public record DailyPlanAiResponse(
         DailyTaskCategory category,
         Integer plannedMinutes,
         AiAdjustmentAction aiAdjustmentAction,
-        String aiAdjustmentReason
+        String aiAdjustmentReason,
+        List<AiTaskStepDto> steps
     ) {}
+
+    public record AiTaskStepDto(
+        String title,
+        String guidance,
+        Integer orderIndex,
+        Integer estimatedMinutes,
+        Boolean required,
+        AiTaskStepAction actionType,
+        String scopeAnchor
+    ) {
+        public AiTaskStepDto(
+                String title,
+                String guidance,
+                Integer orderIndex,
+                Integer estimatedMinutes,
+                Boolean required) {
+            this(
+                    title,
+                    guidance,
+                    orderIndex,
+                    estimatedMinutes,
+                    required,
+                    AiTaskStepAction.WRITE,
+                    title);
+        }
+    }
 
     public record AiAdjustmentProposalDto(
         UUID sourceDailyPlanItemId,

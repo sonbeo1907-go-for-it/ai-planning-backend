@@ -23,7 +23,31 @@ public record DailyPlanPromptContext(
         LocalDate previousPlanDate,
         List<UnresolvedTask> unresolvedTasks,
         List<ExplicitWeakTopic> unresolvedWeakTopics,
-        List<TopicSignal> topicSignals) {
+        List<TopicSignal> topicSignals,
+        String locale) {
+
+    public DailyPlanPromptContext(
+            LocalDate targetDate,
+            String timeZone,
+            int availableMinutes,
+            String roadmapTitle,
+            List<RelevantTopic> relevantTopics,
+            LocalDate previousPlanDate,
+            List<UnresolvedTask> unresolvedTasks,
+            List<ExplicitWeakTopic> unresolvedWeakTopics,
+            List<TopicSignal> topicSignals) {
+        this(
+                targetDate,
+                timeZone,
+                availableMinutes,
+                roadmapTitle,
+                relevantTopics,
+                previousPlanDate,
+                unresolvedTasks,
+                unresolvedWeakTopics,
+                topicSignals,
+                "en");
+    }
 
     public record RelevantTopic(
             UUID roadmapItemId,

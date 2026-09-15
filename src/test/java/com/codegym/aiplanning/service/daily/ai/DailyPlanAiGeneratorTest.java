@@ -62,6 +62,10 @@ class DailyPlanAiGeneratorTest {
 
         assertThat(result.response().items()).hasSize(1);
         assertThat(result.response().items().get(0).plannedMinutes()).isEqualTo(60);
+        assertThat(result.response().items().get(0).steps())
+                .singleElement()
+                .extracting(DailyPlanAiResponse.AiTaskStepDto::title)
+                .isEqualTo("Viết và chạy một bài tập Spring");
         verify(aiClientService, times(2)).generateContent(
                 eq(AiPurpose.DAILY_PLAN_GENERATION),
                 anyString(),
@@ -82,6 +86,15 @@ class DailyPlanAiGeneratorTest {
                 .doesNotContain("recentProgress")
                 .doesNotContain("actualResult")
                 .doesNotContain("\"previousPlan\":");
+
+        ArgumentCaptor<String> systemPromptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(aiClientService, times(2)).generateContent(
+                eq(AiPurpose.DAILY_PLAN_GENERATION),
+                systemPromptCaptor.capture(),
+                anyString());
+        assertThat(systemPromptCaptor.getAllValues())
+                .allSatisfy(prompt -> assertThat(prompt)
+                        .contains("using BCP 47 locale en"));
     }
 
     @Test
@@ -150,6 +163,9 @@ class DailyPlanAiGeneratorTest {
                 .contains("30%")
                 .contains("REVIEW")
                 .contains("placed first");
+        assertThat(systemPromptCaptor.getValue())
+                .contains("independently checkable Task Steps")
+                .contains("must not repeat");
 
         assertThat(userPromptCaptor.getValue())
                 .contains("unresolvedWeakTopics")
@@ -253,7 +269,18 @@ class DailyPlanAiGeneratorTest {
                       "category": "REVIEW",
                       "plannedMinutes": 30,
                       "aiAdjustmentAction": null,
-                      "aiAdjustmentReason": null
+                      "aiAdjustmentReason": null,
+                      "steps": [
+                        {
+                          "title": "Giải một câu hỏi xác thực",
+                          "guidance": "Review one Spring authentication scenario.",
+                          "orderIndex": 0,
+                          "estimatedMinutes": 10,
+                          "required": true,
+                          "actionType": "REVIEW",
+                          "scopeAnchor": "Spring"
+                        }
+                      ]
                     },
                     {
                       "roadmapItemId": "%s",
@@ -262,7 +289,18 @@ class DailyPlanAiGeneratorTest {
                       "category": "NEW_MATERIAL",
                       "plannedMinutes": 60,
                       "aiAdjustmentAction": null,
-                      "aiAdjustmentReason": null
+                      "aiAdjustmentReason": null,
+                      "steps": [
+                        {
+                          "title": "Tạo một repository mẫu",
+                          "guidance": "Implement one Spring repository example.",
+                          "orderIndex": 0,
+                          "estimatedMinutes": 20,
+                          "required": true,
+                          "actionType": "IMPLEMENT",
+                          "scopeAnchor": "Spring"
+                        }
+                      ]
                     }
                   ],
                   "adjustments": []
@@ -353,7 +391,18 @@ class DailyPlanAiGeneratorTest {
                       "category": "PRACTICE",
                       "plannedMinutes": %d,
                       "aiAdjustmentAction": null,
-                      "aiAdjustmentReason": null
+                      "aiAdjustmentReason": null,
+                      "steps": [
+                        {
+                          "title": "Viết và chạy một bài tập Spring",
+                          "guidance": "Ghi lại kết quả quan sát được.",
+                          "orderIndex": 0,
+                          "estimatedMinutes": null,
+                          "required": true,
+                          "actionType": "IMPLEMENT",
+                          "scopeAnchor": "Spring"
+                        }
+                      ]
                     }
                   ],
                   "adjustments": []

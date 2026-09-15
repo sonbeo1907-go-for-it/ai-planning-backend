@@ -94,7 +94,8 @@ public class DailyPlanPromptContextBuilder {
                 aggregateTopicSignals(
                         source.recentProgress(),
                         latestOutcomes,
-                        selectedTopicIds));
+                        selectedTopicIds),
+                source.locale());
     }
 
     private Map<UUID, DailyPlanningContext.RoadmapTopic> activeTopics(

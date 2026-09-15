@@ -22,6 +22,8 @@ import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapVersionRepository;
+import com.codegym.aiplanning.repository.profile.UserProfileRepository;
+import com.codegym.aiplanning.entity.profile.UserProfile;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext.PreviousPlan;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext.ProgressSignal;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext.LatestTopicOutcome;
@@ -56,6 +58,7 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
     private final RoadmapVersionRepository roadmapVersionRepository;
     private final RoadmapItemRepository roadmapItemRepository;
     private final WeakTopicContextResolver weakTopicContextResolver;
+    private final UserProfileRepository userProfileRepository;
 
     public DatabasePlanningContextBuilder(
             DailyPlanRepository dailyPlanRepository,
@@ -65,7 +68,8 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
             RoadmapRepository roadmapRepository,
             RoadmapVersionRepository roadmapVersionRepository,
             RoadmapItemRepository roadmapItemRepository,
-            WeakTopicContextResolver weakTopicContextResolver) {
+            WeakTopicContextResolver weakTopicContextResolver,
+            UserProfileRepository userProfileRepository) {
         this.dailyPlanRepository = dailyPlanRepository;
         this.dailyPlanVersionRepository = dailyPlanVersionRepository;
         this.dailyPlanItemRepository = dailyPlanItemRepository;
@@ -74,6 +78,7 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
         this.roadmapVersionRepository = roadmapVersionRepository;
         this.roadmapItemRepository = roadmapItemRepository;
         this.weakTopicContextResolver = weakTopicContextResolver;
+        this.userProfileRepository = userProfileRepository;
     }
 
     @Override
@@ -115,6 +120,10 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
         List<UnfinishedTask> unfinishedTasks = previousPlan == null
                 ? List.of()
                 : previousPlan.unfinishedTasks();
+        String locale = userProfileRepository.findByUserId(userId)
+                .map(UserProfile::getLocale)
+                .filter(value -> !value.isBlank())
+                .orElse(UserProfile.DEFAULT_LOCALE);
 
         return new DailyPlanningContext(
                 plan.getId(),
@@ -128,7 +137,8 @@ public class DatabasePlanningContextBuilder implements PlanningContextBuilder {
                 unfinishedTasks,
                 progressContext.weaknessSignals(),
                 unresolvedWeakTopics,
-                previousPlan);
+                previousPlan,
+                locale);
     }
 
     private RoadmapContext buildRoadmapContext(

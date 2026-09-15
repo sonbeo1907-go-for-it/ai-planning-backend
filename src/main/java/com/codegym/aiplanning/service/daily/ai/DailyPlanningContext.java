@@ -19,7 +19,8 @@ public record DailyPlanningContext(
         List<UnfinishedTask> unfinishedTasks,
         List<WeaknessSignal> weaknessSignals,
         List<WeakTopicPromptContext> unresolvedWeakTopics,
-        PreviousPlan previousPlan) {
+        PreviousPlan previousPlan,
+        String locale) {
 
     public DailyPlanningContext {
         if (recentProgress == null) {
@@ -37,6 +38,38 @@ public record DailyPlanningContext(
         if (unresolvedWeakTopics == null) {
             unresolvedWeakTopics = List.of();
         }
+        if (locale == null || locale.isBlank()) {
+            locale = "en";
+        }
+    }
+
+    public DailyPlanningContext(
+            UUID dailyPlanId,
+            UUID userId,
+            LocalDate targetDate,
+            String timeZone,
+            int availableMinutes,
+            RoadmapContext roadmap,
+            List<ProgressSignal> recentProgress,
+            List<LatestTopicOutcome> latestTopicOutcomes,
+            List<UnfinishedTask> unfinishedTasks,
+            List<WeaknessSignal> weaknessSignals,
+            List<WeakTopicPromptContext> unresolvedWeakTopics,
+            PreviousPlan previousPlan) {
+        this(
+                dailyPlanId,
+                userId,
+                targetDate,
+                timeZone,
+                availableMinutes,
+                roadmap,
+                recentProgress,
+                latestTopicOutcomes,
+                unfinishedTasks,
+                weaknessSignals,
+                unresolvedWeakTopics,
+                previousPlan,
+                "en");
     }
 
     public DailyPlanningContext(
@@ -62,7 +95,8 @@ public record DailyPlanningContext(
                 unfinishedTasks,
                 weaknessSignals,
                 List.of(),
-                previousPlan);
+                previousPlan,
+                "en");
     }
 
     public record RoadmapContext(

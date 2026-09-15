@@ -25,7 +25,16 @@ public class AiPlanParser {
             "category",
             "plannedMinutes",
             "aiAdjustmentAction",
-            "aiAdjustmentReason");
+            "aiAdjustmentReason",
+            "steps");
+    private static final Set<String> STEP_FIELDS = Set.of(
+            "title",
+            "guidance",
+            "orderIndex",
+            "estimatedMinutes",
+            "required",
+            "actionType",
+            "scopeAnchor");
     private static final Set<String> ADJUSTMENT_FIELDS = Set.of(
             "sourceDailyPlanItemId",
             "title",
@@ -41,11 +50,22 @@ public class AiPlanParser {
             JsonNode root = objectMapper.readTree(rawJson);
             requireObjectWithExactFields(root, ROOT_FIELDS, "daily plan");
             requireText(root, "summary", "daily plan");
-            requireArray(root, "items", ITEM_FIELDS, "item");
+            requireItems(root);
             requireArray(root, "adjustments", ADJUSTMENT_FIELDS, "adjustment");
             return objectMapper.treeToValue(root, DailyPlanAiResponse.class);
         } catch (JsonProcessingException exception) {
             throw invalid("The AI response is not valid Daily Plan JSON.");
+        }
+    }
+
+    private void requireItems(JsonNode root) {
+        JsonNode items = root.get("items");
+        if (items == null || !items.isArray()) {
+            throw invalid("daily plan.items must be an array.");
+        }
+        for (JsonNode item : items) {
+            requireObjectWithExactFields(item, ITEM_FIELDS, "item");
+            requireArray(item, "steps", STEP_FIELDS, "step");
         }
     }
 

@@ -19,6 +19,7 @@ import com.codegym.aiplanning.entity.daily.DailyTaskCategory;
 import com.codegym.aiplanning.entity.daily.DailyTaskStatus;
 import com.codegym.aiplanning.entity.daily.ProgressEntry;
 import com.codegym.aiplanning.entity.daily.ProgressEntryStatus;
+import com.codegym.aiplanning.entity.profile.UserProfile;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
@@ -28,6 +29,7 @@ import com.codegym.aiplanning.repository.daily.DailyPlanItemRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanVersionRepository;
 import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
+import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapVersionRepository;
@@ -64,6 +66,8 @@ class DatabasePlanningContextBuilderTest {
     private RoadmapItemRepository roadmapItemRepository;
     @Mock
     private WeakTopicContextResolver weakTopicContextResolver;
+    @Mock
+    private UserProfileRepository userProfileRepository;
 
     private DatabasePlanningContextBuilder builder;
 
@@ -77,7 +81,8 @@ class DatabasePlanningContextBuilderTest {
                 roadmapRepository,
                 roadmapVersionRepository,
                 roadmapItemRepository,
-                weakTopicContextResolver);
+                weakTopicContextResolver,
+                userProfileRepository);
     }
 
     @Test
@@ -98,6 +103,8 @@ class DatabasePlanningContextBuilderTest {
                 UserRole.USER,
                 AccountStatus.ACTIVE);
         ReflectionTestUtils.setField(user, "id", userId);
+        UserProfile profile = UserProfile.create(user, "Owner");
+        profile.update(null, null, "vi-VN", null);
 
         Roadmap roadmap = Roadmap.manualDraft(user, "Java Backend", null);
         ReflectionTestUtils.setField(roadmap, "id", roadmapId);
@@ -197,6 +204,8 @@ class DatabasePlanningContextBuilderTest {
 
         when(dailyPlanRepository.findByIdAndUserId(targetPlanId, userId))
                 .thenReturn(Optional.of(targetPlan));
+        when(userProfileRepository.findByUserId(userId))
+                .thenReturn(Optional.of(profile));
         when(roadmapRepository.findByIdAndOwnerId(roadmapId, userId))
                 .thenReturn(Optional.of(roadmap));
         when(roadmapVersionRepository.findByIdAndRoadmapId(
@@ -252,6 +261,7 @@ class DatabasePlanningContextBuilderTest {
         DailyPlanningContext context = builder.buildContext(targetPlanId, userId);
 
         assertThat(context.availableMinutes()).isEqualTo(90);
+        assertThat(context.locale()).isEqualTo("vi-VN");
         assertThat(context.roadmap().activeVersionId()).isEqualTo(activeRoadmapVersionId);
         assertThat(context.roadmap().topics()).extracting(DailyPlanningContext.RoadmapTopic::roadmapItemId)
                 .containsExactly(authenticationUnit.getId(), authorizationUnit.getId());

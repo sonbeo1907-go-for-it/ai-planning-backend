@@ -13,11 +13,14 @@ import com.codegym.aiplanning.entity.daily.DailyPlanVersion;
 import com.codegym.aiplanning.entity.daily.DailyPlanVersionOrigin;
 import com.codegym.aiplanning.entity.daily.DailyPlanVersionStatus;
 import com.codegym.aiplanning.entity.daily.DailyTaskCategory;
+import com.codegym.aiplanning.entity.daily.DailyPlanTaskStep;
 import com.codegym.aiplanning.repository.daily.DailyPlanItemRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanTaskStepRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanVersionRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanAiResponse;
+import com.codegym.aiplanning.service.daily.step.TaskStepValidator;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -40,6 +43,8 @@ class DailyPlanPersistenceServiceImplTest {
     @Mock
     private DailyPlanItemRepository dailyPlanItemRepository;
     @Mock
+    private DailyPlanTaskStepRepository taskStepRepository;
+    @Mock
     private AuditLogService auditLogService;
 
     private DailyPlanPersistenceServiceImpl persistenceService;
@@ -56,6 +61,8 @@ class DailyPlanPersistenceServiceImplTest {
                 dailyPlanRepository,
                 dailyPlanVersionRepository,
                 dailyPlanItemRepository,
+                taskStepRepository,
+                new TaskStepValidator(),
                 auditLogService);
 
         userId = UUID.randomUUID();
@@ -68,6 +75,18 @@ class DailyPlanPersistenceServiceImplTest {
 
         activeVersion = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 0);
         ReflectionTestUtils.setField(activeVersion, "id", activeVersionId);
+
+        org.mockito.Mockito.lenient()
+                .when(dailyPlanItemRepository.saveAll(any()))
+                .thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            List<DailyPlanItem> items = invocation.getArgument(0);
+            items.forEach(item -> ReflectionTestUtils.setField(
+                    item,
+                    "id",
+                    UUID.randomUUID()));
+            return items;
+                });
     }
 
     @Test
@@ -89,7 +108,7 @@ class DailyPlanPersistenceServiceImplTest {
         });
 
         List<DailyPlanAiResponse.AiPlanItemDto> aiItems = List.of(
-                new DailyPlanAiResponse.AiPlanItemDto(UUID.randomUUID(), "T1", null, DailyTaskCategory.CUSTOM, 20, null, null)
+                aiItem()
         );
 
         DailyPlanVersion result = persistenceService.persistAiGeneratedDraft(
@@ -128,7 +147,7 @@ class DailyPlanPersistenceServiceImplTest {
         });
 
         List<DailyPlanAiResponse.AiPlanItemDto> aiItems = List.of(
-                new DailyPlanAiResponse.AiPlanItemDto(UUID.randomUUID(), "T1", null, DailyTaskCategory.CUSTOM, 20, null, null)
+                aiItem()
         );
 
         DailyPlanVersion result = persistenceService.persistAiGeneratedDraft(
@@ -151,6 +170,14 @@ class DailyPlanPersistenceServiceImplTest {
         DailyPlanItem savedItem = itemCaptor.getValue().get(0);
         assertThat(savedItem.getTitle()).isEqualTo("T1");
         assertThat(savedItem.getPlannedMinutes()).isEqualTo(20);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<DailyPlanTaskStep>> stepCaptor = ArgumentCaptor.forClass(List.class);
+        verify(taskStepRepository).saveAll(stepCaptor.capture());
+        DailyPlanTaskStep savedStep = stepCaptor.getValue().get(0);
+        assertThat(savedStep.getDailyPlanItemId()).isEqualTo(savedItem.getId());
+        assertThat(savedStep.getTitle()).isEqualTo("Solve one focused exercise");
+        assertThat(savedStep.getOrderIndex()).isZero();
     }
 
     @Test
@@ -171,5 +198,22 @@ class DailyPlanPersistenceServiceImplTest {
                         List.of()))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("available-time budget");
+    }
+
+    private DailyPlanAiResponse.AiPlanItemDto aiItem() {
+        return new DailyPlanAiResponse.AiPlanItemDto(
+                UUID.randomUUID(),
+                "T1",
+                null,
+                DailyTaskCategory.PRACTICE,
+                20,
+                null,
+                null,
+                List.of(new DailyPlanAiResponse.AiTaskStepDto(
+                        "Solve one focused exercise",
+                        null,
+                        0,
+                        10,
+                        true)));
     }
 }
