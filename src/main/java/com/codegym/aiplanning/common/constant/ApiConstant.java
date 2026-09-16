@@ -121,6 +121,9 @@ public final class ApiConstant {
     public static final String AI_EXECUTIONS = API_V1 + "/ai-executions";
     public static final String AI_EXECUTION_BY_ID = "/{executionId}";
     public static final String MATERIALS = API_V1 + "/materials";
+    public static final String REPORTS = API_V1 + "/reports";
+    public static final String DASHBOARD = "/dashboard";
+    public static final String REPORTS_DASHBOARD = REPORTS + DASHBOARD;
 
     private ApiConstant() {}
 }
