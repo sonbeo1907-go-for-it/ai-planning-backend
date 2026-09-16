@@ -44,4 +44,11 @@ public interface DailyPlanRepository extends JpaRepository<DailyPlan, UUID> {
 
     List<DailyPlan> findByUserIdAndRoadmapIdAndPlanDateBeforeOrderByPlanDateDesc(
             UUID userId, UUID roadmapId, LocalDate planDate);
+
+    @Query(value = "SELECT DISTINCT p.plan_date FROM daily_plans p "
+            + "JOIN daily_plan_versions v ON v.daily_plan_id = p.id "
+            + "JOIN daily_plan_items i ON i.daily_plan_version_id = v.id "
+            + "WHERE p.user_id = :userId AND i.status = 'COMPLETED' AND i.removed_at IS NULL",
+            nativeQuery = true)
+    List<java.sql.Date> findCompletedPlanDatesNative(@Param("userId") UUID userId);
 }
