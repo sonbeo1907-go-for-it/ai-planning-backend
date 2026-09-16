@@ -44,7 +44,11 @@ class V2FoundationMigrationTest {
                     "roadmap_items",
                     "ai_providers",
                     "ai_provider_credentials",
-                    "ai_provider_configs");
+                    "ai_provider_configs",
+                    "task_guidances",
+                    "task_guidance_revisions",
+                    "task_step_guidances",
+                    "task_guidance_references");
             assertThat(tables).doesNotContain("courses", "modules", "classes");
 
             UUID userId = UUID.randomUUID();

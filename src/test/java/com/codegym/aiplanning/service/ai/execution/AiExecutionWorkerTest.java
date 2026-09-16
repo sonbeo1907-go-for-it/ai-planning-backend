@@ -26,6 +26,7 @@ import com.codegym.aiplanning.service.daily.DailyPlanService;
 import com.codegym.aiplanning.service.roadmap.AiRoadmapGeneratorService;
 import com.codegym.aiplanning.service.evaluation.DailyEvaluationService;
 import com.codegym.aiplanning.service.evaluation.WeakTopicService;
+import com.codegym.aiplanning.service.guidance.TaskGuidanceGenerationService;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -65,6 +66,9 @@ class AiExecutionWorkerTest {
     @Mock
     private WeakTopicService weakTopicService;
 
+    @Mock
+    private TaskGuidanceGenerationService taskGuidanceGenerationService;
+
     private AiExecutionWorker worker;
     private UUID executionId;
     private UUID ownerId;
@@ -82,7 +86,8 @@ class AiExecutionWorkerTest {
                 auditLogService,
                 transactionTemplate,
                 dailyEvaluationService,
-                weakTopicService);
+                weakTopicService,
+                taskGuidanceGenerationService);
         executionId = UUID.randomUUID();
         ownerId = UUID.randomUUID();
         roadmapId = UUID.randomUUID();
@@ -268,6 +273,70 @@ class AiExecutionWorkerTest {
                 any(Instant.class));
         verify(dailyEvaluationService, never())
                 .generateDailyQuizWithProviderConfig(any(), any(), any());
+    }
+
+    @Test
+    void dailyPlanItemExecutionPublishesTaskGuidanceRevision() {
+        UUID revisionId = UUID.randomUUID();
+        when(execution.getTargetType()).thenReturn(AiExecutionTargetType.DAILY_PLAN_ITEM);
+        prepareClaimedExecution();
+        when(taskGuidanceGenerationService.generate(
+                        executionId,
+                        ownerId,
+                        roadmapId,
+                        AiExecutionOperation.GENERATE,
+                        null,
+                        providerConfig))
+                .thenReturn(revisionId);
+
+        worker.executeAsync(executionId);
+
+        verify(taskGuidanceGenerationService).generate(
+                executionId,
+                ownerId,
+                roadmapId,
+                AiExecutionOperation.GENERATE,
+                null,
+                providerConfig);
+        verify(execution).markSucceeded(
+                eq(AiExecutionResultType.TASK_GUIDANCE_REVISION),
+                eq(revisionId),
+                any(Instant.class));
+        verify(auditLogService).logAction(
+                ownerId,
+                "user@example.com",
+                AuditEventAction.TASK_GUIDANCE_GENERATED,
+                "TaskGuidanceRevision",
+                revisionId.toString());
+    }
+
+    @Test
+    void taskGuidanceFailureIsAuditedWithoutPersonalPromptContent() {
+        when(execution.getTargetType()).thenReturn(AiExecutionTargetType.DAILY_PLAN_ITEM);
+        prepareClaimedExecution();
+        when(taskGuidanceGenerationService.generate(
+                        executionId,
+                        ownerId,
+                        roadmapId,
+                        AiExecutionOperation.GENERATE,
+                        null,
+                        providerConfig))
+                .thenThrow(new BusinessException(
+                        ErrorCode.AI_OUTPUT_INVALID,
+                        "raw provider response with personal task content"));
+
+        worker.executeAsync(executionId);
+
+        verify(execution).markFailed(
+                eq(ErrorCode.AI_OUTPUT_INVALID.name()),
+                eq("The AI provider returned invalid Task Guidance."),
+                any(Instant.class));
+        verify(auditLogService).logAction(
+                ownerId,
+                "user@example.com",
+                AuditEventAction.TASK_GUIDANCE_GENERATION_FAILED,
+                "AiExecution",
+                executionId.toString());
     }
 
     private void prepareClaimedExecution() {

@@ -25,6 +25,8 @@ import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.roadmap.impl.AiRoadmapPersistenceService;
 import com.codegym.aiplanning.service.evaluation.impl.DailyEvaluationPersistenceService;
 import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
+import com.codegym.aiplanning.repository.guidance.TaskGuidanceRepository;
+import com.codegym.aiplanning.service.guidance.TaskGuidanceContextBuilder;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -46,6 +48,8 @@ public class AiExecutionServiceImpl implements AiExecutionService {
     private final AuditLogService auditLogService;
     private final DailyEvaluationPersistenceService evaluationPersistenceService;
     private final WeakTopicRepository weakTopicRepository;
+    private final TaskGuidanceContextBuilder taskGuidanceContextBuilder;
+    private final TaskGuidanceRepository taskGuidanceRepository;
 
     public AiExecutionServiceImpl(
             AiExecutionRepository executionRepository,
@@ -56,7 +60,9 @@ public class AiExecutionServiceImpl implements AiExecutionService {
             DailyPlanRepository dailyPlanRepository,
             AuditLogService auditLogService,
             DailyEvaluationPersistenceService evaluationPersistenceService,
-            WeakTopicRepository weakTopicRepository) {
+            WeakTopicRepository weakTopicRepository,
+            TaskGuidanceContextBuilder taskGuidanceContextBuilder,
+            TaskGuidanceRepository taskGuidanceRepository) {
         this.executionRepository = executionRepository;
         this.inputRepository = inputRepository;
         this.userAccountRepository = userAccountRepository;
@@ -66,6 +72,8 @@ public class AiExecutionServiceImpl implements AiExecutionService {
         this.auditLogService = auditLogService;
         this.evaluationPersistenceService = evaluationPersistenceService;
         this.weakTopicRepository = weakTopicRepository;
+        this.taskGuidanceContextBuilder = taskGuidanceContextBuilder;
+        this.taskGuidanceRepository = taskGuidanceRepository;
     }
 
     @Override
@@ -294,6 +302,64 @@ public class AiExecutionServiceImpl implements AiExecutionService {
         return AiExecutionResponse.from(execution);
     }
 
+    @Override
+    @Transactional
+    public AiExecutionResponse submitTaskGuidanceGeneration(
+            UUID ownerId,
+            UUID dailyPlanId,
+            UUID dailyPlanVersionId,
+            UUID dailyPlanItemId,
+            String idempotencyKey) {
+        return submitTaskGuidance(
+                ownerId,
+                dailyPlanId,
+                dailyPlanVersionId,
+                dailyPlanItemId,
+                null,
+                AiExecutionOperation.GENERATE,
+                idempotencyKey);
+    }
+
+    @Override
+    @Transactional
+    public AiExecutionResponse submitTaskGuidanceRegeneration(
+            UUID ownerId,
+            UUID dailyPlanId,
+            UUID dailyPlanVersionId,
+            UUID dailyPlanItemId,
+            String adjustmentInstruction,
+            String idempotencyKey) {
+        return submitTaskGuidance(
+                ownerId,
+                dailyPlanId,
+                dailyPlanVersionId,
+                dailyPlanItemId,
+                normalizePrompt(adjustmentInstruction),
+                AiExecutionOperation.REGENERATE,
+                idempotencyKey);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AiExecutionResponse getLatestTaskGuidanceExecution(
+            UUID ownerId,
+            UUID dailyPlanId,
+            UUID dailyPlanVersionId,
+            UUID dailyPlanItemId) {
+        taskGuidanceContextBuilder.requireOwnedItem(
+                ownerId,
+                dailyPlanId,
+                dailyPlanVersionId,
+                dailyPlanItemId);
+        return AiExecutionResponse.from(executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.DAILY_PLAN_ITEM,
+                        dailyPlanItemId,
+                        AiPurpose.TASK_GUIDANCE_GENERATION)
+                .orElseThrow(this::notFound));
+    }
+
     private AiExecutionResponse submit(
             UUID ownerId,
             UUID roadmapId,
@@ -427,6 +493,88 @@ public class AiExecutionServiceImpl implements AiExecutionService {
         return AiExecutionResponse.from(execution);
     }
 
+    private AiExecutionResponse submitTaskGuidance(
+            UUID ownerId,
+            UUID dailyPlanId,
+            UUID dailyPlanVersionId,
+            UUID dailyPlanItemId,
+            String adjustmentInstruction,
+            AiExecutionOperation operation,
+            String idempotencyKey) {
+        taskGuidanceContextBuilder.requireOwnedItem(
+                ownerId,
+                dailyPlanId,
+                dailyPlanVersionId,
+                dailyPlanItemId);
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        if (normalizedKey != null) {
+            AiExecution existing = findMatchingIdempotentExecution(
+                    ownerId,
+                    normalizedKey,
+                    AiExecutionTargetType.DAILY_PLAN_ITEM,
+                    dailyPlanItemId,
+                    AiPurpose.TASK_GUIDANCE_GENERATION,
+                    operation);
+            if (existing != null) {
+                return AiExecutionResponse.from(existing);
+            }
+        }
+
+        boolean guidanceExists = taskGuidanceRepository
+                .findByDailyPlanItemIdAndOwnerId(dailyPlanItemId, ownerId)
+                .isPresent();
+        if (operation == AiExecutionOperation.GENERATE && guidanceExists) {
+            throw new BusinessException(
+                    ErrorCode.CONFLICT,
+                    "Task Guidance already exists; use regeneration.");
+        }
+        if (operation == AiExecutionOperation.REGENERATE && !guidanceExists) {
+            throw new BusinessException(
+                    ErrorCode.TASK_GUIDANCE_NOT_FOUND,
+                    "Task Guidance was not found.");
+        }
+
+        AiExecution active = executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.DAILY_PLAN_ITEM,
+                        dailyPlanItemId,
+                        AiPurpose.TASK_GUIDANCE_GENERATION,
+                        ACTIVE_STATUSES)
+                .orElse(null);
+        if (active != null) {
+            return AiExecutionResponse.from(active);
+        }
+
+        UserAccount owner = userAccountRepository.findById(ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.AUTHENTICATION_REQUIRED,
+                        "The authenticated account is unavailable."));
+        AiProviderConfig providerConfig = providerSelector.requireDefault(
+                AiPurpose.TASK_GUIDANCE_GENERATION);
+        AiExecution execution = executionRepository.saveAndFlush(AiExecution.queue(
+                owner,
+                providerConfig,
+                AiPurpose.TASK_GUIDANCE_GENERATION,
+                operation,
+                AiExecutionTargetType.DAILY_PLAN_ITEM,
+                dailyPlanItemId,
+                normalizedKey));
+        if (adjustmentInstruction != null) {
+            inputRepository.save(AiExecutionInput.create(
+                    execution.getId(),
+                    adjustmentInstruction,
+                    Instant.now()));
+        }
+        auditLogService.logAction(
+                ownerId,
+                owner.getEmail(),
+                AuditEventAction.TASK_GUIDANCE_GENERATION_QUEUED,
+                "AiExecution",
+                execution.getId().toString());
+        return AiExecutionResponse.from(execution);
+    }
+
     private AiExecution findMatchingIdempotentExecution(
             UUID ownerId,
             String idempotencyKey,
@@ -468,7 +616,13 @@ public class AiExecutionServiceImpl implements AiExecutionService {
         if (adjustmentPrompt == null || adjustmentPrompt.isBlank()) {
             return null;
         }
-        return adjustmentPrompt.trim();
+        String normalized = adjustmentPrompt.trim();
+        if (normalized.length() > 1000) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Adjustment instruction must not exceed 1000 characters.");
+        }
+        return normalized;
     }
 
     private BusinessException notFound() {

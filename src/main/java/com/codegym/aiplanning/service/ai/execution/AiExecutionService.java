@@ -44,4 +44,25 @@ public interface AiExecutionService {
             UUID ownerId,
             UUID weakTopicId,
             String idempotencyKey);
+
+    AiExecutionResponse submitTaskGuidanceGeneration(
+            UUID ownerId,
+            UUID dailyPlanId,
+            UUID dailyPlanVersionId,
+            UUID dailyPlanItemId,
+            String idempotencyKey);
+
+    AiExecutionResponse submitTaskGuidanceRegeneration(
+            UUID ownerId,
+            UUID dailyPlanId,
+            UUID dailyPlanVersionId,
+            UUID dailyPlanItemId,
+            String adjustmentInstruction,
+            String idempotencyKey);
+
+    AiExecutionResponse getLatestTaskGuidanceExecution(
+            UUID ownerId,
+            UUID dailyPlanId,
+            UUID dailyPlanVersionId,
+            UUID dailyPlanItemId);
 }

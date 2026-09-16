@@ -33,6 +33,8 @@ import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.roadmap.impl.AiRoadmapPersistenceService;
 import com.codegym.aiplanning.service.evaluation.impl.DailyEvaluationPersistenceService;
 import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
+import com.codegym.aiplanning.repository.guidance.TaskGuidanceRepository;
+import com.codegym.aiplanning.service.guidance.TaskGuidanceContextBuilder;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -75,6 +77,12 @@ class AiExecutionServiceImplTest {
     @Mock
     private WeakTopicRepository weakTopicRepository;
 
+    @Mock
+    private TaskGuidanceContextBuilder taskGuidanceContextBuilder;
+
+    @Mock
+    private TaskGuidanceRepository taskGuidanceRepository;
+
     private AiExecutionServiceImpl service;
     private UUID ownerId;
     private UUID roadmapId;
@@ -92,7 +100,9 @@ class AiExecutionServiceImplTest {
                 dailyPlanRepository,
                 auditLogService,
                 evaluationPersistenceService,
-                weakTopicRepository);
+                weakTopicRepository,
+                taskGuidanceContextBuilder,
+                taskGuidanceRepository);
         ownerId = UUID.randomUUID();
         roadmapId = UUID.randomUUID();
         owner = org.mockito.Mockito.mock(UserAccount.class);
@@ -362,6 +372,55 @@ class AiExecutionServiceImplTest {
         assertEquals(ErrorCode.CONFLICT, exception.errorCode());
         verify(providerSelector, never()).requireDefault(any());
         verify(executionRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void taskGuidanceGenerationQueuesAnOwnerScopedItemExecution() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID executionId = UUID.randomUUID();
+        when(taskGuidanceContextBuilder.requireOwnedItem(
+                        ownerId,
+                        planId,
+                        versionId,
+                        itemId))
+                .thenReturn(org.mockito.Mockito.mock(
+                        com.codegym.aiplanning.entity.daily.DailyPlanItem.class));
+        when(taskGuidanceRepository.findByDailyPlanItemIdAndOwnerId(itemId, ownerId))
+                .thenReturn(Optional.empty());
+        when(executionRepository
+                        .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                                ownerId,
+                                AiExecutionTargetType.DAILY_PLAN_ITEM,
+                                itemId,
+                                AiPurpose.TASK_GUIDANCE_GENERATION,
+                                List.of(AiExecutionStatus.QUEUED, AiExecutionStatus.RUNNING)))
+                .thenReturn(Optional.empty());
+        when(userAccountRepository.findById(ownerId)).thenReturn(Optional.of(owner));
+        when(owner.getEmail()).thenReturn("user@example.com");
+        when(providerSelector.requireDefault(AiPurpose.TASK_GUIDANCE_GENERATION))
+                .thenReturn(providerConfig);
+        when(executionRepository.saveAndFlush(any(AiExecution.class)))
+                .thenAnswer(invocation -> persistedExecution(
+                        invocation.getArgument(0), executionId));
+
+        AiExecutionResponse response = service.submitTaskGuidanceGeneration(
+                ownerId,
+                planId,
+                versionId,
+                itemId,
+                "guidance-request-1");
+
+        assertEquals(AiPurpose.TASK_GUIDANCE_GENERATION, response.purpose());
+        assertEquals(AiExecutionTargetType.DAILY_PLAN_ITEM, response.targetType());
+        assertEquals(itemId, response.targetId());
+        verify(auditLogService).logAction(
+                ownerId,
+                "user@example.com",
+                AuditEventAction.TASK_GUIDANCE_GENERATION_QUEUED,
+                "AiExecution",
+                executionId.toString());
     }
 
     private AiExecution persistedExecution(AiExecution execution, UUID executionId) {

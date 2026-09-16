@@ -16,6 +16,7 @@ import com.codegym.aiplanning.service.roadmap.AiRoadmapGeneratorService;
 import com.codegym.aiplanning.service.daily.DailyPlanService;
 import com.codegym.aiplanning.service.evaluation.DailyEvaluationService;
 import com.codegym.aiplanning.service.evaluation.WeakTopicService;
+import com.codegym.aiplanning.service.guidance.TaskGuidanceGenerationService;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -39,6 +40,7 @@ public class AiExecutionWorker {
     private final TransactionTemplate transactionTemplate;
     private final DailyEvaluationService dailyEvaluationService;
     private final WeakTopicService weakTopicService;
+    private final TaskGuidanceGenerationService taskGuidanceGenerationService;
 
     public AiExecutionWorker(
             AiExecutionRepository executionRepository,
@@ -48,7 +50,8 @@ public class AiExecutionWorker {
             AuditLogService auditLogService,
             TransactionTemplate transactionTemplate,
             DailyEvaluationService dailyEvaluationService,
-            WeakTopicService weakTopicService) {
+            WeakTopicService weakTopicService,
+            TaskGuidanceGenerationService taskGuidanceGenerationService) {
         this.executionRepository = executionRepository;
         this.inputRepository = inputRepository;
         this.roadmapGeneratorService = roadmapGeneratorService;
@@ -57,6 +60,7 @@ public class AiExecutionWorker {
         this.transactionTemplate = transactionTemplate;
         this.dailyEvaluationService = dailyEvaluationService;
         this.weakTopicService = weakTopicService;
+        this.taskGuidanceGenerationService = taskGuidanceGenerationService;
     }
 
     @Async("aiGenerationExecutor")
@@ -73,7 +77,7 @@ public class AiExecutionWorker {
             completeWithFailure(
                     context,
                     exception.errorCode().name(),
-                    sanitizedMessage(exception));
+                    safeFailureMessage(context, exception));
         } catch (RuntimeException exception) {
             logUnexpectedFailure(context.executionId(), exception);
             completeWithFailure(
@@ -84,6 +88,18 @@ public class AiExecutionWorker {
     }
 
     private GenerationResult execute(JobContext context) {
+        if (context.targetType() == AiExecutionTargetType.DAILY_PLAN_ITEM) {
+            UUID revisionId = taskGuidanceGenerationService.generate(
+                    context.executionId(),
+                    context.ownerId(),
+                    context.targetId(),
+                    context.operation(),
+                    context.adjustmentPrompt(),
+                    context.providerConfig());
+            return new GenerationResult(
+                    AiExecutionResultType.TASK_GUIDANCE_REVISION,
+                    revisionId);
+        }
         if (context.targetType() == AiExecutionTargetType.WEAK_TOPIC) {
             UUID quizId = weakTopicService.generateMasteryCheckQuizWithProviderConfig(
                     context.ownerId(),
@@ -170,6 +186,18 @@ public class AiExecutionWorker {
                     AuditEventAction.AI_EXECUTION_SUCCEEDED,
                     "AiExecution",
                     context.executionId().toString());
+            if (context.targetType() == AiExecutionTargetType.DAILY_PLAN_ITEM) {
+                AuditEventAction action = context.operation()
+                                == AiExecutionOperation.REGENERATE
+                        ? AuditEventAction.TASK_GUIDANCE_REGENERATED
+                        : AuditEventAction.TASK_GUIDANCE_GENERATED;
+                auditLogService.logAction(
+                        context.ownerId(),
+                        context.ownerEmail(),
+                        action,
+                        "TaskGuidanceRevision",
+                        resultId.toString());
+            }
         });
     }
 
@@ -195,6 +223,14 @@ public class AiExecutionWorker {
                     AuditEventAction.AI_EXECUTION_FAILED,
                     "AiExecution",
                     context.executionId().toString());
+            if (context.targetType() == AiExecutionTargetType.DAILY_PLAN_ITEM) {
+                auditLogService.logAction(
+                        context.ownerId(),
+                        context.ownerEmail(),
+                        AuditEventAction.TASK_GUIDANCE_GENERATION_FAILED,
+                        "AiExecution",
+                        context.executionId().toString());
+            }
         });
     }
 
@@ -204,6 +240,21 @@ public class AiExecutionWorker {
             return "AI execution failed.";
         }
         return message.length() <= 500 ? message : message.substring(0, 500);
+    }
+
+    private String safeFailureMessage(
+            JobContext context,
+            BusinessException exception) {
+        if (context.targetType() != AiExecutionTargetType.DAILY_PLAN_ITEM) {
+            return sanitizedMessage(exception);
+        }
+        return switch (exception.errorCode()) {
+            case AI_PROVIDER_UNAVAILABLE ->
+                    "The AI provider is currently unavailable.";
+            case AI_OUTPUT_INVALID ->
+                    "The AI provider returned invalid Task Guidance.";
+            default -> "Task Guidance generation failed.";
+        };
     }
 
     private void logUnexpectedFailure(UUID executionId, RuntimeException exception) {

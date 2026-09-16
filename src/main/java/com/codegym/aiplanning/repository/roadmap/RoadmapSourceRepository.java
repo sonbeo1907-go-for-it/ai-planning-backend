@@ -25,4 +25,20 @@ public interface RoadmapSourceRepository extends JpaRepository<RoadmapSource, UU
             order by link.createdAt
             """)
     List<RoadmapSource> findByRoadmapId(@Param("roadmapId") UUID roadmapId);
+
+    @Query("""
+            select link
+            from RoadmapSource link
+            join link.roadmap roadmap
+            left join fetch link.learningSource source
+            left join fetch link.material material
+            where roadmap.id = :roadmapId
+              and roadmap.owner.id = :ownerId
+              and (source.id is null or source.owner.id = :ownerId)
+              and (material.id is null or material.user.id = :ownerId)
+            order by link.createdAt
+            """)
+    List<RoadmapSource> findOwnedByRoadmapId(
+            @Param("roadmapId") UUID roadmapId,
+            @Param("ownerId") UUID ownerId);
 }

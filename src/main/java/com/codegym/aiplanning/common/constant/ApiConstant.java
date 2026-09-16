@@ -68,6 +68,16 @@ public final class ApiConstant {
             DAILY_PLAN_ITEM_STEPS + "/{stepId}";
     public static final String DAILY_PLAN_ITEM_STEP_COMPLETION =
             DAILY_PLAN_ITEM_STEP_BY_ID + "/completion";
+    public static final String DAILY_PLAN_ITEM_GUIDANCE =
+            DAILY_PLAN_VERSION_ITEM_BY_ID + "/guidance";
+    public static final String DAILY_PLAN_ITEM_GUIDANCE_BY_REVISION =
+            DAILY_PLAN_ITEM_GUIDANCE + "/{revisionId}";
+    public static final String DAILY_PLAN_ITEM_GUIDANCE_GENERATE =
+            DAILY_PLAN_ITEM_GUIDANCE + "/generate";
+    public static final String DAILY_PLAN_ITEM_GUIDANCE_REGENERATE =
+            DAILY_PLAN_ITEM_GUIDANCE + "/regenerate";
+    public static final String DAILY_PLAN_ITEM_GUIDANCE_CURRENT_EXECUTION =
+            DAILY_PLAN_ITEM_GUIDANCE + "/execution/current";
     public static final String DAILY_PLAN_ITEM_PROGRESS =
             DAILY_PLAN_BY_ID + "/items/{itemId}/progress";
     public static final String DAILY_PLAN_ITEM_PROGRESS_CORRECTION =
