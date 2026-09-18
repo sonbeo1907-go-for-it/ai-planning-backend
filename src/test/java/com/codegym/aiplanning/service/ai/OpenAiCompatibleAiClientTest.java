@@ -50,6 +50,9 @@ class OpenAiCompatibleAiClientTest {
     private OpenAiCompatibleAiClient client;
     private HttpServer server;
     private final AtomicReference<String> requestBody = new AtomicReference<>();
+    private final AtomicReference<String> responseContent =
+            new AtomicReference<>("{\"choices\":[{\"message\":{\"content\":\"{}\"}}]}");
+    private long serverSleepMs = 0L;
 
     @BeforeEach
     void setUp() {
@@ -171,11 +174,59 @@ class OpenAiCompatibleAiClientTest {
         return providerConfig;
     }
 
+    @Test
+    void extractsUsageWhenReturnedByProvider() throws IOException {
+        responseContent.set("{\"choices\":[{\"message\":{\"content\":\"{}\"}}],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":45,\"total_tokens\":165}}");
+        String baseUrl = startProviderServer();
+        AiProvider aiProvider = provider("OPENAI", baseUrl);
+        AiProviderConfig openAiConfig = config(aiProvider);
+        UUID providerId = UUID.randomUUID();
+        when(aiProvider.getId()).thenReturn(providerId);
+        when(credentialSelector.findFirstAvailable(providerId))
+                .thenReturn(Optional.of(new ResolvedAiCredential(null, "test-secret")));
+
+        try {
+            client.generateContent(openAiConfig, "System prompt", "User prompt");
+            com.codegym.aiplanning.service.ai.provider.AiUsage usage =
+                    com.codegym.aiplanning.service.ai.provider.AiUsageHolder.getAndClear();
+            assertThat(usage).isNotNull();
+            assertThat(usage.inputTokens()).isEqualTo(120);
+            assertThat(usage.outputTokens()).isEqualTo(45);
+        } finally {
+            com.codegym.aiplanning.service.ai.provider.AiUsageHolder.clear();
+        }
+    }
+
+    @Test
+    void throwsAiTimeoutWhenProviderExceedsTimeout() throws IOException {
+        serverSleepMs = 2000L;
+        String baseUrl = startProviderServer();
+        AiProvider aiProvider = provider("OPENAI", baseUrl);
+        AiProviderConfig openAiConfig = config(aiProvider);
+        when(openAiConfig.getTimeoutSeconds()).thenReturn(1);
+        UUID providerId = UUID.randomUUID();
+        when(aiProvider.getId()).thenReturn(providerId);
+        when(credentialSelector.findFirstAvailable(providerId))
+                .thenReturn(Optional.of(new ResolvedAiCredential(null, "test-secret")));
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> client.generateContent(openAiConfig, "System prompt", "User prompt"));
+
+        assertThat(exception.errorCode()).isEqualTo(ErrorCode.AI_TIMEOUT);
+    }
+
     private void respond(HttpExchange exchange) throws IOException {
+        if (serverSleepMs > 0) {
+            try {
+                Thread.sleep(serverSleepMs);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        }
         requestBody.set(new String(
                 exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-        byte[] response = "{\"choices\":[{\"message\":{\"content\":\"{}\"}}]}"
-                .getBytes(StandardCharsets.UTF_8);
+        byte[] response = responseContent.get().getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.sendResponseHeaders(200, response.length);
         exchange.getResponseBody().write(response);

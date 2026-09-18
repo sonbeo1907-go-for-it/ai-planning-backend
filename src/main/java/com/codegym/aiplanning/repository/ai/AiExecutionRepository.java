@@ -1,5 +1,6 @@
 package com.codegym.aiplanning.repository.ai;
 
+import com.codegym.aiplanning.controller.admin.ai.dto.AiExecutionAnalyticsResponse;
 import com.codegym.aiplanning.entity.ai.AiExecution;
 import com.codegym.aiplanning.entity.ai.AiExecutionStatus;
 import com.codegym.aiplanning.entity.ai.AiExecutionTargetType;
@@ -76,4 +77,26 @@ public interface AiExecutionRepository extends JpaRepository<AiExecution, UUID> 
                and lease_expires_at < :now
             """, nativeQuery = true)
     int requeueExpired(@Param("now") Instant now);
+
+    @Query("""
+            select new com.codegym.aiplanning.controller.admin.ai.dto.AiExecutionAnalyticsResponse(
+                a.providerConfig.provider.displayName,
+                a.providerConfig.model,
+                a.operation,
+                count(a),
+                sum(case when a.status = com.codegym.aiplanning.entity.ai.AiExecutionStatus.SUCCEEDED then 1L else 0L end),
+                sum(case when a.status = com.codegym.aiplanning.entity.ai.AiExecutionStatus.FAILED then 1L else 0L end),
+                sum(case when a.status = com.codegym.aiplanning.entity.ai.AiExecutionStatus.TIMEOUT then 1L else 0L end),
+                avg(a.latencyMs),
+                sum(a.inputTokens),
+                sum(a.outputTokens)
+            )
+            from AiExecution a
+            where a.startedAt >= :from and a.startedAt < :to
+            group by a.providerConfig.provider.displayName, a.providerConfig.model, a.operation
+            order by a.providerConfig.provider.displayName asc, a.providerConfig.model asc, a.operation asc
+            """)
+    List<AiExecutionAnalyticsResponse> aggregateAnalytics(
+            @Param("from") Instant from,
+            @Param("to") Instant to);
 }
