@@ -99,6 +99,42 @@ class DashboardReportControllerIntegrationTest {
                 .andExpect(jsonPath("$.data.studyTime.totalStudyHours").value(0.8));
     }
 
+    @Test
+    void getKnowledgeMap_unauthenticated_returnsUnauthorized() throws Exception {
+        mockMvc.perform(get(ApiConstant.REPORTS_KNOWLEDGE_MAP))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void getKnowledgeMap_authenticated_returnsKnowledgeMapData() throws Exception {
+        UserAccount user = createUser("kmap-user", "Knowledge Learner");
+        String accessToken = login(user.getEmail());
+
+        mockMvc.perform(get(ApiConstant.REPORTS_KNOWLEDGE_MAP)
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalMilestones").value(0))
+                .andExpect(jsonPath("$.data.masteredTopics").value(0))
+                .andExpect(jsonPath("$.data.milestones").isArray());
+    }
+
+    @Test
+    void getWeakTopicsTimeline_unauthenticated_returnsUnauthorized() throws Exception {
+        mockMvc.perform(get(ApiConstant.REPORTS_WEAK_TOPICS_TIMELINE))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void getWeakTopicsTimeline_authenticated_returnsTimelineList() throws Exception {
+        UserAccount user = createUser("weak-user", "Weak Learner");
+        String accessToken = login(user.getEmail());
+
+        mockMvc.perform(get(ApiConstant.REPORTS_WEAK_TOPICS_TIMELINE)
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isArray());
+    }
+
     private UserAccount createUser(String prefix, String displayName) {
         String email = prefix + "-" + UUID.randomUUID() + "@example.com";
         UserAccount user = UserAccount.create(

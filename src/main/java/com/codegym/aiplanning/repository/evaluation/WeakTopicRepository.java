@@ -63,4 +63,18 @@ public interface WeakTopicRepository extends JpaRepository<WeakTopic, UUID> {
             @Param("userId") UUID userId,
             @Param("roadmapVersionId") UUID roadmapVersionId,
             @Param("statuses") Collection<WeakTopicStatus> statuses);
+
+    @Query("""
+            SELECT DISTINCT wt FROM WeakTopic wt
+            JOIN FETCH wt.roadmap roadmap
+            JOIN FETCH wt.roadmapItem item
+            LEFT JOIN FETCH item.parent parent
+            LEFT JOIN FETCH parent.parent milestone
+            WHERE wt.user.id = :userId
+              AND (:roadmapId IS NULL OR wt.roadmap.id = :roadmapId)
+            ORDER BY wt.masteredAt DESC NULLS LAST, wt.unresolvedAt DESC
+            """)
+    List<WeakTopic> findWithContextByUserIdAndOptionalRoadmapId(
+            @Param("userId") UUID userId,
+            @Param("roadmapId") UUID roadmapId);
 }

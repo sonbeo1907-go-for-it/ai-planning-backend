@@ -134,6 +134,10 @@ public final class ApiConstant {
     public static final String REPORTS = API_V1 + "/reports";
     public static final String DASHBOARD = "/dashboard";
     public static final String REPORTS_DASHBOARD = REPORTS + DASHBOARD;
+    public static final String KNOWLEDGE_MAP = "/knowledge-map";
+    public static final String REPORTS_KNOWLEDGE_MAP = REPORTS + KNOWLEDGE_MAP;
+    public static final String WEAK_TOPICS_TIMELINE = "/weak-topics-timeline";
+    public static final String REPORTS_WEAK_TOPICS_TIMELINE = REPORTS + WEAK_TOPICS_TIMELINE;
 
     private ApiConstant() {}
 }
