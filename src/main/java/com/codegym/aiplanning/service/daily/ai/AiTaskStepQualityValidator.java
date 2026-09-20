@@ -16,12 +16,15 @@ import java.util.stream.Collectors;
  */
 public class AiTaskStepQualityValidator {
 
-    private static final int MAX_SCOPE_ANCHOR_LENGTH = 160;
+    private final LearningUnitAnchorMatcher anchorMatcher = new LearningUnitAnchorMatcher();
     private static final double PARAPHRASE_CONTAINMENT_THRESHOLD = 0.80;
     private static final Set<String> ACTION_WORDS = Set.of(
             "write", "implement", "compare", "explain", "solve", "run", "read", "review", "summarize",
             "study", "learn", "use", "viet", "cai", "xay", "so", "giai", "chay", "doc", "on", "tom",
             "hoc", "dung");
+    private static final Set<String> CONCRETE_ACTION_WORDS = Set.of(
+            "write", "implement", "compare", "explain", "solve", "run", "read", "review", "summarize",
+            "viet", "cai", "xay", "so", "giai", "chay", "doc", "tom");
     private static final Set<String> IGNORED_WORDS = Set.of(
             "a", "an", "the", "to", "of", "with", "and", "or", "for", "in", "on", "using",
             "mot", "cac", "cua", "va", "voi", "cho", "trong", "bang", "su", "dung");
@@ -35,46 +38,47 @@ public class AiTaskStepQualityValidator {
         if (step.actionType() == null) {
             throw invalid("step.actionType is required.");
         }
-        String anchor = normalize(step.scopeAnchor());
-        if (anchor.isBlank() || step.scopeAnchor().trim().length() > MAX_SCOPE_ANCHOR_LENGTH) {
-            throw invalid("step.scopeAnchor must be a short, non-blank source phrase.");
+        if (!anchorMatcher.validLength(step.scopeAnchor())) {
+            throw invalid(
+                    "step.scopeAnchor must be a short, meaningful source phrase.",
+                    DailyPlanValidationReason.STEP_ANCHOR_MISSING);
         }
 
         boolean hasCurriculumContext = !normalize(learningUnitTitle).isBlank()
-                || !normalize(learningUnitDescription).isBlank()
-                || !normalize(parentTopicTitle).isBlank();
-        String referenceScope = hasCurriculumContext
-                ? normalize(String.join(
-                        " ",
-                        safe(learningUnitTitle),
-                        safe(learningUnitDescription),
-                        safe(parentTopicTitle)))
-                : normalize(parentTaskTitle);
-        if (!referenceScope.contains(anchor)) {
-            throw invalid("A Task Step scope anchor is outside its supplied Learning Unit context.");
+                || !normalize(learningUnitDescription).isBlank();
+        String referenceTitle = hasCurriculumContext ? learningUnitTitle : parentTaskTitle;
+        String referenceDescription = hasCurriculumContext ? learningUnitDescription : null;
+        if (!anchorMatcher.belongsToLearningUnit(
+                step.scopeAnchor(), referenceTitle, referenceDescription)) {
+            throw invalid(
+                    "A Task Step scope anchor is outside its supplied Learning Unit context.",
+                    DailyPlanValidationReason.STEP_ANCHOR_OUTSIDE_UNIT);
         }
 
-        String stepContent = normalize(String.join(
-                " ",
-                safe(step.title()),
-                safe(step.guidance())));
-        if (!stepContent.contains(anchor)) {
-            throw invalid("A Task Step must use its source-grounded scope anchor.");
+        if (!anchorMatcher.usedInStep(
+                step.scopeAnchor(), step.title(), step.guidance())) {
+            throw invalid(
+                    "A Task Step must use its source-grounded scope anchor.",
+                    DailyPlanValidationReason.STEP_ANCHOR_UNUSED);
         }
 
         rejectLikelyParaphrase(
-                step.title(), parentTaskTitle, step.scopeAnchor(), "parent task");
+                step.title(), step.guidance(), parentTaskTitle, step.scopeAnchor(), "parent task");
         rejectLikelyParaphrase(
-                step.title(), learningUnitTitle, step.scopeAnchor(), "Learning Unit");
+                step.title(), step.guidance(), learningUnitTitle, step.scopeAnchor(), "Learning Unit");
         rejectLikelyParaphrase(
-                step.title(), parentTopicTitle, step.scopeAnchor(), "parent Topic");
+                step.title(), step.guidance(), parentTopicTitle, step.scopeAnchor(), "parent Topic");
     }
 
     private void rejectLikelyParaphrase(
             String stepTitle,
+            String stepGuidance,
             String referenceTitle,
             String scopeAnchor,
             String label) {
+        if (normalize(stepTitle).equals(normalize(referenceTitle))) {
+            throw invalid("A Task Step must not repeat or merely rename its " + label + ".");
+        }
         Set<String> stepTokens = new HashSet<>(meaningfulTokens(stepTitle));
         Set<String> referenceTokens = new HashSet<>(meaningfulTokens(referenceTitle));
         Set<String> anchorTokens = tokens(scopeAnchor);
@@ -89,9 +93,19 @@ public class AiTaskStepQualityValidator {
                 / (double) Math.min(stepTokens.size(), referenceTokens.size());
         boolean hasLittleNewInformation =
                 stepTokens.size() <= referenceTokens.size() + 1;
-        if (containment >= PARAPHRASE_CONTAINMENT_THRESHOLD && hasLittleNewInformation) {
+        if (containment >= PARAPHRASE_CONTAINMENT_THRESHOLD
+                && hasLittleNewInformation
+                && !hasConcreteGuidance(stepGuidance, referenceTitle)) {
             throw invalid("A Task Step must not repeat or merely rename its " + label + ".");
         }
+    }
+
+    private boolean hasConcreteGuidance(String guidance, String referenceTitle) {
+        Set<String> guidanceTokens = tokens(guidance);
+        boolean hasAction = guidanceTokens.stream().anyMatch(CONCRETE_ACTION_WORDS::contains);
+        Set<String> newDetails = new HashSet<>(meaningfulTokens(guidance));
+        newDetails.removeAll(meaningfulTokens(referenceTitle));
+        return hasAction && newDetails.size() >= 2;
     }
 
     private Set<String> meaningfulTokens(String value) {
@@ -125,11 +139,12 @@ public class AiTaskStepQualityValidator {
                 .replaceAll("\\s+", " ");
     }
 
-    private String safe(String value) {
-        return value == null ? "" : value;
-    }
-
     private InvalidAiDailyPlanResponseException invalid(String message) {
         return new InvalidAiDailyPlanResponseException(message);
+    }
+
+    private InvalidAiDailyPlanResponseException invalid(
+            String message, DailyPlanValidationReason reason) {
+        return new InvalidAiDailyPlanResponseException(message, reason);
     }
 }

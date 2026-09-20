@@ -2,7 +2,9 @@ package com.codegym.aiplanning.service.daily.ai;
 
 import com.codegym.aiplanning.entity.daily.AiAdjustmentAction;
 import com.codegym.aiplanning.entity.daily.DailyTaskCategory;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -87,7 +89,10 @@ public class DailyPlanValidator {
         int totalMinutes = 0;
         int reviewCount = 0;
         int reviewMinutes = 0;
-        for (DailyPlanAiResponse.AiPlanItemDto item : response.items()) {
+        List<InvalidAiDailyPlanResponseException.StepLocation> anchorFailures =
+                new ArrayList<>();
+        for (int itemIndex = 0; itemIndex < response.items().size(); itemIndex++) {
+            DailyPlanAiResponse.AiPlanItemDto item = response.items().get(itemIndex);
             requireText(item.title(), 255, "item.title");
             requireOptionalText(item.description(), 4000, "item.description");
             if (item.plannedMinutes() == null
@@ -124,7 +129,11 @@ public class DailyPlanValidator {
             } else if (item.aiAdjustmentReason() != null && !item.aiAdjustmentReason().isBlank()) {
                 throw invalid("item.aiAdjustmentReason requires an adjustment action.");
             }
-            validateSteps(item, referenceTitles.get(item.roadmapItemId()));
+            validateSteps(
+                    item,
+                    referenceTitles.get(item.roadmapItemId()),
+                    itemIndex,
+                    anchorFailures);
             String itemKey = item.title().trim().toLowerCase(java.util.Locale.ROOT)
                     + "|"
                     + item.roadmapItemId();
@@ -132,6 +141,13 @@ public class DailyPlanValidator {
                 throw invalid("AI response contains a duplicate planned item.");
             }
             totalMinutes += item.plannedMinutes();
+        }
+
+        if (!anchorFailures.isEmpty()) {
+            throw new InvalidAiDailyPlanResponseException(
+                    "AI Task Step scope validation failed.",
+                    anchorFailures.get(0).reason(),
+                    anchorFailures);
         }
 
         if (totalMinutes > availableMinutes) {
@@ -169,7 +185,9 @@ public class DailyPlanValidator {
 
     private void validateSteps(
             DailyPlanAiResponse.AiPlanItemDto item,
-            StepReferenceTitles referenceTitles) {
+            StepReferenceTitles referenceTitles,
+            int itemIndex,
+            List<InvalidAiDailyPlanResponseException.StepLocation> anchorFailures) {
         if (item.steps() == null
                 || item.steps().isEmpty()
                 || item.steps().size() > MAX_TASK_STEPS) {
@@ -187,7 +205,8 @@ public class DailyPlanValidator {
         int estimatedTotal = 0;
         int requiredCount = 0;
 
-        for (DailyPlanAiResponse.AiTaskStepDto step : item.steps()) {
+        for (int stepIndex = 0; stepIndex < item.steps().size(); stepIndex++) {
+            DailyPlanAiResponse.AiTaskStepDto step = item.steps().get(stepIndex);
             if (step == null) {
                 throw invalid("Task Step entries must be JSON objects.");
             }
@@ -222,12 +241,22 @@ public class DailyPlanValidator {
                 throw invalid(
                         "A Task Step must not repeat its task, Learning Unit, or parent Topic title.");
             }
-            stepQualityValidator.validate(
-                    step,
-                    item.title(),
-                    referenceTitles == null ? null : referenceTitles.learningUnitTitle(),
-                    referenceTitles == null ? null : referenceTitles.learningUnitDescription(),
-                    referenceTitles == null ? null : referenceTitles.parentTopicTitle());
+            try {
+                stepQualityValidator.validate(
+                        step,
+                        item.title(),
+                        referenceTitles == null ? null : referenceTitles.learningUnitTitle(),
+                        referenceTitles == null ? null : referenceTitles.learningUnitDescription(),
+                        referenceTitles == null ? null : referenceTitles.parentTopicTitle());
+            } catch (InvalidAiDailyPlanResponseException exception) {
+                if (!exception.reason().isStepAnchorFailure()) {
+                    throw exception;
+                }
+                if (anchorFailures.size() < 5) {
+                    anchorFailures.add(new InvalidAiDailyPlanResponseException.StepLocation(
+                            itemIndex, stepIndex, exception.reason()));
+                }
+            }
         }
 
         if (requiredCount == 0) {

@@ -50,6 +50,8 @@ class OpenAiCompatibleAiClientTest {
     private OpenAiCompatibleAiClient client;
     private HttpServer server;
     private final AtomicReference<String> requestBody = new AtomicReference<>();
+    private final AtomicReference<String> providerResponse = new AtomicReference<>(
+            "{\"choices\":[{\"message\":{\"content\":\"{}\"}}]}");
 
     @BeforeEach
     void setUp() {
@@ -136,6 +138,23 @@ class OpenAiCompatibleAiClientTest {
         assertThat(request.has("thinking")).isFalse();
     }
 
+    @Test
+    void distinguishesOutputTokenTruncationFromInvalidDailyPlanJson() throws Exception {
+        String baseUrl = startProviderServer();
+        AiProvider deepSeek = provider("DEEPSEEK", baseUrl);
+        AiProviderConfig deepSeekConfig = config(deepSeek);
+        UUID providerId = UUID.randomUUID();
+        when(deepSeek.getId()).thenReturn(providerId);
+        when(credentialSelector.findFirstAvailable(providerId))
+                .thenReturn(Optional.of(new ResolvedAiCredential(null, "test-secret")));
+        providerResponse.set("{\"choices\":[{\"finish_reason\":\"length\",\"message\":{\"content\":\"{partial\"}}]}");
+
+        BusinessException failure = assertThrows(BusinessException.class,
+                () -> client.generateContent(deepSeekConfig, "System prompt", "User prompt"));
+        assertThat(failure.errorCode()).isEqualTo(ErrorCode.AI_GENERATION_FAILED);
+        assertThat(failure.getMessage()).contains("output-token limit").doesNotContain("partial");
+    }
+
     @AfterEach
     void stopServer() {
         if (server != null) {
@@ -174,8 +193,7 @@ class OpenAiCompatibleAiClientTest {
     private void respond(HttpExchange exchange) throws IOException {
         requestBody.set(new String(
                 exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-        byte[] response = "{\"choices\":[{\"message\":{\"content\":\"{}\"}}]}"
-                .getBytes(StandardCharsets.UTF_8);
+        byte[] response = providerResponse.get().getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.sendResponseHeaders(200, response.length);
         exchange.getResponseBody().write(response);

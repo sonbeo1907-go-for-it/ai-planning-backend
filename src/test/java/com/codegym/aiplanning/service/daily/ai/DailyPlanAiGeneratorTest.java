@@ -76,6 +76,10 @@ class DailyPlanAiGeneratorTest {
                 eq(AiPurpose.DAILY_PLAN_GENERATION),
                 anyString(),
                 promptCaptor.capture());
+        assertThat(promptCaptor.getAllValues().get(1))
+                .contains("DAILY_BUDGET")
+                .contains("Reduce the sum of plannedMinutes");
+        assertThat(promptCaptor.getAllValues().get(0)).doesNotContain("RETRY_NOTICE");
         assertThat(promptCaptor.getAllValues().get(0))
                 .contains("relevantTopics")
                 .contains("unresolvedTasks")
@@ -114,6 +118,70 @@ class DailyPlanAiGeneratorTest {
                 eq(AiPurpose.DAILY_PLAN_GENERATION),
                 anyString(),
                 anyString());
+        ArgumentCaptor<String> retryPrompts = ArgumentCaptor.forClass(String.class);
+        verify(aiClientService, times(3)).generateContent(
+                eq(AiPurpose.DAILY_PLAN_GENERATION), anyString(), retryPrompts.capture());
+        assertThat(retryPrompts.getAllValues().get(1))
+                .contains("JSON_FORMAT")
+                .contains("Return one complete JSON object");
+    }
+
+    @Test
+    void generate_retriesStepScopeFailureWithSafeSpecificGuidance() {
+        when(aiClientService.generateContent(
+                        eq(AiPurpose.DAILY_PLAN_GENERATION), anyString(), anyString()))
+                .thenReturn(responseJson(60)
+                        .replace("Spring", "Kubernetes")
+                        .replace("\"scopeAnchor\": \"Kubernetes\"",
+                                "\"scopeAnchor\": \"Spring\""))
+                .thenReturn(responseJson(60));
+
+        generator.generate(context(60));
+
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(aiClientService, times(2)).generateContent(
+                eq(AiPurpose.DAILY_PLAN_GENERATION), anyString(), prompts.capture());
+        assertThat(prompts.getAllValues().get(1))
+                .contains("STEP_ANCHOR_UNUSED")
+                .contains("items[0].steps[0]")
+                .contains("Include scopeAnchor in the step title or guidance")
+                .doesNotContain("Kubernetes");
+    }
+
+    @Test
+    void generate_repairsTransientAnchorWhenStepAlreadyNamesItsLearningUnit() {
+        when(aiClientService.generateContent(
+                        eq(AiPurpose.DAILY_PLAN_GENERATION), anyString(), anyString()))
+                .thenReturn(responseJson(60).replace("\"scopeAnchor\": \"Spring\"",
+                        "\"scopeAnchor\": \"wrong anchor\""));
+
+        DailyPlanAiGenerator.GeneratedDailyPlan result = generator.generate(context(60));
+
+        DailyPlanAiResponse.AiTaskStepDto step = result.response().items().get(0).steps().get(0);
+        assertThat(step.scopeAnchor()).isEqualTo("Spring");
+        assertThat(step.title()).contains("Spring");
+        verify(aiClientService, times(1)).generateContent(
+                eq(AiPurpose.DAILY_PLAN_GENERATION), anyString(), anyString());
+
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(aiClientService).generateContent(
+                eq(AiPurpose.DAILY_PLAN_GENERATION), anyString(), prompts.capture());
+        assertThat(prompts.getValue()).contains("anchorCandidates");
+    }
+
+    @Test
+    void generate_doesNotRetryProviderOutputTokenTruncationWithSameConfiguration() {
+        when(aiClientService.generateContent(
+                        eq(AiPurpose.DAILY_PLAN_GENERATION), anyString(), anyString()))
+                .thenThrow(new BusinessException(ErrorCode.AI_GENERATION_FAILED,
+                        "The AI provider stopped at its configured output-token limit."));
+
+        assertThatThrownBy(() -> generator.generate(context(60)))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).errorCode())
+                .isEqualTo(ErrorCode.AI_GENERATION_FAILED);
+        verify(aiClientService, times(1)).generateContent(
+                eq(AiPurpose.DAILY_PLAN_GENERATION), anyString(), anyString());
     }
 
     @Test

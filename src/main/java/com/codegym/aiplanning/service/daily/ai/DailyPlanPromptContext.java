@@ -2,6 +2,7 @@ package com.codegym.aiplanning.service.daily.ai;
 
 import com.codegym.aiplanning.entity.daily.DailyTaskStatus;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -74,6 +75,12 @@ public record DailyPlanPromptContext(
                     estimatedMinutes,
                     priority,
                     completed);
+        }
+
+        /** Bounded examples from this Learning Unit only; never from the parent Topic. */
+        @JsonProperty("anchorCandidates")
+        public List<String> anchorCandidates() {
+            return new LearningUnitAnchorMatcher().promptCandidates(title, description);
         }
     }
 

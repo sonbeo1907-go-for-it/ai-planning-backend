@@ -8,6 +8,7 @@ import com.codegym.aiplanning.service.ai.AiClientService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Locale;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -23,6 +24,7 @@ public class DailyPlanAiGenerator {
     private final DailyPlanValidator validator;
     private final DailyPlanConstraintEvaluator evaluator;
     private final DailyPlanPromptContextBuilder promptContextBuilder;
+    private final DailyPlanAnchorRepairer anchorRepairer = new DailyPlanAnchorRepairer();
     private final ObjectMapper objectMapper;
 
     public DailyPlanAiGenerator(
@@ -52,8 +54,9 @@ public class DailyPlanAiGenerator {
                 context.locale());
         String userPrompt = buildUserPrompt(promptContext);
 
+        InvalidAiDailyPlanResponseException previousFailure = null;
         for (int attempt = 0; attempt <= MAX_SCHEMA_RETRIES; attempt++) {
-            String retryUserPrompt = retryPrompt(userPrompt, attempt);
+            String retryUserPrompt = retryPrompt(userPrompt, previousFailure);
             String rawResponse = providerConfig == null
                     ? aiClientService.generateContent(
                             AiPurpose.DAILY_PLAN_GENERATION,
@@ -64,7 +67,8 @@ public class DailyPlanAiGenerator {
                             systemPrompt,
                             retryUserPrompt);
             try {
-                DailyPlanAiResponse response = parser.parse(rawResponse);
+                DailyPlanAiResponse response = anchorRepairer.repair(
+                        parser.parse(rawResponse), promptContext);
                 validator.validateResponse(response, promptContext);
                 DailyPlanConstraintEvaluator.EvaluationResult evaluation =
                         evaluator.evaluate(response, context);
@@ -72,16 +76,19 @@ public class DailyPlanAiGenerator {
                         response,
                         evaluation.requiresUserDecision());
             } catch (InvalidAiDailyPlanResponseException exception) {
+                previousFailure = exception;
                 log.warn(
-                        "AI Daily Plan schema validation failed on attempt {} for Daily Plan {}.",
+                        "AI Daily Plan validation failed on attempt {} for Daily Plan {}: reason={}, stepLocations={}.",
                         attempt + 1,
-                        context.dailyPlanId());
+                        context.dailyPlanId(),
+                        exception.reason(),
+                        exception.stepLocations());
             }
         }
 
         throw new BusinessException(
                 ErrorCode.AI_OUTPUT_INVALID,
-                "The AI provider did not return a valid in-budget Daily Plan after three attempts.");
+                "The AI provider did not return a valid Daily Plan after three attempts. You can create a manual draft.");
     }
 
     private String buildSystemPrompt(int availableMinutes, String locale) {
@@ -104,9 +111,13 @@ public class DailyPlanAiGenerator {
                 the session combines multiple actions. Each step must describe an observable action
                 such as write, implement, compare, explain, solve, run, read, review, or summarize. A step
                 must not repeat or merely rename the task title, Learning Unit title, or parent Topic.
-                Set actionType to the matching uppercase action. Set scopeAnchor to a short exact
-                phrase copied from that Learning Unit's title or description, and use that phrase in
-                the step title or guidance. Never use an anchor taken only from another curriculum unit.
+                Set actionType to the matching uppercase action. Each relevantTopics entry includes
+                anchorCandidates selected from its own Learning Unit. Choose a short scopeAnchor
+                from those candidates when possible and include the same phrase in the step title
+                or guidance. The phrase must also occur in the referenced Learning Unit title or
+                description. Never use an anchor taken only from the parent Topic or another unit.
+                A step with meaningful guidance and a concrete new
+                action may reuse Learning Unit vocabulary; copying only its title is not enough.
                 Step estimates are part of the parent task budget and their sum must not exceed
                 plannedMinutes. At least one step must be required.
 
@@ -121,7 +132,8 @@ public class DailyPlanAiGenerator {
                 items. Put tasks that should be rescheduled or dropped in adjustments instead of
                 today's items.
 
-                The sum of items[].plannedMinutes MUST be at most %d. If all desirable work cannot
+                The sum of items[].plannedMinutes MUST be at most %d. REVIEW minutes MUST be at
+                most %d. If all desirable work cannot
                 fit, keep today's items within the limit and add SPLIT, RESCHEDULE, or DROP advisory
                 adjustments. Never silently truncate a task.
 
@@ -133,6 +145,10 @@ public class DailyPlanAiGenerator {
                 and Milestone fields only as parent context; never substitute their IDs for the
                 Learning Unit ID.
 
+                Return only one complete JSON object with exactly these fields. Include every
+                field even when its value is null; use JSON null, not the string "null". Do not
+                add markdown fences or extra properties. plannedMinutes and estimatedMinutes
+                are numbers; orderIndex starts at 0 and required is a boolean.
                 Return only one JSON object with exactly this structure:
                 {
                   "summary": "short explanation",
@@ -173,7 +189,7 @@ public class DailyPlanAiGenerator {
                 Roadmap Item and prior Daily Plan Item UUIDs present in the supplied context.
                 The adjustments array must be empty when no advisory decision is needed.
                 Write all user-facing content using BCP 47 locale %s.
-                """.formatted(availableMinutes, responseLocale);
+                """.formatted(availableMinutes, availableMinutes * 30 / 100, responseLocale);
     }
 
     private String normalizeLocale(String locale) {
@@ -196,13 +212,24 @@ public class DailyPlanAiGenerator {
         }
     }
 
-    private String retryPrompt(String userPrompt, int attempt) {
-        if (attempt == 0) {
+    private String retryPrompt(
+            String userPrompt, InvalidAiDailyPlanResponseException previousFailure) {
+        if (previousFailure == null) {
             return userPrompt;
         }
+        String correction = previousFailure.stepLocations().isEmpty()
+                ? previousFailure.reason().retryInstruction()
+                : previousFailure.stepLocations().stream()
+                        .map(location -> "items[" + location.itemIndex() + "].steps["
+                                + location.stepIndex() + "]: " + location.reason().name()
+                                + ": " + location.reason().retryInstruction())
+                        .collect(Collectors.joining(" "));
         return userPrompt
-                + "\nRETRY_NOTICE: The previous response failed strict schema or budget validation. "
-                + "Return a corrected JSON object that follows every system constraint.";
+                + "\nRETRY_NOTICE: The previous response failed validation ("
+                + previousFailure.reason().name()
+                + "). "
+                + correction
+                + " Return a fresh complete JSON object; follow every system constraint.";
     }
 
     public record GeneratedDailyPlan(

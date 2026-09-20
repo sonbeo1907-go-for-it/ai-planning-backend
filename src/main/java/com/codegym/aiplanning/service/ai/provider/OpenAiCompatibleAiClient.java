@@ -134,6 +134,14 @@ public class OpenAiCompatibleAiClient implements AiClientService {
     }
 
     private String requireContent(CompletionResponse response) {
+        if (response != null
+                && response.choices() != null
+                && !response.choices().isEmpty()
+                && "length".equalsIgnoreCase(response.choices().get(0).finishReason())) {
+            throw new BusinessException(
+                    ErrorCode.AI_GENERATION_FAILED,
+                    "The AI provider stopped at its configured output-token limit. Increase that limit or reduce the requested output size.");
+        }
         if (response == null
                 || response.choices() == null
                 || response.choices().isEmpty()
@@ -173,7 +181,9 @@ public class OpenAiCompatibleAiClient implements AiClientService {
     private record CompletionResponse(List<CompletionChoice> choices) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record CompletionChoice(CompletionMessage message) {}
+    private record CompletionChoice(
+            CompletionMessage message,
+            @com.fasterxml.jackson.annotation.JsonProperty("finish_reason") String finishReason) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record CompletionMessage(String content) {}

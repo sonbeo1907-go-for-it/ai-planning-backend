@@ -2,6 +2,7 @@ package com.codegym.aiplanning.service.daily.ai;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import com.codegym.aiplanning.entity.daily.DailyTaskCategory;
 import java.time.LocalDate;
@@ -206,6 +207,36 @@ class DailyPlanValidatorTest {
         assertThatThrownBy(() -> validator.validateResponse(response, context))
                 .isInstanceOf(InvalidAiDailyPlanResponseException.class)
                 .hasMessageContaining("parent AI task");
+    }
+
+    @Test
+    void validateResponse_reportsMultipleStepAnchorFailuresWithoutContent() {
+        List<DailyPlanAiResponse.AiTaskStepDto> steps = List.of(
+                new DailyPlanAiResponse.AiTaskStepDto(
+                        "Write unrelated example", null, 0, 10, true,
+                        AiTaskStepAction.WRITE, "Topic"),
+                new DailyPlanAiResponse.AiTaskStepDto(
+                        "Run unrelated tests", null, 1, 10, true,
+                        AiTaskStepAction.RUN, "Topic"));
+        DailyPlanAiResponse response = new DailyPlanAiResponse(
+                "Plan",
+                List.of(new DailyPlanAiResponse.AiPlanItemDto(
+                        roadmapItemId, "Practice", null, DailyTaskCategory.PRACTICE,
+                        30, null, null, steps)),
+                List.of());
+
+        assertThatThrownBy(() -> validator.validateResponse(response, context))
+                .isInstanceOf(InvalidAiDailyPlanResponseException.class)
+                .satisfies(failure -> {
+                    InvalidAiDailyPlanResponseException invalid =
+                            (InvalidAiDailyPlanResponseException) failure;
+                    assertThat(invalid.reason()).isEqualTo(
+                            DailyPlanValidationReason.STEP_ANCHOR_UNUSED);
+                    assertThat(invalid.stepLocations()).extracting(
+                            InvalidAiDailyPlanResponseException.StepLocation::stepIndex)
+                            .containsExactly(0, 1);
+                    assertThat(invalid.getMessage()).doesNotContain("unrelated");
+                });
     }
 
     private DailyPlanAiResponse response(int plannedMinutes, UUID itemId) {
