@@ -74,7 +74,7 @@ class DashboardReportControllerIntegrationTest {
                 .andExpect(jsonPath("$.data.studyTime.dailyPoints").isArray())
                 .andExpect(jsonPath("$.data.studyTime.dailyPoints.length()").value(7));
 
-        // Add a completed progress entry today
+        // A non-task progress entry contributes study time, but not task streak credit.
         ProgressEntry entry = ProgressEntry.create(
                 user.getId(),
                 null,
@@ -88,13 +88,13 @@ class DashboardReportControllerIntegrationTest {
                 null);
         progressEntryRepository.save(entry);
 
-        // Query again and verify streak is 1, total minutes is 50
+        // Query again and verify account-wide minutes without a false task streak.
         mockMvc.perform(get(ApiConstant.REPORTS_DASHBOARD)
                         .header("Authorization", "Bearer " + accessToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.streak.currentStreak").value(1))
-                .andExpect(jsonPath("$.data.streak.longestStreak").value(1))
-                .andExpect(jsonPath("$.data.streak.isActiveToday").value(true))
+                .andExpect(jsonPath("$.data.streak.currentStreak").value(0))
+                .andExpect(jsonPath("$.data.streak.longestStreak").value(0))
+                .andExpect(jsonPath("$.data.streak.isActiveToday").value(false))
                 .andExpect(jsonPath("$.data.studyTime.totalStudyMinutes").value(50))
                 .andExpect(jsonPath("$.data.studyTime.totalStudyHours").value(0.8));
     }

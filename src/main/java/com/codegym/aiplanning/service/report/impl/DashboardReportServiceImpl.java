@@ -23,7 +23,6 @@ import com.codegym.aiplanning.entity.roadmap.RoadmapItemProgress;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItemProgressStatus;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
-import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
 import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
 import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
 import com.codegym.aiplanning.repository.profile.UserProfileRepository;
@@ -32,7 +31,8 @@ import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.service.report.DashboardReportService;
 import com.codegym.aiplanning.service.roadmap.RoadmapProgressService;
-import java.sql.Date;
+import com.codegym.aiplanning.service.roadmap.progress.ProgressHistoryResolver;
+import com.codegym.aiplanning.service.roadmap.progress.ProgressHistoryResolver.EffectiveEvent;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -58,7 +58,6 @@ public class DashboardReportServiceImpl implements DashboardReportService {
 
     private final UserProfileRepository userProfileRepository;
     private final ProgressEntryRepository progressEntryRepository;
-    private final DailyPlanRepository dailyPlanRepository;
     private final RoadmapRepository roadmapRepository;
     private final RoadmapProgressService roadmapProgressService;
     private final RoadmapItemRepository roadmapItemRepository;
@@ -68,7 +67,6 @@ public class DashboardReportServiceImpl implements DashboardReportService {
     public DashboardReportServiceImpl(
             UserProfileRepository userProfileRepository,
             ProgressEntryRepository progressEntryRepository,
-            DailyPlanRepository dailyPlanRepository,
             RoadmapRepository roadmapRepository,
             RoadmapProgressService roadmapProgressService,
             RoadmapItemRepository roadmapItemRepository,
@@ -76,7 +74,6 @@ public class DashboardReportServiceImpl implements DashboardReportService {
             WeakTopicRepository weakTopicRepository) {
         this.userProfileRepository = userProfileRepository;
         this.progressEntryRepository = progressEntryRepository;
-        this.dailyPlanRepository = dailyPlanRepository;
         this.roadmapRepository = roadmapRepository;
         this.roadmapProgressService = roadmapProgressService;
         this.roadmapItemRepository = roadmapItemRepository;
@@ -97,36 +94,32 @@ public class DashboardReportServiceImpl implements DashboardReportService {
             timeZoneStr = "UTC";
         }
         int targetMinutes = profile != null ? profile.getDefaultDailyMinutes() : 60;
-        LocalDate today = LocalDate.now(zoneId);
+        Instant now = Instant.now();
+        LocalDate today = now.atZone(zoneId).toLocalDate();
         LocalDate yesterday = today.minusDays(1);
+        List<EffectiveEvent> events = ProgressHistoryResolver.effectiveEvents(
+                        progressEntryRepository.findByUserIdOrderByRecordedAtDesc(userId))
+                .stream()
+                .filter(event -> event.activityRecordedAt() != null
+                        && !event.activityRecordedAt().isAfter(now))
+                .toList();
 
-        // 1. Calculate Streak
-        StreakDto streak = calculateStreak(userId, zoneId, timeZoneStr, today, yesterday);
+        StreakDto streak = calculateStreak(events, zoneId, timeZoneStr, today, yesterday);
 
-        // 2. Calculate Study Time & 7-Day History
-        StudyTimeDto studyTime = calculateStudyTime(userId, zoneId, today, targetMinutes);
+        StudyTimeDto studyTime = calculateStudyTime(events, zoneId, today, targetMinutes);
 
-        // 3. Calculate Master Plan Progress
         MasterPlanProgressDto masterPlan = calculateMasterPlan(userId);
 
         return new DashboardReportResponse(masterPlan, streak, studyTime);
     }
 
     private StreakDto calculateStreak(
-            UUID userId, ZoneId zoneId, String timeZoneStr, LocalDate today, LocalDate yesterday) {
-        List<ProgressEntry> completedEntries =
-                progressEntryRepository.findByUserIdAndStatus(userId, ProgressEntryStatus.COMPLETED);
-        List<Date> planDates = dailyPlanRepository.findCompletedPlanDatesNative(userId);
-
+            List<EffectiveEvent> events, ZoneId zoneId, String timeZoneStr,
+            LocalDate today, LocalDate yesterday) {
         TreeSet<LocalDate> completedDates = new TreeSet<>();
-        for (ProgressEntry entry : completedEntries) {
-            if (entry.getRecordedAt() != null) {
-                completedDates.add(entry.getRecordedAt().atZone(zoneId).toLocalDate());
-            }
-        }
-        for (Date sqlDate : planDates) {
-            if (sqlDate != null) {
-                completedDates.add(sqlDate.toLocalDate());
+        for (EffectiveEvent event : events) {
+            if (isCompletedTask(event.entry())) {
+                completedDates.add(event.activityRecordedAt().atZone(zoneId).toLocalDate());
             }
         }
 
@@ -174,28 +167,23 @@ public class DashboardReportServiceImpl implements DashboardReportService {
     }
 
     private StudyTimeDto calculateStudyTime(
-            UUID userId, ZoneId zoneId, LocalDate today, int targetMinutes) {
-        Long totalMinutesSum = progressEntryRepository.sumActualMinutesByUserId(userId);
-        long totalStudyMinutes = totalMinutesSum != null ? totalMinutesSum : 0L;
-        double totalStudyHours = Math.round((totalStudyMinutes / 60.0) * 10.0) / 10.0;
-
+            List<EffectiveEvent> events, ZoneId zoneId, LocalDate today, int targetMinutes) {
+        long totalStudyMinutes = 0;
         LocalDate sevenDaysAgo = today.minusDays(6);
-        Instant sevenDaysAgoInstant = sevenDaysAgo.atStartOfDay(zoneId).toInstant();
-        List<ProgressEntry> recentEntries = progressEntryRepository
-                .findByUserIdAndRecordedAtGreaterThanEqualOrderByRecordedAtAsc(userId, sevenDaysAgoInstant);
 
         Map<LocalDate, Integer> dailyMinutesMap = new HashMap<>();
         Map<LocalDate, Set<UUID>> dailyTasksMap = new HashMap<>();
 
-        for (ProgressEntry entry : recentEntries) {
-            if (entry.getRecordedAt() != null) {
-                LocalDate entryDate = entry.getRecordedAt().atZone(zoneId).toLocalDate();
-                if (!entryDate.isBefore(sevenDaysAgo) && !entryDate.isAfter(today)) {
-                    int minutes = entry.getActualMinutes() != null ? entry.getActualMinutes() : 0;
-                    dailyMinutesMap.put(entryDate, dailyMinutesMap.getOrDefault(entryDate, 0) + minutes);
-                    if (entry.getStatus() == ProgressEntryStatus.COMPLETED && entry.getDailyPlanItemId() != null) {
-                        dailyTasksMap.computeIfAbsent(entryDate, k -> new HashSet<>()).add(entry.getDailyPlanItemId());
-                    }
+        for (EffectiveEvent event : events) {
+            ProgressEntry entry = event.entry();
+            int minutes = entry.getActualMinutes() != null ? entry.getActualMinutes() : 0;
+            totalStudyMinutes += minutes;
+            LocalDate entryDate = event.activityRecordedAt().atZone(zoneId).toLocalDate();
+            if (!entryDate.isBefore(sevenDaysAgo) && !entryDate.isAfter(today)) {
+                dailyMinutesMap.merge(entryDate, minutes, Integer::sum);
+                if (isCompletedTask(entry)) {
+                    dailyTasksMap.computeIfAbsent(entryDate, ignored -> new HashSet<>())
+                            .add(entry.getDailyPlanItemId());
                 }
             }
         }
@@ -209,11 +197,18 @@ public class DashboardReportServiceImpl implements DashboardReportService {
             dailyPoints.add(new DailyStudyTimePointDto(d, dayOfWeek, minutes, completedCount, targetMinutes));
         }
 
+        double totalStudyHours = Math.round((totalStudyMinutes / 60.0) * 10.0) / 10.0;
         return new StudyTimeDto(totalStudyMinutes, totalStudyHours, dailyPoints);
     }
 
+    private boolean isCompletedTask(ProgressEntry entry) {
+        return entry.getStatus() == ProgressEntryStatus.COMPLETED
+                && entry.getDailyPlanItemId() != null;
+    }
+
     private MasterPlanProgressDto calculateMasterPlan(UUID userId) {
-        Optional<Roadmap> activeRoadmapOpt = roadmapRepository.findByOwnerIdAndStatus(userId, RoadmapStatus.ACTIVE);
+        Optional<Roadmap> activeRoadmapOpt = roadmapRepository
+                .findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(userId, RoadmapStatus.ACTIVE);
         if (activeRoadmapOpt.isEmpty()) {
             return null;
         }
@@ -261,7 +256,8 @@ public class DashboardReportServiceImpl implements DashboardReportService {
                     .orElseThrow(() -> new BusinessException(
                             ErrorCode.RESOURCE_NOT_FOUND, "Roadmap was not found."));
         } else {
-            roadmap = roadmapRepository.findByOwnerIdAndStatus(userId, RoadmapStatus.ACTIVE)
+            roadmap = roadmapRepository.findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(
+                            userId, RoadmapStatus.ACTIVE)
                     .orElse(null);
             if (roadmap == null) {
                 List<Roadmap> allRoadmaps = roadmapRepository.findAllByOwnerIdOrderByUpdatedAtDesc(userId);

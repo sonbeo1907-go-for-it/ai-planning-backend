@@ -16,6 +16,25 @@ public final class ProgressHistoryResolver {
 
     private ProgressHistoryResolver() {}
 
+    /** A correction supplies the result, while the original entry supplies the activity date. */
+    public record EffectiveEvent(ProgressEntry entry, Instant activityRecordedAt) {}
+
+    public static List<EffectiveEvent> effectiveEvents(List<ProgressEntry> entries) {
+        if (entries == null || entries.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, ProgressEntry> entriesById = new HashMap<>();
+        for (ProgressEntry entry : entries) {
+            if (entry.getId() != null) {
+                entriesById.put(entry.getId(), entry);
+            }
+        }
+        return effectiveEntries(entries).stream()
+                .map(entry -> new EffectiveEvent(
+                        entry, rootEntry(entry, entriesById).getRecordedAt()))
+                .toList();
+    }
+
     public static List<ProgressEntry> effectiveEntries(List<ProgressEntry> entries) {
         if (entries == null || entries.isEmpty()) {
             return List.of();

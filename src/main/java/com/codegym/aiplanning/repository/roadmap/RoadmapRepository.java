@@ -17,6 +17,9 @@ public interface RoadmapRepository extends JpaRepository<Roadmap, UUID> {
 
     Optional<Roadmap> findByOwnerIdAndStatus(UUID ownerId, RoadmapStatus status);
 
+    Optional<Roadmap> findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(
+            UUID ownerId, RoadmapStatus status);
+
     long countByOwnerId(UUID ownerId);
 
     List<Roadmap> findAllByOwnerIdOrderByUpdatedAtDesc(UUID ownerId);

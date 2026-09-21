@@ -1,8 +1,6 @@
 package com.codegym.aiplanning.service.report;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
@@ -26,7 +24,6 @@ import com.codegym.aiplanning.entity.roadmap.RoadmapItemProgressStatus;
 import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
-import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
 import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
 import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
 import com.codegym.aiplanning.repository.profile.UserProfileRepository;
@@ -59,9 +56,6 @@ class DashboardReportServiceTest {
 
     @Mock
     private ProgressEntryRepository progressEntryRepository;
-
-    @Mock
-    private DailyPlanRepository dailyPlanRepository;
 
     @Mock
     private RoadmapRepository roadmapRepository;
@@ -102,7 +96,7 @@ class DashboardReportServiceTest {
     @Test
     void getDashboardReport_withActiveToday_calculatesConsecutiveStreak() {
         LocalDate today = LocalDate.now(zoneId);
-        Instant todayInstant = today.atTime(10, 0).atZone(zoneId).toInstant();
+        Instant todayInstant = today.atStartOfDay(zoneId).toInstant();
         Instant yesterdayInstant = today.minusDays(1).atTime(15, 0).atZone(zoneId).toInstant();
         Instant twoDaysAgoInstant = today.minusDays(2).atTime(18, 0).atZone(zoneId).toInstant();
 
@@ -118,13 +112,10 @@ class DashboardReportServiceTest {
                 userId, UUID.randomUUID(), ProgressEntryStatus.COMPLETED, 50, 100, "Done", 2, 4, null, null);
         ReflectionTestUtils.setField(entryTwoDaysAgo, "recordedAt", twoDaysAgoInstant);
 
-        when(progressEntryRepository.findByUserIdAndStatus(userId, ProgressEntryStatus.COMPLETED))
+        when(progressEntryRepository.findByUserIdOrderByRecordedAtDesc(userId))
                 .thenReturn(List.of(entryToday, entryYesterday, entryTwoDaysAgo));
-        when(dailyPlanRepository.findCompletedPlanDatesNative(userId)).thenReturn(List.of());
-        when(progressEntryRepository.sumActualMinutesByUserId(userId)).thenReturn(125L);
-        when(progressEntryRepository.findByUserIdAndRecordedAtGreaterThanEqualOrderByRecordedAtAsc(eq(userId), any()))
-                .thenReturn(List.of(entryTwoDaysAgo, entryYesterday, entryToday));
-        when(roadmapRepository.findByOwnerIdAndStatus(userId, RoadmapStatus.ACTIVE)).thenReturn(Optional.empty());
+        when(roadmapRepository.findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(
+                userId, RoadmapStatus.ACTIVE)).thenReturn(Optional.empty());
 
         DashboardReportResponse response = dashboardReportService.getDashboardReport(userId);
 
@@ -152,13 +143,10 @@ class DashboardReportServiceTest {
                 userId, UUID.randomUUID(), ProgressEntryStatus.COMPLETED, 60, 100, "Done", 2, 4, null, null);
         ReflectionTestUtils.setField(entryTwoDaysAgo, "recordedAt", twoDaysAgoInstant);
 
-        when(progressEntryRepository.findByUserIdAndStatus(userId, ProgressEntryStatus.COMPLETED))
+        when(progressEntryRepository.findByUserIdOrderByRecordedAtDesc(userId))
                 .thenReturn(List.of(entryYesterday, entryTwoDaysAgo));
-        when(dailyPlanRepository.findCompletedPlanDatesNative(userId)).thenReturn(List.of());
-        when(progressEntryRepository.sumActualMinutesByUserId(userId)).thenReturn(100L);
-        when(progressEntryRepository.findByUserIdAndRecordedAtGreaterThanEqualOrderByRecordedAtAsc(eq(userId), any()))
-                .thenReturn(List.of(entryTwoDaysAgo, entryYesterday));
-        when(roadmapRepository.findByOwnerIdAndStatus(userId, RoadmapStatus.ACTIVE)).thenReturn(Optional.empty());
+        when(roadmapRepository.findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(
+                userId, RoadmapStatus.ACTIVE)).thenReturn(Optional.empty());
 
         DashboardReportResponse response = dashboardReportService.getDashboardReport(userId);
 
@@ -181,19 +169,46 @@ class DashboardReportServiceTest {
                 userId, UUID.randomUUID(), ProgressEntryStatus.COMPLETED, 30, 100, "Done", 1, 5, null, null);
         ReflectionTestUtils.setField(entry4, "recordedAt", fourDaysAgoInstant);
 
-        when(progressEntryRepository.findByUserIdAndStatus(userId, ProgressEntryStatus.COMPLETED))
+        when(progressEntryRepository.findByUserIdOrderByRecordedAtDesc(userId))
                 .thenReturn(List.of(entry3, entry4));
-        when(dailyPlanRepository.findCompletedPlanDatesNative(userId)).thenReturn(List.of());
-        when(progressEntryRepository.sumActualMinutesByUserId(userId)).thenReturn(60L);
-        when(progressEntryRepository.findByUserIdAndRecordedAtGreaterThanEqualOrderByRecordedAtAsc(eq(userId), any()))
-                .thenReturn(List.of(entry4, entry3));
-        when(roadmapRepository.findByOwnerIdAndStatus(userId, RoadmapStatus.ACTIVE)).thenReturn(Optional.empty());
+        when(roadmapRepository.findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(
+                userId, RoadmapStatus.ACTIVE)).thenReturn(Optional.empty());
 
         DashboardReportResponse response = dashboardReportService.getDashboardReport(userId);
 
         assertThat(response.streak().currentStreak()).isEqualTo(0);
         assertThat(response.streak().longestStreak()).isEqualTo(2);
         assertThat(response.streak().isActiveToday()).isFalse();
+    }
+
+    @Test
+    void correctedCompletionReplacesMinutesAndRemovesStreakCredit() {
+        UUID taskId = UUID.randomUUID();
+        UUID originalId = UUID.randomUUID();
+        LocalDate yesterday = LocalDate.now(zoneId).minusDays(1);
+        ProgressEntry original = ProgressEntry.create(
+                userId, taskId, ProgressEntryStatus.COMPLETED,
+                60, 100, "Done", null, null, null, null);
+        ReflectionTestUtils.setField(original, "id", originalId);
+        ReflectionTestUtils.setField(
+                original, "recordedAt", yesterday.atTime(15, 0).atZone(zoneId).toInstant());
+
+        ProgressEntry correction = ProgressEntry.create(
+                userId, taskId, ProgressEntryStatus.PARTIALLY_COMPLETED,
+                45, 50, "Partly done", null, null, null, originalId);
+        ReflectionTestUtils.setField(correction, "id", UUID.randomUUID());
+        ReflectionTestUtils.setField(correction, "recordedAt", Instant.now());
+
+        when(progressEntryRepository.findByUserIdOrderByRecordedAtDesc(userId))
+                .thenReturn(List.of(correction, original));
+        when(roadmapRepository.findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(
+                userId, RoadmapStatus.ACTIVE)).thenReturn(Optional.empty());
+
+        DashboardReportResponse response = dashboardReportService.getDashboardReport(userId);
+
+        assertThat(response.streak().currentStreak()).isZero();
+        assertThat(response.studyTime().totalStudyMinutes()).isEqualTo(45);
+        assertThat(response.studyTime().dailyPoints().get(5).studyMinutes()).isEqualTo(45);
     }
 
     @Test
@@ -208,12 +223,10 @@ class DashboardReportServiceTest {
         RoadmapProgressResponse progressResponse = new RoadmapProgressResponse(
                 roadmapId, UUID.randomUUID(), 1, 3, 33.3, List.of(topicProgress));
 
-        when(progressEntryRepository.findByUserIdAndStatus(userId, ProgressEntryStatus.COMPLETED)).thenReturn(List.of());
-        when(dailyPlanRepository.findCompletedPlanDatesNative(userId)).thenReturn(List.of());
-        when(progressEntryRepository.sumActualMinutesByUserId(userId)).thenReturn(0L);
-        when(progressEntryRepository.findByUserIdAndRecordedAtGreaterThanEqualOrderByRecordedAtAsc(eq(userId), any()))
+        when(progressEntryRepository.findByUserIdOrderByRecordedAtDesc(userId))
                 .thenReturn(List.of());
-        when(roadmapRepository.findByOwnerIdAndStatus(userId, RoadmapStatus.ACTIVE))
+        when(roadmapRepository.findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(
+                userId, RoadmapStatus.ACTIVE))
                 .thenReturn(Optional.of(roadmap));
         when(roadmapProgressService.getProgress(userId, roadmapId)).thenReturn(progressResponse);
 
@@ -275,7 +288,8 @@ class DashboardReportServiceTest {
                 Instant.now().minus(5, ChronoUnit.DAYS), "Asia/Ho_Chi_Minh");
         wt2.markMastered(Instant.now(), new BigDecimal("80.0"));
 
-        when(roadmapRepository.findByOwnerIdAndStatus(userId, RoadmapStatus.ACTIVE))
+        when(roadmapRepository.findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(
+                userId, RoadmapStatus.ACTIVE))
                 .thenReturn(Optional.of(roadmap));
         when(roadmapItemRepository.findAllByRoadmapVersionIds(List.of(versionId)))
                 .thenReturn(List.of(milestone, topic1, topic2, unit1, unit2, unit3));
@@ -316,7 +330,8 @@ class DashboardReportServiceTest {
 
     @Test
     void getKnowledgeMap_whenNoRoadmap_returnsEmptyStructure() {
-        when(roadmapRepository.findByOwnerIdAndStatus(userId, RoadmapStatus.ACTIVE))
+        when(roadmapRepository.findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(
+                userId, RoadmapStatus.ACTIVE))
                 .thenReturn(Optional.empty());
         when(roadmapRepository.findAllByOwnerIdOrderByUpdatedAtDesc(userId))
                 .thenReturn(List.of());
