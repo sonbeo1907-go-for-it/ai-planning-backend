@@ -6,6 +6,7 @@ import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -24,7 +25,10 @@ public record WeakTopicResponse(
         WeakTopicStatus status,
         WeakTopicTrigger triggerSource,
         BigDecimal lastQuizScore,
+        BigDecimal lastMasteryScore,
         Integer lastUnderstandingRating,
         Instant unresolvedAt,
+        LocalDate eligibleOn,
+        String eligibilityZone,
         Instant masteredAt
 ) {}

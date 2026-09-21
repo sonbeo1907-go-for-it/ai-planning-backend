@@ -4,6 +4,7 @@ import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.controller.evaluation.dto.AnswerSubmissionDto;
 import com.codegym.aiplanning.controller.evaluation.dto.DailyEvaluationResponse;
+import com.codegym.aiplanning.controller.evaluation.dto.MasteryCheckResultResponse;
 import com.codegym.aiplanning.controller.evaluation.dto.QuizDetailResponse;
 import com.codegym.aiplanning.controller.evaluation.dto.QuizOptionDto;
 import com.codegym.aiplanning.controller.evaluation.dto.QuizQuestionResponse;
@@ -22,6 +23,9 @@ import com.codegym.aiplanning.entity.evaluation.QuizAttemptAnswer;
 import com.codegym.aiplanning.entity.evaluation.QuizQuestion;
 import com.codegym.aiplanning.entity.evaluation.QuizStatus;
 import com.codegym.aiplanning.entity.evaluation.QuizType;
+import com.codegym.aiplanning.entity.evaluation.WeakTopic;
+import com.codegym.aiplanning.entity.evaluation.WeakTopicStatus;
+import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
@@ -34,11 +38,14 @@ import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
 import com.codegym.aiplanning.repository.evaluation.DailyEvaluationRepository;
 import com.codegym.aiplanning.repository.evaluation.QuizAttemptRepository;
 import com.codegym.aiplanning.repository.evaluation.QuizRepository;
+import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
+import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.service.evaluation.QuizGeneratorService.GeneratedQuestion;
 import com.codegym.aiplanning.service.evaluation.QuizGeneratorService.GeneratedQuizPlan;
 import com.codegym.aiplanning.service.evaluation.QuizTopicScoredEvent;
+import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -62,6 +69,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class DailyEvaluationPersistenceService {
 
     private static final BigDecimal PASSING_SCORE = new BigDecimal("80.00");
+    private static final int MASTERY_PERCENT = 80;
 
     private final DailyPlanRepository dailyPlanRepository;
     private final DailyPlanVersionRepository dailyPlanVersionRepository;
@@ -72,8 +80,11 @@ public class DailyEvaluationPersistenceService {
     private final UserAccountRepository userAccountRepository;
     private final QuizRepository quizRepository;
     private final QuizAttemptRepository quizAttemptRepository;
+    private final WeakTopicRepository weakTopicRepository;
+    private final UserProfileRepository userProfileRepository;
     private final DailyEvaluationRepository dailyEvaluationRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
 
     public DailyEvaluationPersistenceService(
@@ -86,8 +97,11 @@ public class DailyEvaluationPersistenceService {
             UserAccountRepository userAccountRepository,
             QuizRepository quizRepository,
             QuizAttemptRepository quizAttemptRepository,
+            WeakTopicRepository weakTopicRepository,
+            UserProfileRepository userProfileRepository,
             DailyEvaluationRepository dailyEvaluationRepository,
             ApplicationEventPublisher eventPublisher,
+            AuditLogService auditLogService,
             ObjectMapper objectMapper) {
         this.dailyPlanRepository = dailyPlanRepository;
         this.dailyPlanVersionRepository = dailyPlanVersionRepository;
@@ -98,8 +112,11 @@ public class DailyEvaluationPersistenceService {
         this.userAccountRepository = userAccountRepository;
         this.quizRepository = quizRepository;
         this.quizAttemptRepository = quizAttemptRepository;
+        this.weakTopicRepository = weakTopicRepository;
+        this.userProfileRepository = userProfileRepository;
         this.dailyEvaluationRepository = dailyEvaluationRepository;
         this.eventPublisher = eventPublisher;
+        this.auditLogService = auditLogService;
         this.objectMapper = objectMapper;
     }
 
@@ -391,7 +408,7 @@ public class DailyEvaluationPersistenceService {
     }
 
     @Transactional
-    public QuizDetailResponse submitMasteryQuiz(
+    public MasteryCheckResultResponse submitMasteryQuiz(
             UUID userId,
             UUID weakTopicId,
             UUID quizId,
@@ -402,15 +419,93 @@ public class DailyEvaluationPersistenceService {
                 || quiz.getQuizType() != QuizType.MASTERY_CHECK) {
             throw notFound("Mastery quiz was not found.");
         }
+        WeakTopic weakTopic = weakTopicRepository
+                .findByIdAndUserIdForUpdate(weakTopicId, userId)
+                .orElseThrow(() -> notFound("Weak Topic was not found."));
+        if (!quiz.getRoadmap().getId().equals(weakTopic.getRoadmap().getId())
+                || !quiz.getRoadmapVersion().getId().equals(weakTopic.getRoadmapVersion().getId())
+                || quiz.getQuestions().stream().anyMatch(question ->
+                        !question.getRoadmapItem().getId().equals(weakTopic.getRoadmapItem().getId()))) {
+            throw notFound("Mastery quiz was not found.");
+        }
         if (quiz.getStatus() == QuizStatus.SUBMITTED) {
-            return mapToQuizDetailResponse(quiz);
+            QuizAttempt existingAttempt = quizAttemptRepository
+                    .findFirstByQuizIdAndUserIdOrderByAttemptNumberDesc(quizId, userId)
+                    .orElseThrow(() -> notFound("Mastery attempt was not found."));
+            return mapMasteryResult(weakTopic, quiz, existingAttempt);
+        }
+        if (weakTopic.getStatus() == WeakTopicStatus.MASTERED) {
+            throw new BusinessException(
+                    ErrorCode.WEAK_TOPIC_ALREADY_MASTERED,
+                    "Weak Topic is already mastered.");
+        }
+        if (!weakTopic.isEligibleForMastery(Instant.now())) {
+            throw new BusinessException(
+                    ErrorCode.WEAK_TOPIC_NOT_ELIGIBLE,
+                    "A mastery check is available from the next local calendar day.");
         }
         Map<UUID, String> answers = validateAnswers(quiz, request);
         QuizAttempt attempt = gradeAttempt(quiz, answers);
         quiz.markSubmitted();
         quizRepository.save(quiz);
         quizAttemptRepository.saveAndFlush(attempt);
-        return mapToQuizDetailResponse(quiz, attempt);
+        if (attempt.isPassed()) {
+            weakTopic.markMastered(Instant.now(), attempt.getScore());
+        } else {
+            weakTopic.markMasteryFailed(attempt.getScore());
+        }
+        weakTopicRepository.save(weakTopic);
+        auditLogService.logAction(
+                userId,
+                quiz.getUser().getEmail(),
+                AuditEventAction.MASTERY_ATTEMPT_SUBMITTED,
+                "QuizAttempt",
+                attempt.getId().toString());
+        if (attempt.isPassed()) {
+            auditLogService.logAction(
+                    userId,
+                    quiz.getUser().getEmail(),
+                    AuditEventAction.WEAK_TOPIC_MASTERED,
+                    "WeakTopic",
+                    weakTopicId.toString());
+        }
+        return mapMasteryResult(weakTopic, quiz, attempt);
+    }
+
+    private MasteryCheckResultResponse mapMasteryResult(
+            WeakTopic weakTopic,
+            Quiz quiz,
+            QuizAttempt attempt) {
+        int correctCount = (int) attempt.getAnswers().stream()
+                .filter(QuizAttemptAnswer::isCorrect)
+                .count();
+        boolean mastered = attempt.isPassed();
+        return new MasteryCheckResultResponse(
+                weakTopic.getId(),
+                quiz.getId(),
+                attempt.getId(),
+                attempt.getScore(),
+                correctCount,
+                quiz.getQuestions().size(),
+                mastered,
+                weakTopic.getStatus(),
+                weakTopic.getStatus() != WeakTopicStatus.MASTERED
+                        && weakTopic.isEligibleForMastery(Instant.now()),
+                masteryMessage(quiz.getUser().getId(), mastered));
+    }
+
+    private String masteryMessage(UUID userId, boolean mastered) {
+        boolean vietnamese = userProfileRepository.findByUserId(userId)
+                .map(profile -> profile.getLocale().startsWith("vi"))
+                .orElse(false);
+        if (vietnamese) {
+            return mastered
+                    ? "Bạn đã nắm vững đơn vị học này."
+                    : "Đơn vị học vẫn cần được củng cố.";
+        }
+        return mastered
+                ? "You have mastered this learning unit."
+                : "This learning unit still needs reinforcement.";
     }
 
     private Map<UUID, String> validateAnswers(
@@ -448,7 +543,7 @@ public class DailyEvaluationPersistenceService {
         return answers;
     }
 
-    private QuizAttempt gradeAttempt(
+    QuizAttempt gradeAttempt(
             Quiz quiz,
             Map<UUID, String> submittedAnswers) {
         int correctCount = 0;
@@ -471,7 +566,9 @@ public class DailyEvaluationPersistenceService {
                 quiz.getUser(),
                 1,
                 score,
-                score.compareTo(PASSING_SCORE) >= 0,
+                quiz.getQuizType() == QuizType.MASTERY_CHECK
+                        ? correctCount * 100 >= MASTERY_PERCENT * quiz.getQuestions().size()
+                        : score.compareTo(PASSING_SCORE) >= 0,
                 Instant.now());
         gradedAnswers.forEach(attempt::addAnswer);
         return attempt;

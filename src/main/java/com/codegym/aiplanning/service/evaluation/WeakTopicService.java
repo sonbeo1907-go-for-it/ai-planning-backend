@@ -30,6 +30,10 @@ public interface WeakTopicService {
             UUID weakTopicId,
             AiProviderConfig providerConfig);
 
+    QuizDetailResponse getMasteryCheckQuiz(UUID userId, UUID weakTopicId, UUID quizId);
+
+    List<QuizDetailResponse> getMasteryCheckHistory(UUID userId, UUID weakTopicId);
+
     MasteryCheckResultResponse submitMasteryCheck(
             UUID userId, UUID weakTopicId, UUID quizId, SubmitQuizRequest request);
 

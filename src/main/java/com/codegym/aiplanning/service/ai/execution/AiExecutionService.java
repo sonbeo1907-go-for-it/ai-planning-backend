@@ -45,6 +45,8 @@ public interface AiExecutionService {
             UUID weakTopicId,
             String idempotencyKey);
 
+    AiExecutionResponse getLatestMasteryCheckExecution(UUID ownerId, UUID weakTopicId);
+
     AiExecutionResponse submitTaskGuidanceGeneration(
             UUID ownerId,
             UUID dailyPlanId,

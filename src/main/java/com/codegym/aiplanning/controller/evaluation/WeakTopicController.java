@@ -4,6 +4,7 @@ import com.codegym.aiplanning.common.api.ApiResponse;
 import com.codegym.aiplanning.common.constant.ApiConstant;
 import com.codegym.aiplanning.controller.ai.dto.AiExecutionResponse;
 import com.codegym.aiplanning.controller.evaluation.dto.MasteryCheckResultResponse;
+import com.codegym.aiplanning.controller.evaluation.dto.QuizDetailResponse;
 import com.codegym.aiplanning.controller.evaluation.dto.SubmitQuizRequest;
 import com.codegym.aiplanning.service.ai.execution.AiExecutionService;
 import com.codegym.aiplanning.service.evaluation.WeakTopicService;
@@ -11,12 +12,14 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.net.URI;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -68,5 +71,37 @@ public class WeakTopicController {
                 weakTopicId,
                 quizId,
                 request));
+    }
+
+    @GetMapping(ApiConstant.WEAK_TOPIC_MASTERY_CHECK_EXECUTION)
+    @Operation(summary = "Get the latest owned mastery-check execution")
+    public ApiResponse<AiExecutionResponse> getLatestExecution(
+            @PathVariable UUID weakTopicId,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ApiResponse.of(aiExecutionService.getLatestMasteryCheckExecution(
+                UUID.fromString(jwt.getSubject()),
+                weakTopicId));
+    }
+
+    @GetMapping(ApiConstant.WEAK_TOPIC_MASTERY_CHECK_BY_ID)
+    @Operation(summary = "Get an owned mastery check")
+    public ApiResponse<QuizDetailResponse> getQuiz(
+            @PathVariable UUID weakTopicId,
+            @PathVariable UUID quizId,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ApiResponse.of(weakTopicService.getMasteryCheckQuiz(
+                UUID.fromString(jwt.getSubject()),
+                weakTopicId,
+                quizId));
+    }
+
+    @GetMapping(ApiConstant.WEAK_TOPIC_MASTERY_CHECK_HISTORY)
+    @Operation(summary = "List owned mastery-check history")
+    public ApiResponse<List<QuizDetailResponse>> getHistory(
+            @PathVariable UUID weakTopicId,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ApiResponse.of(weakTopicService.getMasteryCheckHistory(
+                UUID.fromString(jwt.getSubject()),
+                weakTopicId));
     }
 }

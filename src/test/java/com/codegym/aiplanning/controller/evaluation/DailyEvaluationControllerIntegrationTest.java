@@ -18,6 +18,9 @@ import com.codegym.aiplanning.entity.daily.DailyPlanVersion;
 import com.codegym.aiplanning.entity.daily.DailyPlanVersionOrigin;
 import com.codegym.aiplanning.entity.evaluation.Quiz;
 import com.codegym.aiplanning.entity.evaluation.QuizQuestion;
+import com.codegym.aiplanning.entity.evaluation.WeakTopic;
+import com.codegym.aiplanning.entity.evaluation.WeakTopicStatus;
+import com.codegym.aiplanning.entity.evaluation.WeakTopicTrigger;
 import com.codegym.aiplanning.entity.profile.UserProfile;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
@@ -260,6 +263,110 @@ class DailyEvaluationControllerIntegrationTest {
                         + "/evaluation")
                         .header("Authorization", "Bearer " + login(admin.getEmail())))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void masteryRequiresTheNextLocalDay() throws Exception {
+        EvaluationFixture fixture = createFixture("mastery-premature@example.com");
+        WeakTopic weakTopic = createWeakTopic(fixture, Instant.now());
+
+        mockMvc.perform(post(ApiConstant.WEAK_TOPICS + "/" + weakTopic.getId()
+                        + "/mastery-check/generate")
+                        .header("Authorization", "Bearer " + fixture.token()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("WEAK_TOPIC_NOT_ELIGIBLE"));
+    }
+
+    @Test
+    void fourOfFiveMasteryAnswersPreserveTheAttemptAndOwnerBoundary() throws Exception {
+        EvaluationFixture fixture = createFixture("mastery-owner@example.com");
+        WeakTopic weakTopic = createWeakTopic(
+                fixture,
+                Instant.now().minusSeconds(172_800));
+        Quiz quiz = Quiz.createMasteryCheck(
+                fixture.user(),
+                fixture.roadmap(),
+                fixture.roadmapVersion(),
+                weakTopic);
+        quiz.addQuestion(question(fixture.topic(), "Q1", "A", 0));
+        quiz.addQuestion(question(fixture.topic(), "Q2", "A", 1));
+        quiz.addQuestion(question(fixture.topic(), "Q3", "A", 2));
+        quiz.addQuestion(question(fixture.topic(), "Q4", "A", 3));
+        quiz.addQuestion(question(fixture.topic(), "Q5", "A", 4));
+        quiz = quizRepository.saveAndFlush(quiz);
+
+        String path = ApiConstant.WEAK_TOPICS + "/" + weakTopic.getId()
+                + "/mastery-check/" + quiz.getId();
+        mockMvc.perform(get(path)
+                        .header("Authorization", "Bearer " + fixture.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.questions[0].correctOption").doesNotExist());
+
+        SubmitQuizRequest request = new SubmitQuizRequest(List.of(
+                answer(quiz, 0, "A"),
+                answer(quiz, 1, "A"),
+                answer(quiz, 2, "A"),
+                answer(quiz, 3, "A"),
+                answer(quiz, 4, "B")));
+        String requestBody = objectMapper.writeValueAsString(request);
+        MvcResult first = mockMvc.perform(post(path + "/submit")
+                        .header("Authorization", "Bearer " + fixture.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.quizScore").value(80.0))
+                .andExpect(jsonPath("$.data.correctCount").value(4))
+                .andExpect(jsonPath("$.data.totalCount").value(5))
+                .andExpect(jsonPath("$.data.isMastered").value(true))
+                .andReturn();
+        String attemptId = objectMapper.readTree(first.getResponse().getContentAsString())
+                .path("data").path("attemptId").asText();
+
+        mockMvc.perform(post(path + "/submit")
+                        .header("Authorization", "Bearer " + fixture.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.attemptId").value(attemptId));
+        assertThat(weakTopicRepository.findById(weakTopic.getId()).orElseThrow().getStatus())
+                .isEqualTo(WeakTopicStatus.MASTERED);
+
+        String historyPath = ApiConstant.WEAK_TOPICS + "/" + weakTopic.getId()
+                + "/mastery-checks";
+        mockMvc.perform(get(historyPath)
+                        .header("Authorization", "Bearer " + fixture.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].score").value(80.0));
+
+        UserAccount other = createUser("mastery-other@example.com", "Other");
+        mockMvc.perform(get(path)
+                        .header("Authorization", "Bearer " + login(other.getEmail())))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get(historyPath)
+                        .header("Authorization", "Bearer " + login(other.getEmail())))
+                .andExpect(status().isNotFound());
+        UserAccount admin = createAccount(
+                "mastery-admin@example.com", "Admin", UserRole.ADMIN);
+        mockMvc.perform(get(path)
+                        .header("Authorization", "Bearer " + login(admin.getEmail())))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get(historyPath)
+                        .header("Authorization", "Bearer " + login(admin.getEmail())))
+                .andExpect(status().isForbidden());
+    }
+
+    private WeakTopic createWeakTopic(EvaluationFixture fixture, Instant detectedAt) {
+        return weakTopicRepository.saveAndFlush(WeakTopic.create(
+                fixture.user(),
+                fixture.roadmap(),
+                fixture.roadmapVersion(),
+                fixture.topic(),
+                WeakTopicTrigger.LOW_RATING,
+                null,
+                2,
+                detectedAt,
+                "UTC"));
     }
 
     private Quiz createFiveQuestionQuiz(EvaluationFixture fixture) {

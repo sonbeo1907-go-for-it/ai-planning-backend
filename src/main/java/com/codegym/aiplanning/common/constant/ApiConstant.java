@@ -126,8 +126,14 @@ public final class ApiConstant {
     public static final String WEAK_TOPIC_BY_ID = "/{weakTopicId}";
     public static final String WEAK_TOPIC_MASTERY_CHECK_GENERATE =
             WEAK_TOPIC_BY_ID + "/mastery-check/generate";
+    public static final String WEAK_TOPIC_MASTERY_CHECK_EXECUTION =
+            WEAK_TOPIC_BY_ID + "/mastery-check/execution";
+    public static final String WEAK_TOPIC_MASTERY_CHECK_HISTORY =
+            WEAK_TOPIC_BY_ID + "/mastery-checks";
+    public static final String WEAK_TOPIC_MASTERY_CHECK_BY_ID =
+            WEAK_TOPIC_BY_ID + "/mastery-check/{quizId}";
     public static final String WEAK_TOPIC_MASTERY_CHECK_SUBMIT =
-            WEAK_TOPIC_BY_ID + "/mastery-check/{quizId}/submit";
+            WEAK_TOPIC_MASTERY_CHECK_BY_ID + "/submit";
     public static final String AI_EXECUTIONS = API_V1 + "/ai-executions";
     public static final String AI_EXECUTION_BY_ID = "/{executionId}";
     public static final String MATERIALS = API_V1 + "/materials";

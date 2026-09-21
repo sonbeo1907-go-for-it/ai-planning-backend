@@ -18,6 +18,8 @@ import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.evaluation.WeakTopic;
 import com.codegym.aiplanning.entity.evaluation.WeakTopicStatus;
 import com.codegym.aiplanning.entity.evaluation.WeakTopicTrigger;
+import com.codegym.aiplanning.entity.evaluation.Quiz;
+import com.codegym.aiplanning.entity.evaluation.QuizType;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
@@ -26,6 +28,7 @@ import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import com.codegym.aiplanning.repository.evaluation.QuizRepository;
+import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.codegym.aiplanning.service.evaluation.QuizGeneratorService;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -51,6 +54,8 @@ class WeakTopicServiceImplTest {
     private WeakTopicRepository weakTopicRepository;
     @Mock
     private UserAccountRepository userAccountRepository;
+    @Mock
+    private UserProfileRepository userProfileRepository;
     @Mock
     private RoadmapItemRepository roadmapItemRepository;
     @Mock
@@ -162,7 +167,7 @@ class WeakTopicServiceImplTest {
 
         weakTopicService.processEvaluationResult(userId, roadmapId, roadmapItemId, new BigDecimal("50.00"), 1);
 
-        verify(existingTopic).updateTrigger(eq(WeakTopicTrigger.BOTH), eq(new BigDecimal("50.00")), eq(1), any(Instant.class));
+        verify(existingTopic).updateTrigger(eq(WeakTopicTrigger.BOTH), eq(new BigDecimal("50.00")), eq(1), any(Instant.class), eq("UTC"));
         verify(weakTopicRepository).save(existingTopic);
         // Entity fetch should not happen
         verify(userAccountRepository, never()).findById(any());
@@ -234,7 +239,7 @@ class WeakTopicServiceImplTest {
         when(mockMilestone.getTitle()).thenReturn("OOP foundations");
 
         when(weakTopicRepository.findWithItemByUserIdAndRoadmapVersionIdAndStatusIn(
-                eq(userId), eq(roadmapId), eq(Collections.singletonList(WeakTopicStatus.UNRESOLVED))))
+                eq(userId), eq(roadmapId), eq(List.of(WeakTopicStatus.UNRESOLVED, WeakTopicStatus.IN_REVIEW))))
                 .thenReturn(List.of(mockTopic));
 
         List<WeakTopicPromptContext> result = weakTopicService.resolveUnresolvedWeakTopics(userId, roadmapId);
@@ -269,7 +274,7 @@ class WeakTopicServiceImplTest {
         when(mockItem.getTitle()).thenReturn("Legacy topic");
 
         when(weakTopicRepository.findWithItemByUserIdAndRoadmapVersionIdAndStatusIn(
-                eq(userId), eq(roadmapId), eq(Collections.singletonList(WeakTopicStatus.UNRESOLVED))))
+                eq(userId), eq(roadmapId), eq(List.of(WeakTopicStatus.UNRESOLVED, WeakTopicStatus.IN_REVIEW))))
                 .thenReturn(List.of(mockTopic));
 
         List<WeakTopicPromptContext> result = weakTopicService.resolveUnresolvedWeakTopics(userId, roadmapId);
@@ -291,7 +296,7 @@ class WeakTopicServiceImplTest {
         when(weakTopicRepository.findWithItemByUserIdAndRoadmapIdAndStatusIn(
                 eq(userId),
                 eq(roadmapId),
-                eq(List.of(WeakTopicStatus.values()))))
+                eq(List.of(WeakTopicStatus.UNRESOLVED, WeakTopicStatus.IN_REVIEW))))
                 .thenReturn(List.of());
 
         List<WeakTopicResponse> result = weakTopicService.getWeakTopics(
@@ -303,7 +308,7 @@ class WeakTopicServiceImplTest {
         verify(weakTopicRepository).findWithItemByUserIdAndRoadmapIdAndStatusIn(
                 userId,
                 roadmapId,
-                List.of(WeakTopicStatus.values()));
+                List.of(WeakTopicStatus.UNRESOLVED, WeakTopicStatus.IN_REVIEW));
     }
 
     @Test
@@ -358,7 +363,7 @@ class WeakTopicServiceImplTest {
         when(weakTopicRepository.findWithItemByUserIdAndRoadmapIdAndStatusIn(
                 userId,
                 roadmapId,
-                List.of(WeakTopicStatus.values())))
+                List.of(WeakTopicStatus.UNRESOLVED, WeakTopicStatus.IN_REVIEW)))
                 .thenReturn(List.of(weakTopic));
 
         WeakTopicResponse response = weakTopicService.getWeakTopics(
@@ -375,6 +380,44 @@ class WeakTopicServiceImplTest {
         assertEquals("Core OOP principles", response.topicTitle());
         assertEquals(milestoneId, response.milestoneId());
         assertEquals("OOP foundations", response.milestoneTitle());
+    }
+
+    @Test
+    void generateMasteryCheck_rejectsTheDetectionDay() {
+        UUID weakTopicId = UUID.randomUUID();
+        WeakTopic weakTopic = mock(WeakTopic.class);
+        when(weakTopicRepository.findWithContextByIdAndUserId(weakTopicId, userId))
+                .thenReturn(Optional.of(weakTopic));
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> weakTopicService.generateMasteryCheckQuiz(userId, weakTopicId));
+
+        assertEquals(ErrorCode.WEAK_TOPIC_NOT_ELIGIBLE, exception.errorCode());
+        verify(quizGeneratorService, never()).generateMasteryCheckQuestions(
+                any(), any(), any());
+    }
+
+    @Test
+    void getMasteryCheckQuiz_rejectsAnotherWeakTopicQuiz() {
+        UUID weakTopicId = UUID.randomUUID();
+        UUID quizId = UUID.randomUUID();
+        WeakTopic weakTopic = mock(WeakTopic.class);
+        Quiz quiz = mock(Quiz.class);
+        WeakTopic otherTarget = mock(WeakTopic.class);
+        when(otherTarget.getId()).thenReturn(UUID.randomUUID());
+        when(quiz.getQuizType()).thenReturn(QuizType.MASTERY_CHECK);
+        when(quiz.getTargetWeakTopic()).thenReturn(otherTarget);
+        when(weakTopicRepository.findWithContextByIdAndUserId(weakTopicId, userId))
+                .thenReturn(Optional.of(weakTopic));
+        when(quizRepository.findWithQuestionsByIdAndUserId(quizId, userId))
+                .thenReturn(Optional.of(quiz));
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> weakTopicService.getMasteryCheckQuiz(userId, weakTopicId, quizId));
+
+        assertEquals(ErrorCode.RESOURCE_NOT_FOUND, exception.errorCode());
     }
 
     private void setupMockEntities() {

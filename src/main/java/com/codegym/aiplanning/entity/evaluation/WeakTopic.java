@@ -16,6 +16,8 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "weak_topics")
@@ -48,6 +50,9 @@ public class WeakTopic extends BaseEntity {
     @Column(name = "last_quiz_score", precision = 5, scale = 2)
     private BigDecimal lastQuizScore;
 
+    @Column(name = "last_mastery_score", precision = 5, scale = 2)
+    private BigDecimal lastMasteryScore;
+
     @Column(name = "last_understanding_rating")
     private Integer lastUnderstandingRating;
 
@@ -56,6 +61,12 @@ public class WeakTopic extends BaseEntity {
 
     @Column(name = "mastered_at")
     private Instant masteredAt;
+
+    @Column(name = "eligibility_zone", nullable = false, length = 50)
+    private String eligibilityZone;
+
+    @Column(name = "eligible_on", nullable = false)
+    private LocalDate eligibleOn;
 
     protected WeakTopic() {}
 
@@ -67,7 +78,8 @@ public class WeakTopic extends BaseEntity {
             WeakTopicTrigger triggerSource,
             BigDecimal quizScore,
             Integer understandingRating,
-            Instant unresolvedAt) {
+            Instant unresolvedAt,
+            String eligibilityZone) {
         if (roadmapItem == null
                 || roadmapItem.getItemType() != RoadmapItemType.LEARNING_UNIT) {
             throw new IllegalArgumentException(
@@ -95,6 +107,7 @@ public class WeakTopic extends BaseEntity {
         weakTopic.lastQuizScore = quizScore;
         weakTopic.lastUnderstandingRating = understandingRating;
         weakTopic.unresolvedAt = unresolvedAt != null ? unresolvedAt : Instant.now();
+        weakTopic.setEligibility(weakTopic.unresolvedAt, eligibilityZone);
         return weakTopic;
     }
 
@@ -102,7 +115,8 @@ public class WeakTopic extends BaseEntity {
             WeakTopicTrigger triggerSource,
             BigDecimal quizScore,
             Integer understandingRating,
-            Instant triggerTime) {
+            Instant triggerTime,
+            String eligibilityZone) {
         this.triggerSource = triggerSource;
         if (quizScore != null) {
             this.lastQuizScore = quizScore;
@@ -110,9 +124,28 @@ public class WeakTopic extends BaseEntity {
         if (understandingRating != null) {
             this.lastUnderstandingRating = understandingRating;
         }
+        if (this.status == WeakTopicStatus.MASTERED) {
+            this.unresolvedAt = triggerTime != null ? triggerTime : Instant.now();
+            setEligibility(this.unresolvedAt, eligibilityZone);
+            this.masteredAt = null;
+        }
         this.status = WeakTopicStatus.UNRESOLVED;
-        this.unresolvedAt = triggerTime != null ? triggerTime : Instant.now();
+    }
+
+    public void markMasteryFailed(BigDecimal score) {
+        this.status = WeakTopicStatus.UNRESOLVED;
+        this.lastMasteryScore = score;
         this.masteredAt = null;
+    }
+
+    public boolean isEligibleForMastery(Instant now) {
+        return !now.atZone(ZoneId.of(eligibilityZone)).toLocalDate().isBefore(eligibleOn);
+    }
+
+    private void setEligibility(Instant detectedAt, String zone) {
+        ZoneId zoneId = ZoneId.of(zone);
+        this.eligibilityZone = zoneId.getId();
+        this.eligibleOn = detectedAt.atZone(zoneId).toLocalDate().plusDays(1);
     }
 
     public void markInReview() {
@@ -121,9 +154,10 @@ public class WeakTopic extends BaseEntity {
         }
     }
 
-    public void markMastered(Instant masteredAt) {
+    public void markMastered(Instant masteredAt, BigDecimal score) {
         this.status = WeakTopicStatus.MASTERED;
         this.masteredAt = masteredAt != null ? masteredAt : Instant.now();
+        this.lastMasteryScore = score;
     }
 
     public UserAccount getUser() {
@@ -154,6 +188,10 @@ public class WeakTopic extends BaseEntity {
         return lastQuizScore;
     }
 
+    public BigDecimal getLastMasteryScore() {
+        return lastMasteryScore;
+    }
+
     public Integer getLastUnderstandingRating() {
         return lastUnderstandingRating;
     }
@@ -164,5 +202,13 @@ public class WeakTopic extends BaseEntity {
 
     public Instant getMasteredAt() {
         return masteredAt;
+    }
+
+    public LocalDate getEligibleOn() {
+        return eligibleOn;
+    }
+
+    public String getEligibilityZone() {
+        return eligibilityZone;
     }
 }

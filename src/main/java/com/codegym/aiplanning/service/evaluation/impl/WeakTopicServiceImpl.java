@@ -7,6 +7,7 @@ import com.codegym.aiplanning.controller.evaluation.dto.QuizDetailResponse;
 import com.codegym.aiplanning.controller.evaluation.dto.SubmitQuizRequest;
 import com.codegym.aiplanning.controller.evaluation.dto.WeakTopicResponse;
 import com.codegym.aiplanning.entity.ai.AiProviderConfig;
+import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.evaluation.Quiz;
 import com.codegym.aiplanning.entity.evaluation.QuizQuestion;
@@ -21,6 +22,7 @@ import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.repository.evaluation.QuizRepository;
 import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
+import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.service.evaluation.QuizGeneratorService;
@@ -28,12 +30,12 @@ import com.codegym.aiplanning.service.evaluation.QuizGeneratorService.GeneratedQ
 import com.codegym.aiplanning.service.evaluation.QuizTopicScoredEvent;
 import com.codegym.aiplanning.service.evaluation.WeakTopicContextResolver;
 import com.codegym.aiplanning.service.evaluation.WeakTopicService;
+import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -52,29 +54,35 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
 
     private final WeakTopicRepository weakTopicRepository;
     private final UserAccountRepository userAccountRepository;
+    private final UserProfileRepository userProfileRepository;
     private final RoadmapItemRepository roadmapItemRepository;
     private final RoadmapRepository roadmapRepository;
     private final QuizRepository quizRepository;
     private final QuizGeneratorService quizGeneratorService;
     private final DailyEvaluationPersistenceService evaluationPersistenceService;
+    private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
 
     public WeakTopicServiceImpl(
             WeakTopicRepository weakTopicRepository,
             UserAccountRepository userAccountRepository,
+            UserProfileRepository userProfileRepository,
             RoadmapItemRepository roadmapItemRepository,
             RoadmapRepository roadmapRepository,
             QuizRepository quizRepository,
             QuizGeneratorService quizGeneratorService,
             DailyEvaluationPersistenceService evaluationPersistenceService,
+            AuditLogService auditLogService,
             ObjectMapper objectMapper) {
         this.weakTopicRepository = weakTopicRepository;
         this.userAccountRepository = userAccountRepository;
+        this.userProfileRepository = userProfileRepository;
         this.roadmapItemRepository = roadmapItemRepository;
         this.roadmapRepository = roadmapRepository;
         this.quizRepository = quizRepository;
         this.quizGeneratorService = quizGeneratorService;
         this.evaluationPersistenceService = evaluationPersistenceService;
+        this.auditLogService = auditLogService;
         this.objectMapper = objectMapper;
     }
 
@@ -111,8 +119,22 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
                         "Roadmap Learning Unit was not found.");
             }
             requireLearningUnitHierarchy(existingWeakTopic.getRoadmapItem());
-            existingWeakTopic.updateTrigger(triggerSource, quizScore, understandingRating, Instant.now());
+            boolean reopening = existingWeakTopic.getStatus() == WeakTopicStatus.MASTERED;
+            existingWeakTopic.updateTrigger(
+                    triggerSource,
+                    quizScore,
+                    understandingRating,
+                    Instant.now(),
+                    eligibilityZone(userId));
             weakTopicRepository.save(existingWeakTopic);
+            if (reopening) {
+                auditLogService.logAction(
+                        userId,
+                        existingWeakTopic.getUser().getEmail(),
+                        AuditEventAction.WEAK_TOPIC_REOPENED,
+                        "WeakTopic",
+                        existingWeakTopic.getId().toString());
+            }
         } else {
             UserAccount user = userAccountRepository.findById(userId)
                     .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "User not found"));
@@ -136,7 +158,8 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
                     triggerSource,
                     quizScore,
                     understandingRating,
-                    Instant.now());
+                    Instant.now(),
+                    eligibilityZone(userId));
             weakTopicRepository.save(newWeakTopic);
         }
     }
@@ -161,7 +184,7 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
                 .findWithItemByUserIdAndRoadmapVersionIdAndStatusIn(
                         userId,
                         roadmapVersionId,
-                        Collections.singletonList(WeakTopicStatus.UNRESOLVED));
+                        List.of(WeakTopicStatus.UNRESOLVED, WeakTopicStatus.IN_REVIEW));
 
         return unresolvedTopics.stream()
                 .map(wt -> {
@@ -191,7 +214,7 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
                         ErrorCode.RESOURCE_NOT_FOUND,
                         "Roadmap was not found."));
         Collection<WeakTopicStatus> selectedStatuses = statuses == null || statuses.isEmpty()
-                ? List.of(WeakTopicStatus.values())
+                ? List.of(WeakTopicStatus.UNRESOLVED, WeakTopicStatus.IN_REVIEW)
                 : statuses;
         return weakTopicRepository
                 .findWithItemByUserIdAndRoadmapIdAndStatusIn(
@@ -216,9 +239,10 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
         WeakTopic weakTopic = requireOwnedWeakTopic(userId, weakTopicId);
         if (weakTopic.getStatus() == WeakTopicStatus.MASTERED) {
             throw new BusinessException(
-                    ErrorCode.CONFLICT,
+                    ErrorCode.WEAK_TOPIC_ALREADY_MASTERED,
                     "A mastered topic does not require another mastery check.");
         }
+        requireMasteryEligibility(weakTopic);
 
         Optional<Quiz> existing = quizRepository
                 .findWithQuestionsByUserIdAndTargetWeakTopicIdAndQuizType(
@@ -261,33 +285,53 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public QuizDetailResponse getMasteryCheckQuiz(
+            UUID userId,
+            UUID weakTopicId,
+            UUID quizId) {
+        WeakTopic weakTopic = requireOwnedWeakTopic(userId, weakTopicId);
+        Quiz quiz = quizRepository.findWithQuestionsByIdAndUserId(quizId, userId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.RESOURCE_NOT_FOUND,
+                        "Mastery quiz was not found."));
+        if (quiz.getQuizType() != QuizType.MASTERY_CHECK
+                || quiz.getTargetWeakTopic() == null
+                || !weakTopicId.equals(quiz.getTargetWeakTopic().getId())
+                || !quiz.getRoadmap().getId().equals(weakTopic.getRoadmap().getId())
+                || !quiz.getRoadmapVersion().getId().equals(weakTopic.getRoadmapVersion().getId())
+                || quiz.getQuestions().stream().anyMatch(question ->
+                        !question.getRoadmapItem().getId().equals(weakTopic.getRoadmapItem().getId()))) {
+            throw new BusinessException(
+                    ErrorCode.RESOURCE_NOT_FOUND,
+                    "Mastery quiz was not found.");
+        }
+        return evaluationPersistenceService.mapToQuizDetailResponse(quiz);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<QuizDetailResponse> getMasteryCheckHistory(
+            UUID userId,
+            UUID weakTopicId) {
+        requireOwnedWeakTopic(userId, weakTopicId);
+        return quizRepository.findWithQuestionsByUserIdAndTargetWeakTopicIdAndQuizType(
+                        userId,
+                        weakTopicId,
+                        QuizType.MASTERY_CHECK)
+                .stream()
+                .map(evaluationPersistenceService::mapToQuizDetailResponse)
+                .toList();
+    }
+
+    @Override
     @Transactional
     public MasteryCheckResultResponse submitMasteryCheck(UUID userId, UUID weakTopicId, UUID quizId, SubmitQuizRequest request) {
-        WeakTopic weakTopic = requireOwnedWeakTopic(userId, weakTopicId);
-        QuizDetailResponse quiz = evaluationPersistenceService.submitMasteryQuiz(
+        return evaluationPersistenceService.submitMasteryQuiz(
                 userId,
                 weakTopicId,
                 quizId,
                 request);
-        boolean mastered = Boolean.TRUE.equals(quiz.passed());
-        if (mastered) {
-            weakTopic.markMastered(Instant.now());
-        } else {
-            weakTopic.updateTrigger(
-                    WeakTopicTrigger.QUIZ_FAILED,
-                    quiz.score(),
-                    null,
-                    Instant.now());
-        }
-        weakTopicRepository.save(weakTopic);
-        return new MasteryCheckResultResponse(
-                weakTopicId,
-                quiz.score(),
-                mastered,
-                weakTopic.getStatus(),
-                mastered
-                        ? "The topic is now mastered."
-                        : "The topic remains unresolved.");
     }
 
     @Override
@@ -329,9 +373,26 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
                 weakTopic.getStatus(),
                 weakTopic.getTriggerSource(),
                 weakTopic.getLastQuizScore(),
+                weakTopic.getLastMasteryScore(),
                 weakTopic.getLastUnderstandingRating(),
                 weakTopic.getUnresolvedAt(),
+                weakTopic.getEligibleOn(),
+                weakTopic.getEligibilityZone(),
                 weakTopic.getMasteredAt());
+    }
+
+    private String eligibilityZone(UUID userId) {
+        return userProfileRepository.findByUserId(userId)
+                .map(profile -> profile.getTimeZone())
+                .orElse("UTC");
+    }
+
+    private void requireMasteryEligibility(WeakTopic weakTopic) {
+        if (!weakTopic.isEligibleForMastery(Instant.now())) {
+            throw new BusinessException(
+                    ErrorCode.WEAK_TOPIC_NOT_ELIGIBLE,
+                    "A mastery check is available from the next local calendar day.");
+        }
     }
 
     private void requireLearningUnitHierarchy(RoadmapItem item) {

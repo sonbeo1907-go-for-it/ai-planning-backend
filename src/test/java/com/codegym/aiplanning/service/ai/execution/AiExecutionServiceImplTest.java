@@ -328,6 +328,8 @@ class AiExecutionServiceImplTest {
         WeakTopic weakTopic = org.mockito.Mockito.mock(WeakTopic.class);
         when(weakTopicRepository.findByIdAndUserId(weakTopicId, ownerId))
                 .thenReturn(Optional.of(weakTopic));
+        when(weakTopic.isEligibleForMastery(any(java.time.Instant.class)))
+                .thenReturn(true);
         when(executionRepository
                         .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
                                 ownerId,
@@ -369,7 +371,7 @@ class AiExecutionServiceImplTest {
                         weakTopicId,
                         "mastered-topic-request"));
 
-        assertEquals(ErrorCode.CONFLICT, exception.errorCode());
+        assertEquals(ErrorCode.WEAK_TOPIC_ALREADY_MASTERED, exception.errorCode());
         verify(providerSelector, never()).requireDefault(any());
         verify(executionRepository, never()).saveAndFlush(any());
     }

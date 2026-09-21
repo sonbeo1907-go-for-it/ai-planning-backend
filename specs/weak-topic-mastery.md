@@ -2,14 +2,15 @@
 
 ## Status
 
-Partially implemented and requiring correction.
+Implemented on the `feature/weak-topic-reinforcement-mastery` backend and
+frontend branches, pending merge and operational review. The product-approved
+mastery threshold is 80% on a dedicated five-question check.
 
 The repository already contains `WeakTopic`, mastery-check quiz generation,
 quiz attempts, and the states `UNRESOLVED`, `IN_REVIEW`, and `MASTERED`.
-However, the current mastery transition uses the ordinary quiz pass result,
-whose threshold is 80%. This specification requires an exact 100% result for
-mastery. Active `IN_REVIEW` records must also remain part of Weak Topic
-planning until they are mastered.
+Mastery scoring must remain an explicit policy separate from the ordinary
+daily-quiz pass result, even while both thresholds are 80%. Active `IN_REVIEW`
+records must also remain part of Weak Topic planning until they are mastered.
 
 ## Improvised user story
 
@@ -34,7 +35,7 @@ The daily Micro-Quiz pass threshold and the mastery threshold represent
 different decisions:
 
 - Daily Micro-Quiz pass: existing evaluation policy, currently 80%.
-- Weak Topic mastery: exactly 100% on a dedicated mastery check.
+- Weak Topic mastery: at least 80% on a dedicated five-question check (4/5).
 
 ## Scope and actors
 
@@ -75,6 +76,9 @@ attempt; it never overwrites an earlier result.
   snapshot so that a later profile-timezone change does not rewrite history.
 - The USER may attempt the check on any eligible later date. Missing the first
   eligible day does not archive or master the Weak Topic.
+- Additional weak evidence while the topic remains active updates its evidence
+  but does not postpone the original eligibility date. Reopening a `MASTERED`
+  topic starts a new next-day eligibility window.
 - An existing generated but unsubmitted mastery quiz is returned instead of
   creating a duplicate.
 - A `MASTERED` Weak Topic cannot generate another mastery check unless later
@@ -89,7 +93,7 @@ attempt; it never overwrites an earlier result.
 UNRESOLVED --------------------------------------> IN_REVIEW
      ^                                                  |
      |                                                  |
-     | failed or incomplete mastery attempt             | 100% mastery attempt
+     | failed or incomplete mastery attempt             | at least 80% mastery attempt
      +--------------------------------------------------+------> MASTERED
 
 MASTERED -- later explicit weak evidence for the same current Learning Unit --> UNRESOLVED
@@ -100,9 +104,9 @@ Rules:
 - `UNRESOLVED` and `IN_REVIEW` are both active Weak Topic states.
 - Merely scheduling a REVIEW task may change `UNRESOLVED` to `IN_REVIEW`, but
   it must not remove the Weak Topic from planning context.
-- A mastery attempt below 100% returns the Weak Topic to `UNRESOLVED`, records
+- A mastery attempt below 80% returns the Weak Topic to `UNRESOLVED`, records
   the attempt, and permits a later retry.
-- Only an exactly 100% submitted mastery attempt changes the state to
+- Only a submitted mastery attempt with at least four of five correct answers changes the state to
   `MASTERED` and records `masteredAt`.
 - State transitions use optimistic or pessimistic concurrency protection so
   two submissions cannot produce inconsistent results.
@@ -141,8 +145,8 @@ Rules:
 - The AI context may include the Learning Unit, parent Topic, parent Milestone,
   and relevant source-backed content.
 - Roadmap and source text are untrusted data, never AI instructions.
-- The generated quiz contains a bounded number of questions sufficient to test
-  the unit; the recommended default is three to five.
+- The generated mastery quiz contains exactly five questions so that four
+  correct answers can meet the 80% threshold.
 - Every question contains one correct answer, plausible options, and a concise
   explanation.
 - AI output passes strict schema validation. An invalid response may retry at
@@ -152,11 +156,13 @@ Rules:
 - Mastery is true only when:
 
 ```text
-correct answers == total questions
-and score == 100%
+total questions == 5
+and correct answers >= 4
+and score >= 80%
 ```
 
-- Rounding must never turn a non-perfect result into mastery.
+- Scoring uses integer correct/total counts; rounding cannot turn a failing
+  result into mastery.
 
 ## Asynchronous generation
 
@@ -179,6 +185,9 @@ Existing endpoint groups remain appropriate:
 |---|---|---|
 | `GET` | `/api/v1/roadmaps/{roadmapId}/weak-topics` | List owner-scoped Weak Topics, filterable by status |
 | `POST` | `/api/v1/weak-topics/{weakTopicId}/mastery-check/generate` | Queue an eligible mastery check |
+| `GET` | `/api/v1/weak-topics/{weakTopicId}/mastery-check/execution` | Recover the latest generation execution |
+| `GET` | `/api/v1/weak-topics/{weakTopicId}/mastery-check/{quizId}` | Read one owner-owned check and its result |
+| `GET` | `/api/v1/weak-topics/{weakTopicId}/mastery-checks` | Read the check history |
 | `GET` | `/api/v1/ai-executions/{executionId}` | Read asynchronous generation state |
 | `POST` | `/api/v1/weak-topics/{weakTopicId}/mastery-check/{quizId}/submit` | Submit one complete attempt |
 
@@ -223,8 +232,8 @@ submission policy, never before submission.
   quiz.
 - Incomplete or duplicate answers: reject submission without grading or state
   change.
-- Incorrect answer: persist the attempt, return the state to `UNRESOLVED`, and
-  do not set `masteredAt`.
+- Fewer than four correct answers: persist the attempt, return the state to
+  `UNRESOLVED`, and do not set `masteredAt`.
 - Duplicate submission of the same attempt: return an idempotent result or a
   stable conflict; never create duplicate attempt history.
 - Concurrent attempts: only one state transition is committed, while every
@@ -239,7 +248,7 @@ submission policy, never before submission.
 - `QUIZ_ALREADY_SUBMITTED`
 - `QUIZ_ANSWERS_INCOMPLETE`
 - `QUIZ_ANSWER_DUPLICATE`
-- `AI_PROVIDER_NOT_CONFIGURED`
+- `AI_PROVIDER_DEFAULT_REQUIRED`
 - `AI_PROVIDER_UNAVAILABLE`
 - `AI_OUTPUT_INVALID`
 - `CONFLICT`
@@ -273,8 +282,8 @@ submission policy, never before submission.
 
 ### Domain and service tests
 
-- 100% marks the Weak Topic `MASTERED`.
-- 99% or any incorrect answer does not mark mastery, regardless of rounding.
+- Four or five correct answers out of five mark the Weak Topic `MASTERED`.
+- Three or fewer correct answers leave it active, regardless of rounding.
 - A failed attempt returns `IN_REVIEW` to `UNRESOLVED`.
 - `UNRESOLVED` and `IN_REVIEW` both remain in active planning context.
 - `MASTERED` is excluded from later Daily Plan Weak Topic context.
@@ -304,9 +313,9 @@ submission policy, never before submission.
    local calendar day and remains eligible afterward.
 2. The mastery quiz targets exactly one owner-owned Learning Unit and preserves
    its RoadmapVersion context.
-3. Only a submitted score of exactly 100% changes the Weak Topic to
+3. Only a submitted score of at least 80% (four of five correct) changes the Weak Topic to
    `MASTERED`.
-4. Any non-perfect result remains historical evidence and leaves the Weak Topic
+4. Any result below 80% remains historical evidence and leaves the Weak Topic
    active for later review.
 5. Both `UNRESOLVED` and `IN_REVIEW` remain available to Daily Plan re-planning;
    `MASTERED` does not.
@@ -324,4 +333,3 @@ submission policy, never before submission.
 - Weighted mastery or knowledge maps.
 - ADMIN correction of USER mastery state.
 - Forcing review work beyond the Daily Plan time budget.
-

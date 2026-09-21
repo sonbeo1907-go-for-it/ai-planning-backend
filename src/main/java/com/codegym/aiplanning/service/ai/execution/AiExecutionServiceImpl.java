@@ -252,8 +252,13 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                         "Weak Topic was not found."));
         if (weakTopic.getStatus() == WeakTopicStatus.MASTERED) {
             throw new BusinessException(
-                    ErrorCode.CONFLICT,
+                    ErrorCode.WEAK_TOPIC_ALREADY_MASTERED,
                     "A mastered topic does not require another mastery check.");
+        }
+        if (!weakTopic.isEligibleForMastery(Instant.now())) {
+            throw new BusinessException(
+                    ErrorCode.WEAK_TOPIC_NOT_ELIGIBLE,
+                    "A mastery check is available from the next local calendar day.");
         }
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
         if (normalizedKey != null) {
@@ -300,6 +305,24 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                 "AiExecution",
                 execution.getId().toString());
         return AiExecutionResponse.from(execution);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AiExecutionResponse getLatestMasteryCheckExecution(
+            UUID ownerId,
+            UUID weakTopicId) {
+        weakTopicRepository.findByIdAndUserId(weakTopicId, ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.WEAK_TOPIC_NOT_FOUND,
+                        "Weak Topic was not found."));
+        return AiExecutionResponse.from(executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.WEAK_TOPIC,
+                        weakTopicId,
+                        AiPurpose.QUIZ_GENERATION)
+                .orElseThrow(this::notFound));
     }
 
     @Override
