@@ -75,6 +75,15 @@ public class AiExecution extends BaseEntity {
     @Column(name = "lease_expires_at")
     private Instant leaseExpiresAt;
 
+    @Column(name = "latency_ms")
+    private Long latencyMs;
+
+    @Column(name = "input_tokens")
+    private Integer inputTokens;
+
+    @Column(name = "output_tokens")
+    private Integer outputTokens;
+
     protected AiExecution() {}
 
     public static AiExecution queue(
@@ -101,6 +110,16 @@ public class AiExecution extends BaseEntity {
 
     public void markSucceeded(
             AiExecutionResultType resultType, UUID resultId, Instant completedAt) {
+        markSucceeded(resultType, resultId, completedAt, null, null, null);
+    }
+
+    public void markSucceeded(
+            AiExecutionResultType resultType,
+            UUID resultId,
+            Instant completedAt,
+            Long latencyMs,
+            Integer inputTokens,
+            Integer outputTokens) {
         requireRunning();
         this.status = AiExecutionStatus.SUCCEEDED;
         this.resultType = resultType;
@@ -108,16 +127,43 @@ public class AiExecution extends BaseEntity {
         this.failureCode = null;
         this.failureMessage = null;
         this.completedAt = completedAt;
+        this.latencyMs = latencyMs;
+        this.inputTokens = inputTokens;
+        this.outputTokens = outputTokens;
         this.leaseExpiresAt = null;
         this.activeSlotTargetId = null;
     }
 
     public void markFailed(String failureCode, String failureMessage, Instant completedAt) {
+        markFailed(failureCode, failureMessage, completedAt, null);
+    }
+
+    public void markFailed(
+            String failureCode,
+            String failureMessage,
+            Instant completedAt,
+            Long latencyMs) {
         requireRunning();
         this.status = AiExecutionStatus.FAILED;
         this.failureCode = failureCode;
         this.failureMessage = failureMessage;
         this.completedAt = completedAt;
+        this.latencyMs = latencyMs;
+        this.leaseExpiresAt = null;
+        this.activeSlotTargetId = null;
+    }
+
+    public void markTimeout(
+            String failureCode,
+            String failureMessage,
+            Instant completedAt,
+            Long latencyMs) {
+        requireRunning();
+        this.status = AiExecutionStatus.TIMEOUT;
+        this.failureCode = failureCode;
+        this.failureMessage = failureMessage;
+        this.completedAt = completedAt;
+        this.latencyMs = latencyMs;
         this.leaseExpiresAt = null;
         this.activeSlotTargetId = null;
     }
@@ -186,5 +232,17 @@ public class AiExecution extends BaseEntity {
 
     public Instant getCompletedAt() {
         return completedAt;
+    }
+
+    public Long getLatencyMs() {
+        return latencyMs;
+    }
+
+    public Integer getInputTokens() {
+        return inputTokens;
+    }
+
+    public Integer getOutputTokens() {
+        return outputTokens;
     }
 }

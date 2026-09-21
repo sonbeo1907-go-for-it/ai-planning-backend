@@ -11,9 +11,13 @@ import com.codegym.aiplanning.service.ai.AiCredentialSelector;
 import com.codegym.aiplanning.service.ai.AiProviderSelector;
 import com.codegym.aiplanning.service.ai.ResolvedAiCredential;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import java.net.SocketTimeoutException;
+import java.net.http.HttpTimeoutException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
@@ -65,13 +69,25 @@ public class OpenAiCompatibleAiClient implements AiClientService {
                     .body(requestBody(config, provider, systemPrompt, userPrompt))
                     .retrieve()
                     .body(CompletionResponse.class);
+            if (response != null && response.usage() != null) {
+                AiUsageHolder.set(new AiUsage(
+                        response.usage().promptTokens(),
+                        response.usage().completionTokens()));
+            }
             return requireContent(response);
         } catch (RestClientResponseException exception) {
             throw providerFailure(exception);
         } catch (ResourceAccessException exception) {
+            if (isTimeout(exception)) {
+                throw new BusinessException(
+                        ErrorCode.AI_TIMEOUT,
+                        "The AI provider timed out during generation.",
+                        exception.getCause() != null ? exception.getCause() : exception);
+            }
             throw new BusinessException(
                     ErrorCode.AI_PROVIDER_UNAVAILABLE,
-                    "The AI provider could not be reached within the configured timeout.");
+                    "The AI provider could not be reached within the configured timeout.",
+                    exception.getCause() != null ? exception.getCause() : exception);
         } catch (BusinessException exception) {
             throw exception;
         } catch (RuntimeException exception) {
@@ -177,8 +193,27 @@ public class OpenAiCompatibleAiClient implements AiClientService {
                 "The AI provider could not complete the generation request.");
     }
 
+    private boolean isTimeout(ResourceAccessException exception) {
+        Throwable cause = exception.getCause();
+        while (cause != null) {
+            if (cause instanceof HttpTimeoutException
+                    || cause instanceof SocketTimeoutException
+                    || cause instanceof TimeoutException) {
+                return true;
+            }
+            if (cause.getMessage() != null && cause.getMessage().toLowerCase().contains("timed out")) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        String msg = exception.getMessage();
+        return msg != null && msg.toLowerCase().contains("timed out");
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record CompletionResponse(List<CompletionChoice> choices) {}
+    private record CompletionResponse(
+            List<CompletionChoice> choices,
+            CompletionUsage usage) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record CompletionChoice(
@@ -187,4 +222,10 @@ public class OpenAiCompatibleAiClient implements AiClientService {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record CompletionMessage(String content) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record CompletionUsage(
+            @JsonProperty("prompt_tokens") Integer promptTokens,
+            @JsonProperty("completion_tokens") Integer completionTokens,
+            @JsonProperty("total_tokens") Integer totalTokens) {}
 }

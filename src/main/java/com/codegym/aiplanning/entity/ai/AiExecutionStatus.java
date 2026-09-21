@@ -4,5 +4,6 @@ public enum AiExecutionStatus {
     QUEUED,
     RUNNING,
     SUCCEEDED,
-    FAILED
+    FAILED,
+    TIMEOUT
 }

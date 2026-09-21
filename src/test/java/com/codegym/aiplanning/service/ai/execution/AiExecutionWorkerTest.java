@@ -142,7 +142,10 @@ class AiExecutionWorkerTest {
         verify(execution).markSucceeded(
                 eq(AiExecutionResultType.ROADMAP_VERSION),
                 eq(versionId),
-                any(Instant.class));
+                any(Instant.class),
+                any(Long.class),
+                any(),
+                any());
         verify(inputRepository).deleteByExecutionId(executionId);
         verify(auditLogService).logAction(
                 ownerId,
@@ -173,14 +176,15 @@ class AiExecutionWorkerTest {
         verify(execution).markFailed(
                 eq(ErrorCode.AI_PROVIDER_UNAVAILABLE.name()),
                 eq("Provider unavailable"),
-                any(Instant.class));
+                any(Instant.class),
+                any(Long.class));
         verify(auditLogService).logAction(
                 ownerId,
                 "user@example.com",
                 AuditEventAction.AI_EXECUTION_FAILED,
                 "AiExecution",
                 executionId.toString());
-        verify(execution, never()).markSucceeded(any(), any(), any());
+        verify(execution, never()).markSucceeded(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -216,7 +220,10 @@ class AiExecutionWorkerTest {
         verify(execution).markSucceeded(
                 eq(AiExecutionResultType.DAILY_PLAN_VERSION),
                 eq(versionId),
-                any(Instant.class));
+                any(Instant.class),
+                any(Long.class),
+                any(),
+                any());
         verify(roadmapGeneratorService, never())
                 .generateWithProviderConfig(any(), any(), any());
     }
@@ -243,7 +250,10 @@ class AiExecutionWorkerTest {
         verify(execution).markSucceeded(
                 eq(AiExecutionResultType.QUIZ),
                 eq(quizId),
-                any(Instant.class));
+                any(Instant.class),
+                any(Long.class),
+                any(),
+                any());
         verify(roadmapGeneratorService, never())
                 .generateWithProviderConfig(any(), any(), any());
     }
@@ -270,7 +280,10 @@ class AiExecutionWorkerTest {
         verify(execution).markSucceeded(
                 eq(AiExecutionResultType.QUIZ),
                 eq(quizId),
-                any(Instant.class));
+                any(Instant.class),
+                any(Long.class),
+                any(),
+                any());
         verify(dailyEvaluationService, never())
                 .generateDailyQuizWithProviderConfig(any(), any(), any());
     }
@@ -301,7 +314,10 @@ class AiExecutionWorkerTest {
         verify(execution).markSucceeded(
                 eq(AiExecutionResultType.TASK_GUIDANCE_REVISION),
                 eq(revisionId),
-                any(Instant.class));
+                any(Instant.class),
+                any(Long.class),
+                any(),
+                any());
         verify(auditLogService).logAction(
                 ownerId,
                 "user@example.com",
@@ -330,13 +346,46 @@ class AiExecutionWorkerTest {
         verify(execution).markFailed(
                 eq(ErrorCode.AI_OUTPUT_INVALID.name()),
                 eq("The AI provider returned invalid Task Guidance."),
-                any(Instant.class));
+                any(Instant.class),
+                any(Long.class));
         verify(auditLogService).logAction(
                 ownerId,
                 "user@example.com",
                 AuditEventAction.TASK_GUIDANCE_GENERATION_FAILED,
                 "AiExecution",
                 executionId.toString());
+    }
+
+    @Test
+    void providerTimeoutBecomesAQueryableTimeoutExecution() {
+        when(executionRepository.claimQueued(eq(executionId), any(Instant.class), any(Instant.class)))
+                .thenReturn(1);
+        when(executionRepository.findJobContextById(executionId))
+                .thenReturn(Optional.of(execution));
+        when(inputRepository.findById(executionId)).thenReturn(Optional.empty());
+        when(roadmapGeneratorService.generateWithProviderConfig(
+                        ownerId, roadmapId, providerConfig))
+                .thenThrow(new BusinessException(
+                        ErrorCode.AI_TIMEOUT,
+                        "The AI provider timed out during generation."));
+        when(executionRepository.findByIdForUpdate(executionId))
+                .thenReturn(Optional.of(execution));
+        when(execution.isRunning()).thenReturn(true);
+
+        worker.executeAsync(executionId);
+
+        verify(execution).markTimeout(
+                eq(ErrorCode.AI_TIMEOUT.name()),
+                eq("The AI provider timed out during generation."),
+                any(Instant.class),
+                any(Long.class));
+        verify(auditLogService).logAction(
+                ownerId,
+                "user@example.com",
+                AuditEventAction.AI_EXECUTION_TIMEOUT,
+                "AiExecution",
+                executionId.toString());
+        verify(execution, never()).markSucceeded(any(), any(), any(), any(), any(), any());
     }
 
     private void prepareClaimedExecution() {

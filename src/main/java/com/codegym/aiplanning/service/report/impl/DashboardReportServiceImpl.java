@@ -16,7 +16,6 @@ import com.codegym.aiplanning.controller.roadmap.dto.RoadmapProgressResponse;
 import com.codegym.aiplanning.entity.daily.ProgressEntry;
 import com.codegym.aiplanning.entity.daily.ProgressEntryStatus;
 import com.codegym.aiplanning.entity.evaluation.WeakTopic;
-import com.codegym.aiplanning.entity.evaluation.WeakTopicStatus;
 import com.codegym.aiplanning.entity.profile.UserProfile;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
@@ -38,7 +37,6 @@ import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -287,10 +285,6 @@ public class DashboardReportServiceImpl implements DashboardReportService {
         Map<UUID, RoadmapItemProgress> progressMap = progressList.stream()
                 .collect(Collectors.toMap(RoadmapItemProgress::getRoadmapItemId, Function.identity(), (a, b) -> a));
 
-        List<WeakTopic> weakTopics = weakTopicRepository.findByUserIdAndRoadmapIdOrderByCreatedAtDesc(userId, roadmap.getId());
-        Map<UUID, WeakTopic> weakTopicsByItemId = weakTopics.stream()
-                .collect(Collectors.toMap(wt -> wt.getRoadmapItem().getId(), Function.identity(), (a, b) -> a));
-
         List<RoadmapItem> milestones = items.stream()
                 .filter(i -> i.getItemType() == RoadmapItemType.MILESTONE)
                 .sorted(Comparator.comparingInt(RoadmapItem::getOrderIndex))
@@ -327,26 +321,18 @@ public class DashboardReportServiceImpl implements DashboardReportService {
                 for (RoadmapItem unit : units) {
                     totalLearningUnits++;
                     RoadmapItemProgress unitProg = progressMap.get(unit.getId());
-                    WeakTopic unitWeak = weakTopicsByItemId.get(unit.getId());
 
-                    boolean isUnitMastered = (unitProg != null && unitProg.getStatus() == RoadmapItemProgressStatus.COMPLETED)
-                            || (unitWeak != null && unitWeak.getStatus() == WeakTopicStatus.MASTERED);
+                    // Reinforcement mastery is not completion of the planned Learning Unit.
+                    boolean isUnitMastered = unitProg != null
+                            && unitProg.getStatus() == RoadmapItemProgressStatus.COMPLETED;
 
                     String unitStatus = isUnitMastered
                             ? "MASTERED"
-                            : (unitProg != null && unitProg.getStatus() == RoadmapItemProgressStatus.IN_PROGRESS
-                                    || (unitWeak != null && unitWeak.getStatus() != WeakTopicStatus.MASTERED))
+                            : (unitProg != null && unitProg.getStatus() == RoadmapItemProgressStatus.IN_PROGRESS)
                                     ? "IN_PROGRESS"
                                     : "NOT_STARTED";
 
-                    Instant masteredAt = null;
-                    if (isUnitMastered) {
-                        if (unitWeak != null && unitWeak.getMasteredAt() != null) {
-                            masteredAt = unitWeak.getMasteredAt();
-                        } else if (unitProg != null) {
-                            masteredAt = unitProg.getCompletedAt();
-                        }
-                    }
+                    Instant masteredAt = isUnitMastered ? unitProg.getCompletedAt() : null;
 
                     if (isUnitMastered) {
                         masteredLearningUnits++;
@@ -431,9 +417,10 @@ public class DashboardReportServiceImpl implements DashboardReportService {
 
                     Long daysToMaster = null;
                     if (wt.getMasteredAt() != null && wt.getUnresolvedAt() != null) {
+                        ZoneId zone = ZoneId.of(wt.getEligibilityZone());
                         daysToMaster = ChronoUnit.DAYS.between(
-                                wt.getUnresolvedAt().atZone(ZoneOffset.UTC).toLocalDate(),
-                                wt.getMasteredAt().atZone(ZoneOffset.UTC).toLocalDate());
+                                wt.getUnresolvedAt().atZone(zone).toLocalDate(),
+                                wt.getMasteredAt().atZone(zone).toLocalDate());
                         if (daysToMaster < 0) {
                             daysToMaster = 0L;
                         }

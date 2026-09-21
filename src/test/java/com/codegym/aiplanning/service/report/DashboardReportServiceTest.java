@@ -271,8 +271,9 @@ class DashboardReportServiceTest {
 
         WeakTopic wt2 = WeakTopic.create(
                 userProfile.getUser(), roadmap, version, unit2,
-                WeakTopicTrigger.QUIZ_FAILED, new BigDecimal("45.0"), 2, Instant.now().minus(5, ChronoUnit.DAYS));
-        wt2.markMastered(Instant.now());
+                WeakTopicTrigger.QUIZ_FAILED, new BigDecimal("45.0"), 2,
+                Instant.now().minus(5, ChronoUnit.DAYS), "Asia/Ho_Chi_Minh");
+        wt2.markMastered(Instant.now(), new BigDecimal("80.0"));
 
         when(roadmapRepository.findByOwnerIdAndStatus(userId, RoadmapStatus.ACTIVE))
                 .thenReturn(Optional.of(roadmap));
@@ -280,7 +281,7 @@ class DashboardReportServiceTest {
                 .thenReturn(List.of(milestone, topic1, topic2, unit1, unit2, unit3));
         when(roadmapItemProgressRepository.findByUserIdAndRoadmapVersionId(userId, versionId))
                 .thenReturn(List.of(p1));
-        when(weakTopicRepository.findByUserIdAndRoadmapIdOrderByCreatedAtDesc(userId, roadmapId))
+        lenient().when(weakTopicRepository.findByUserIdAndRoadmapIdOrderByCreatedAtDesc(userId, roadmapId))
                 .thenReturn(List.of(wt2));
 
         KnowledgeMapResponse response = dashboardReportService.getKnowledgeMap(userId, null);
@@ -290,13 +291,27 @@ class DashboardReportServiceTest {
         assertThat(response.totalMilestones()).isEqualTo(1);
         assertThat(response.totalTopics()).isEqualTo(2);
         assertThat(response.totalLearningUnits()).isEqualTo(3);
-        assertThat(response.masteredLearningUnits()).isEqualTo(2);
-        assertThat(response.masteredTopics()).isEqualTo(1);
-        assertThat(response.masteryPercentage()).isEqualTo(66.7);
+        assertThat(response.masteredLearningUnits()).isEqualTo(1);
+        assertThat(response.masteredTopics()).isZero();
+        assertThat(response.masteryPercentage()).isEqualTo(33.3);
         assertThat(response.milestones()).hasSize(1);
         assertThat(response.milestones().get(0).topics()).hasSize(2);
-        assertThat(response.milestones().get(0).topics().get(0).isMastered()).isTrue();
+        assertThat(response.milestones().get(0).topics().get(0).isMastered()).isFalse();
         assertThat(response.milestones().get(0).topics().get(1).isMastered()).isFalse();
+        assertThat(response.milestones().get(0).topics().get(0).learningUnits().get(1).isMastered())
+                .isFalse();
+
+        RoadmapItemProgress p2 = RoadmapItemProgress.create(userId, versionId, u2Id);
+        ReflectionTestUtils.setField(p2, "status", RoadmapItemProgressStatus.COMPLETED);
+        ReflectionTestUtils.setField(p2, "completionPercentage", 100);
+        ReflectionTestUtils.setField(p2, "completedAt", Instant.now());
+        when(roadmapItemProgressRepository.findByUserIdAndRoadmapVersionId(userId, versionId))
+                .thenReturn(List.of(p1, p2));
+
+        KnowledgeMapResponse completed = dashboardReportService.getKnowledgeMap(userId, null);
+        assertThat(completed.masteredLearningUnits()).isEqualTo(2);
+        assertThat(completed.masteredTopics()).isEqualTo(1);
+        assertThat(completed.masteryPercentage()).isEqualTo(66.7);
     }
 
     @Test
@@ -331,13 +346,14 @@ class DashboardReportServiceTest {
         RoadmapItem unit = RoadmapItem.learningUnit(version, topic, "Polymorphism", "", 0, 60);
         ReflectionTestUtils.setField(unit, "id", UUID.randomUUID());
 
-        Instant unresolvedAt = Instant.parse("2026-03-01T10:00:00Z");
-        Instant masteredAt = Instant.parse("2026-03-05T15:00:00Z");
+        Instant unresolvedAt = Instant.parse("2026-03-01T23:30:00Z");
+        Instant masteredAt = Instant.parse("2026-03-05T00:30:00Z");
 
         WeakTopic wt = WeakTopic.create(
                 userProfile.getUser(), roadmap, version, unit,
-                WeakTopicTrigger.QUIZ_FAILED, new BigDecimal("40.0"), 2, unresolvedAt);
-        wt.markMastered(masteredAt);
+                WeakTopicTrigger.QUIZ_FAILED, new BigDecimal("40.0"), 2,
+                unresolvedAt, "Asia/Ho_Chi_Minh");
+        wt.markMastered(masteredAt, new BigDecimal("80.0"));
 
         when(weakTopicRepository.findWithContextByUserIdAndOptionalRoadmapId(userId, roadmapId))
                 .thenReturn(List.of(wt));
@@ -350,6 +366,6 @@ class DashboardReportServiceTest {
         assertThat(item.topicTitle()).isEqualTo("OOP");
         assertThat(item.milestoneTitle()).isEqualTo("Milestone 1");
         assertThat(item.status()).isEqualTo(WeakTopicStatus.MASTERED);
-        assertThat(item.daysToMaster()).isEqualTo(4L);
+        assertThat(item.daysToMaster()).isEqualTo(3L);
     }
 }

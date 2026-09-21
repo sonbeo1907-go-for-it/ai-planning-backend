@@ -17,6 +17,8 @@ import com.codegym.aiplanning.service.daily.DailyPlanService;
 import com.codegym.aiplanning.service.evaluation.DailyEvaluationService;
 import com.codegym.aiplanning.service.evaluation.WeakTopicService;
 import com.codegym.aiplanning.service.guidance.TaskGuidanceGenerationService;
+import com.codegym.aiplanning.service.ai.provider.AiUsage;
+import com.codegym.aiplanning.service.ai.provider.AiUsageHolder;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -70,20 +72,37 @@ public class AiExecutionWorker {
             return;
         }
 
+        long startNanos = System.nanoTime();
         try {
             GenerationResult result = execute(context);
-            completeSuccessfully(context, result.resultType(), result.resultId());
+            long latencyMs = Math.max(0L, (System.nanoTime() - startNanos) / 1_000_000L);
+            AiUsage usage = AiUsageHolder.getAndClear();
+            completeSuccessfully(context, result.resultType(), result.resultId(), latencyMs, usage);
         } catch (BusinessException exception) {
-            completeWithFailure(
-                    context,
-                    exception.errorCode().name(),
-                    safeFailureMessage(context, exception));
+            long latencyMs = Math.max(0L, (System.nanoTime() - startNanos) / 1_000_000L);
+            if (exception.errorCode() == ErrorCode.AI_TIMEOUT) {
+                completeWithTimeout(
+                        context,
+                        exception.errorCode().name(),
+                        safeFailureMessage(context, exception),
+                        latencyMs);
+            } else {
+                completeWithFailure(
+                        context,
+                        exception.errorCode().name(),
+                        safeFailureMessage(context, exception),
+                        latencyMs);
+            }
         } catch (RuntimeException exception) {
+            long latencyMs = Math.max(0L, (System.nanoTime() - startNanos) / 1_000_000L);
             logUnexpectedFailure(context.executionId(), exception);
             completeWithFailure(
                     context,
                     ErrorCode.AI_GENERATION_FAILED.name(),
-                    "AI execution failed unexpectedly.");
+                    "AI execution failed unexpectedly.",
+                    latencyMs);
+        } finally {
+            AiUsageHolder.clear();
         }
     }
 
@@ -169,7 +188,9 @@ public class AiExecutionWorker {
     private void completeSuccessfully(
             JobContext context,
             AiExecutionResultType resultType,
-            UUID resultId) {
+            UUID resultId,
+            Long latencyMs,
+            AiUsage usage) {
         transactionTemplate.executeWithoutResult(status -> {
             AiExecution execution = executionRepository
                     .findByIdForUpdate(context.executionId())
@@ -177,7 +198,10 @@ public class AiExecutionWorker {
             if (execution == null || !execution.isRunning()) {
                 return;
             }
-            execution.markSucceeded(resultType, resultId, Instant.now());
+            Integer inputTokens = usage != null ? usage.inputTokens() : null;
+            Integer outputTokens = usage != null ? usage.outputTokens() : null;
+            execution.markSucceeded(
+                    resultType, resultId, Instant.now(), latencyMs, inputTokens, outputTokens);
             executionRepository.save(execution);
             inputRepository.deleteByExecutionId(context.executionId());
             auditLogService.logAction(
@@ -202,7 +226,7 @@ public class AiExecutionWorker {
     }
 
     private void completeWithFailure(
-            JobContext context, String failureCode, String failureMessage) {
+            JobContext context, String failureCode, String failureMessage, Long latencyMs) {
         log.warn(
                 "AI execution {} failed with code {}.",
                 context.executionId(),
@@ -214,13 +238,46 @@ public class AiExecutionWorker {
             if (execution == null || !execution.isRunning()) {
                 return;
             }
-            execution.markFailed(failureCode, failureMessage, Instant.now());
+            execution.markFailed(failureCode, failureMessage, Instant.now(), latencyMs);
             executionRepository.save(execution);
             inputRepository.deleteByExecutionId(context.executionId());
             auditLogService.logAction(
                     context.ownerId(),
                     context.ownerEmail(),
                     AuditEventAction.AI_EXECUTION_FAILED,
+                    "AiExecution",
+                    context.executionId().toString());
+            if (context.targetType() == AiExecutionTargetType.DAILY_PLAN_ITEM) {
+                auditLogService.logAction(
+                        context.ownerId(),
+                        context.ownerEmail(),
+                        AuditEventAction.TASK_GUIDANCE_GENERATION_FAILED,
+                        "AiExecution",
+                        context.executionId().toString());
+            }
+        });
+    }
+
+    private void completeWithTimeout(
+            JobContext context, String failureCode, String failureMessage, Long latencyMs) {
+        log.warn(
+                "AI execution {} timed out with code {}.",
+                context.executionId(),
+                failureCode);
+        transactionTemplate.executeWithoutResult(status -> {
+            AiExecution execution = executionRepository
+                    .findByIdForUpdate(context.executionId())
+                    .orElse(null);
+            if (execution == null || !execution.isRunning()) {
+                return;
+            }
+            execution.markTimeout(failureCode, failureMessage, Instant.now(), latencyMs);
+            executionRepository.save(execution);
+            inputRepository.deleteByExecutionId(context.executionId());
+            auditLogService.logAction(
+                    context.ownerId(),
+                    context.ownerEmail(),
+                    AuditEventAction.AI_EXECUTION_TIMEOUT,
                     "AiExecution",
                     context.executionId().toString());
             if (context.targetType() == AiExecutionTargetType.DAILY_PLAN_ITEM) {
@@ -249,6 +306,8 @@ public class AiExecutionWorker {
             return sanitizedMessage(exception);
         }
         return switch (exception.errorCode()) {
+            case AI_TIMEOUT ->
+                    "The AI provider request timed out.";
             case AI_PROVIDER_UNAVAILABLE ->
                     "The AI provider is currently unavailable.";
             case AI_OUTPUT_INVALID ->
