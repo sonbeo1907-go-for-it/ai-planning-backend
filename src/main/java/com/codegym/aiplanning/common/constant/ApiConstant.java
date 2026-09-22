@@ -51,6 +51,7 @@ public final class ApiConstant {
     public static final String AI_PROVIDER_TEST_CONNECTION =
             AI_PROVIDER_CONFIG_BY_ID + "/test-connection";
     public static final String ADMIN_AI_ANALYTICS = ADMIN + "/ai-analytics";
+    public static final String ADMIN_AI_EXECUTIONS = ADMIN + "/ai-executions";
     public static final String DAILY_PLANS = API_V1 + "/daily-plans";
     public static final String DAILY_PLAN_TODAY = "/today";
     public static final String DAILY_PLAN_BY_ID = "/{planId}";

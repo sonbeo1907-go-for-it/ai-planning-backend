@@ -17,7 +17,11 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-public interface AiExecutionRepository extends JpaRepository<AiExecution, UUID> {
+public interface AiExecutionRepository extends JpaRepository<AiExecution, UUID>, AiExecutionAdminRepositoryCustom {
+
+    @EntityGraph(attributePaths = {"providerConfig", "providerConfig.provider"})
+    @Query("select execution from AiExecution execution where execution.id = :id")
+    Optional<AiExecution> findAdminDetailById(@Param("id") UUID id);
 
     Optional<AiExecution> findByIdAndOwnerId(UUID id, UUID ownerId);
 
