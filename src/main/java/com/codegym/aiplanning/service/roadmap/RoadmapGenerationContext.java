@@ -6,7 +6,8 @@ import java.util.UUID;
 
 public record RoadmapGenerationContext(
         UUID roadmapId,
-        String title,
+        String roadmapTitle,
+        String learningGoal,
         ProficiencyLevel proficiencyLevel,
         Integer dailyCommitmentMinutes,
         Integer expectedDurationDays,

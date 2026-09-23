@@ -10,6 +10,7 @@ import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapSource;
 import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
+import com.codegym.aiplanning.entity.roadmap.RoadmapTitleOrigin;
 import com.codegym.aiplanning.entity.source.LearningSource;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.repository.profile.UserProfileRepository;
@@ -28,6 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class RoadmapOnboardingServiceImpl implements RoadmapOnboardingService {
 
+    private static final int MAX_ROADMAP_TITLE_LENGTH = 200;
+    private static final int DERIVED_TITLE_LENGTH = 80;
+    private static final String FALLBACK_ROADMAP_TITLE = "Lộ trình từ khảo sát";
     private static final Set<Integer> DAILY_COMMITMENT_OPTIONS = Set.of(30, 60, 120);
     private static final Set<Integer> EXPECTED_DURATION_OPTIONS = Set.of(30, 60, 90);
 
@@ -105,6 +109,12 @@ public class RoadmapOnboardingServiceImpl implements RoadmapOnboardingService {
                     ErrorCode.INVALID_STATUS_TRANSITION,
                     "Completed Roadmap onboarding cannot be edited.");
         }
+        if (request.entityVersion() == null
+                || roadmap.getVersion() != request.entityVersion()) {
+            throw new BusinessException(
+                    ErrorCode.CONCURRENT_MODIFICATION,
+                    "Roadmap onboarding was changed by another request. Reload it before saving again.");
+        }
 
         validateChoice(
                 request.dailyCommitmentMinutes(),
@@ -116,6 +126,9 @@ public class RoadmapOnboardingServiceImpl implements RoadmapOnboardingService {
                 "Expected duration must be 30, 60, or 90 days.");
 
         LearningSource goalSource = requireGoalSource(roadmapId);
+        if (request.title() != null) {
+            roadmap.updateOnboardingTitle(normalizeTitle(request.title()));
+        }
         if (request.goal() != null) {
             goalSource.updateGoal(normalizeGoal(request.goal()));
         }
@@ -149,6 +162,7 @@ public class RoadmapOnboardingServiceImpl implements RoadmapOnboardingService {
                     "Roadmap is not in onboarding.");
         }
         requireCompleteSurvey(roadmap, goalSource);
+        ensureRoadmapTitle(roadmap, goalSource.getContentText());
 
         goalSource.markReady();
         roadmap.completeOnboarding(Instant.now().truncatedTo(ChronoUnit.MICROS));
@@ -223,6 +237,53 @@ public class RoadmapOnboardingServiceImpl implements RoadmapOnboardingService {
                     ErrorCode.VALIDATION_FAILED, "Goal must not be blank.");
         }
         return goal.trim();
+    }
+
+    private String normalizeTitle(String title) {
+        if (title.isBlank()) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED, "Roadmap title must not be blank.");
+        }
+        String normalized = title.trim().replaceAll("\\s+", " ");
+        if (normalized.codePointCount(0, normalized.length()) > MAX_ROADMAP_TITLE_LENGTH) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Roadmap title must not exceed 200 characters.");
+        }
+        return normalized;
+    }
+
+    private void ensureRoadmapTitle(Roadmap roadmap, String goal) {
+        if (roadmap.getTitleOrigin() == RoadmapTitleOrigin.USER
+                || roadmap.getTitleOrigin() == RoadmapTitleOrigin.AI_SUGGESTED) {
+            return;
+        }
+        String derivedTitle = deriveTitleFromGoal(goal);
+        if (derivedTitle == null) {
+            roadmap.applyOnboardingGeneratedTitle(
+                    FALLBACK_ROADMAP_TITLE, RoadmapTitleOrigin.FALLBACK);
+            return;
+        }
+        roadmap.applyOnboardingGeneratedTitle(
+                derivedTitle, RoadmapTitleOrigin.GOAL_DERIVED);
+    }
+
+    private String deriveTitleFromGoal(String goal) {
+        if (goal == null || goal.isBlank()) {
+            return null;
+        }
+        String normalized = goal.trim().replaceAll("\\s+", " ");
+        int codePointCount = normalized.codePointCount(0, normalized.length());
+        if (codePointCount <= DERIVED_TITLE_LENGTH) {
+            return normalized;
+        }
+        int endIndex = normalized.offsetByCodePoints(0, DERIVED_TITLE_LENGTH);
+        String shortened = normalized.substring(0, endIndex).stripTrailing();
+        int lastSpace = shortened.lastIndexOf(' ');
+        if (lastSpace >= DERIVED_TITLE_LENGTH / 2) {
+            shortened = shortened.substring(0, lastSpace).stripTrailing();
+        }
+        return shortened;
     }
 
     private void validateChoice(Integer value, Set<Integer> allowed, String message) {

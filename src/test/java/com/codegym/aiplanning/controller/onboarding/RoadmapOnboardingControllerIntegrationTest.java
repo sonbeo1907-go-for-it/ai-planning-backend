@@ -74,22 +74,28 @@ class RoadmapOnboardingControllerIntegrationTest {
         String accessToken = login(user);
         UUID roadmapId = start(accessToken);
 
-        mockMvc.perform(patch(path(roadmapId))
+        MvcResult goalResult = mockMvc.perform(patch(path(roadmapId))
                         .header("Authorization", "Bearer " + accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"goal\":\"Learn Web Development with React\"}"))
+                        .content("{\"goal\":\"Learn Web Development with React\",\"entityVersion\":0}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.goal")
-                        .value("Learn Web Development with React"));
+                        .value("Learn Web Development with React"))
+                .andReturn();
+        long versionAfterGoal = responseVersion(goalResult);
 
         mockMvc.perform(patch(path(roadmapId))
                         .header("Authorization", "Bearer " + accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"proficiencyLevel\":\"BASIC\"}"))
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "proficiencyLevel", "BASIC",
+                                "entityVersion", versionAfterGoal))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.goal")
                         .value("Learn Web Development with React"))
-                .andExpect(jsonPath("$.data.proficiencyLevel").value("BASIC"));
+                .andExpect(jsonPath("$.data.proficiencyLevel").value("BASIC"))
+                .andReturn();
+        long versionAfterProficiency = currentVersion(accessToken, roadmapId);
 
         mockMvc.perform(patch(path(roadmapId))
                         .header("Authorization", "Bearer " + accessToken)
@@ -97,9 +103,10 @@ class RoadmapOnboardingControllerIntegrationTest {
                         .content("""
                                 {
                                   "dailyCommitmentMinutes": 60,
-                                  "expectedDurationDays": 90
+                                  "expectedDurationDays": 90,
+                                  "entityVersion": %d
                                 }
-                                """))
+                                """.formatted(versionAfterProficiency)))
                 .andExpect(status().isOk());
 
         mockMvc.perform(get(path(roadmapId))
@@ -128,11 +135,13 @@ class RoadmapOnboardingControllerIntegrationTest {
         String accessToken = login(user);
         UUID roadmapId = start(accessToken);
 
-        mockMvc.perform(patch(path(roadmapId))
+        MvcResult goalResult = mockMvc.perform(patch(path(roadmapId))
                         .header("Authorization", "Bearer " + accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"goal\":\"Learn React\"}"))
-                .andExpect(status().isOk());
+                        .content("{\"goal\":\"Learn React\",\"entityVersion\":0}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        long currentVersion = responseVersion(goalResult);
 
         mockMvc.perform(post(path(roadmapId) + ApiConstant.COMPLETE)
                         .header("Authorization", "Bearer " + accessToken))
@@ -142,16 +151,35 @@ class RoadmapOnboardingControllerIntegrationTest {
         mockMvc.perform(patch(path(roadmapId))
                         .header("Authorization", "Bearer " + accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"dailyCommitmentMinutes\":45}"))
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "dailyCommitmentMinutes", 45,
+                                "entityVersion", currentVersion))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
 
         mockMvc.perform(patch(path(roadmapId))
                         .header("Authorization", "Bearer " + accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"expectedDurationDays\":120}"))
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "expectedDurationDays", 120,
+                                "entityVersion", currentVersion))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    private long currentVersion(String accessToken, UUID roadmapId) throws Exception {
+        MvcResult result = mockMvc.perform(get(path(roadmapId))
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        return responseVersion(result);
+    }
+
+    private long responseVersion(MvcResult result) throws Exception {
+        return objectMapper.readTree(result.getResponse().getContentAsString())
+                .path("data")
+                .path("version")
+                .asLong();
     }
 
     @Test
@@ -171,10 +199,12 @@ class RoadmapOnboardingControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
+                                  "title": "Backend Java Roadmap",
                                   "goal": "Backend with Java",
                                   "proficiencyLevel": "BEGINNER",
                                   "dailyCommitmentMinutes": 30,
-                                  "expectedDurationDays": 30
+                                  "expectedDurationDays": 30,
+                                  "entityVersion": 0
                                 }
                                 """))
                 .andExpect(status().isOk());
@@ -183,6 +213,8 @@ class RoadmapOnboardingControllerIntegrationTest {
                         .header("Authorization", "Bearer " + ownerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                .andExpect(jsonPath("$.data.title").value("Backend Java Roadmap"))
+                .andExpect(jsonPath("$.data.titleOrigin").value("USER"))
                 .andExpect(jsonPath("$.data.completed").value(true))
                 .andExpect(jsonPath("$.data.completedAt").isNotEmpty())
                 .andReturn();
@@ -212,10 +244,12 @@ class RoadmapOnboardingControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
+                                  "title": "Frontend React Roadmap",
                                   "goal": "Frontend with React",
                                   "proficiencyLevel": "BASIC",
                                   "dailyCommitmentMinutes": 120,
-                                  "expectedDurationDays": 90
+                                  "expectedDurationDays": 90,
+                                  "entityVersion": 0
                                 }
                                 """))
                 .andExpect(status().isOk());
@@ -229,6 +263,7 @@ class RoadmapOnboardingControllerIntegrationTest {
                         .header("Authorization", "Bearer " + ownerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.goal").value("Backend with Java"))
+                .andExpect(jsonPath("$.data.title").value("Backend Java Roadmap"))
                 .andExpect(jsonPath("$.data.proficiencyLevel").value("BEGINNER"))
                 .andExpect(jsonPath("$.data.dailyCommitmentMinutes").value(30))
                 .andExpect(jsonPath("$.data.expectedDurationDays").value(30));
@@ -237,6 +272,7 @@ class RoadmapOnboardingControllerIntegrationTest {
                         .header("Authorization", "Bearer " + ownerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.goal").value("Frontend with React"))
+                .andExpect(jsonPath("$.data.title").value("Frontend React Roadmap"))
                 .andExpect(jsonPath("$.data.proficiencyLevel").value("BASIC"))
                 .andExpect(jsonPath("$.data.dailyCommitmentMinutes").value(120))
                 .andExpect(jsonPath("$.data.expectedDurationDays").value(90));
@@ -270,9 +306,90 @@ class RoadmapOnboardingControllerIntegrationTest {
         mockMvc.perform(patch(path(roadmapId))
                         .header("Authorization", "Bearer " + ownerToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"goal\":\"Overwrite user goal\"}"))
+                        .content("{\"goal\":\"Overwrite user goal\",\"entityVersion\":999}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_STATUS_TRANSITION"));
+    }
+
+    @Test
+    void completionDerivesTitleFromGoalWhenUserLeavesTitleBlank() throws Exception {
+        UserAccount user = createUser(true);
+        String accessToken = login(user);
+        UUID roadmapId = start(accessToken);
+
+        mockMvc.perform(patch(path(roadmapId))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "goal": "Master practical Spring Boot REST API development",
+                                  "proficiencyLevel": "BASIC",
+                                  "dailyCommitmentMinutes": 60,
+                                  "expectedDurationDays": 60,
+                                  "entityVersion": 0
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.title").doesNotExist());
+
+        mockMvc.perform(post(path(roadmapId) + ApiConstant.COMPLETE)
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.title")
+                        .value("Master practical Spring Boot REST API development"))
+                .andExpect(jsonPath("$.data.titleOrigin").value("GOAL_DERIVED"));
+    }
+
+    @Test
+    void staleOnboardingSaveCannotOverwriteANewerUserTitle() throws Exception {
+        UserAccount user = createUser(true);
+        String accessToken = login(user);
+        UUID roadmapId = start(accessToken);
+
+        mockMvc.perform(patch(path(roadmapId))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "Backend Java",
+                                  "goal": "Learn Java backend development",
+                                  "entityVersion": 0
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.version").value(1))
+                .andExpect(jsonPath("$.data.titleOrigin").value("USER"));
+
+        mockMvc.perform(patch(path(roadmapId))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "Stale title",
+                                  "entityVersion": 0
+                                }
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CONCURRENT_MODIFICATION"));
+
+        mockMvc.perform(get(path(roadmapId))
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.title").value("Backend Java"));
+    }
+
+    @Test
+    void blankUserTitleIsRejectedWithoutLoggingItsContent() throws Exception {
+        UserAccount user = createUser(true);
+        String accessToken = login(user);
+        UUID roadmapId = start(accessToken);
+
+        mockMvc.perform(patch(path(roadmapId))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"   \",\"entityVersion\":0}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
     }
 
     @Test
@@ -308,6 +425,14 @@ class RoadmapOnboardingControllerIntegrationTest {
                                 + "dailyCommitmentMinutes/enum")
                         .toString())
                 .contains("30", "60", "120");
+        assertThat(document
+                        .at("/components/schemas/SaveRoadmapOnboardingRequest/properties/title")
+                        .isMissingNode())
+                .isFalse();
+        assertThat(document
+                        .at("/components/schemas/SaveRoadmapOnboardingRequest/required")
+                        .toString())
+                .contains("entityVersion");
     }
 
     private UUID start(String accessToken) throws Exception {

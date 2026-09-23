@@ -96,10 +96,10 @@ class V2FoundationMigrationTest {
                         INSERT INTO roadmaps (
                             id, owner_id, status, proficiency_level,
                             daily_commitment_minutes, expected_duration_days,
-                            onboarding_completed_at, created_at, updated_at
+                            onboarding_completed_at, title_origin, created_at, updated_at
                         ) VALUES (
                             '%s', '%s', 'DRAFT', 'BEGINNER', 30, 30,
-                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                            CURRENT_TIMESTAMP, 'FALLBACK', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                         )
                         """.formatted(roadmapId, userId));
                 statement.executeUpdate("""
@@ -226,20 +226,20 @@ class V2FoundationMigrationTest {
                 UUID onboardingRoadmapId = UUID.randomUUID();
                 statement.executeUpdate("""
                         INSERT INTO roadmaps (
-                            id, owner_id, status, onboarding_slot_owner_id,
+                            id, owner_id, status, onboarding_slot_owner_id, title_origin,
                             created_at, updated_at
                         ) VALUES (
-                            '%s', '%s', 'ONBOARDING', '%s',
+                            '%s', '%s', 'ONBOARDING', '%s', 'FALLBACK',
                             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                         )
                         """.formatted(onboardingRoadmapId, userId, userId));
 
                 assertThatThrownBy(() -> statement.executeUpdate("""
                                 INSERT INTO roadmaps (
-                                    id, owner_id, status, onboarding_slot_owner_id,
+                                    id, owner_id, status, onboarding_slot_owner_id, title_origin,
                                     created_at, updated_at
                                 ) VALUES (
-                                    RANDOM_UUID(), '%s', 'ONBOARDING', '%s',
+                                    RANDOM_UUID(), '%s', 'ONBOARDING', '%s', 'FALLBACK',
                                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                                 )
                                 """.formatted(userId, userId)))
@@ -247,10 +247,10 @@ class V2FoundationMigrationTest {
 
                 assertThatThrownBy(() -> statement.executeUpdate("""
                                 INSERT INTO roadmaps (
-                                    id, owner_id, status, daily_commitment_minutes,
+                                    id, owner_id, status, daily_commitment_minutes, title_origin,
                                     created_at, updated_at
                                 ) VALUES (
-                                    RANDOM_UUID(), '%s', 'ONBOARDING', 45,
+                                    RANDOM_UUID(), '%s', 'ONBOARDING', 45, 'FALLBACK',
                                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                                 )
                                 """.formatted(userId)))

@@ -17,6 +17,7 @@ import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersionStatus;
 import com.codegym.aiplanning.entity.source.LearningSource;
 import com.codegym.aiplanning.entity.source.LearningSourceStatus;
+import com.codegym.aiplanning.entity.source.LearningSourceType;
 import com.codegym.aiplanning.repository.MaterialRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
@@ -88,7 +89,13 @@ public class AiRoadmapPersistenceService {
         attachSelectedMaterials(userId, roadmap, existingLinks, selectedMaterialIds);
         List<SourceDocument> sources = sourceDocuments(
                 roadmapSourceRepository.findByRoadmapId(roadmapId));
-        if ((roadmap.getTitle() == null || roadmap.getTitle().isBlank()) && sources.isEmpty()) {
+        String learningGoal = roadmapSourceRepository
+                .findGoalSourceByRoadmapId(roadmapId)
+                .map(RoadmapSource::getLearningSource)
+                .map(LearningSource::getContentText)
+                .filter(value -> !value.isBlank())
+                .orElse(roadmap.getTitle());
+        if ((learningGoal == null || learningGoal.isBlank()) && sources.isEmpty()) {
             throw new BusinessException(
                     ErrorCode.VALIDATION_FAILED,
                     "A learning goal or at least one ready learning material is required.");
@@ -97,6 +104,7 @@ public class AiRoadmapPersistenceService {
         return new RoadmapGenerationContext(
                 roadmap.getId(),
                 roadmap.getTitle(),
+                learningGoal,
                 roadmap.getProficiencyLevel(),
                 roadmap.getDailyCommitmentMinutes(),
                 roadmap.getExpectedDurationDays(),
@@ -111,6 +119,10 @@ public class AiRoadmapPersistenceService {
             RoadmapVersionOrigin origin) {
         Roadmap roadmap = requireOwnedRoadmapForUpdate(userId, roadmapId);
         requireNotActivated(roadmap);
+        if (plan.title() != null && !plan.title().isBlank()) {
+            roadmap.applyAiSuggestedTitle(plan.title().trim());
+            roadmapRepository.saveAndFlush(roadmap);
+        }
         supersedeExistingDraft(roadmapId);
 
         int nextVersionNumber = roadmapVersionRepository
@@ -186,6 +198,7 @@ public class AiRoadmapPersistenceService {
         for (RoadmapSource link : links) {
             LearningSource learningSource = link.getLearningSource();
             if (learningSource != null
+                    && learningSource.getSourceType() != LearningSourceType.GOAL
                     && learningSource.getStatus() == LearningSourceStatus.READY
                     && learningSource.getContentText() != null
                     && !learningSource.getContentText().isBlank()) {
