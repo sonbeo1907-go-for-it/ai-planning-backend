@@ -519,6 +519,7 @@ class ManualRoadmapControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn();
         UUID roadmapId = UUID.fromString(data(startResult).path("roadmapId").asText());
+        long entityVersion = data(startResult).path("version").asLong();
 
         mockMvc.perform(patch(ApiConstant.ROADMAP_ONBOARDING + "/" + roadmapId)
                         .header("Authorization", bearer(token))
@@ -528,9 +529,10 @@ class ManualRoadmapControllerIntegrationTest {
                                   "goal": "Learn TypeScript",
                                   "proficiencyLevel": "BEGINNER",
                                   "dailyCommitmentMinutes": 60,
-                                  "expectedDurationDays": 60
+                                  "expectedDurationDays": 60,
+                                  "entityVersion": %d
                                 }
-                                """))
+                                """.formatted(entityVersion)))
                 .andExpect(status().isOk());
         mockMvc.perform(post(ApiConstant.ROADMAP_ONBOARDING + "/" + roadmapId + "/complete")
                         .header("Authorization", bearer(token)))

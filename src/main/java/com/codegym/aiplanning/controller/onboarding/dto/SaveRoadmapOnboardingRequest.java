@@ -2,10 +2,15 @@ package com.codegym.aiplanning.controller.onboarding.dto;
 
 import com.codegym.aiplanning.entity.roadmap.ProficiencyLevel;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 @Schema(description = "Partial values saved while navigating Roadmap onboarding")
 public record SaveRoadmapOnboardingRequest(
+        @Schema(description = "User-authored Roadmap title", example = "Backend Java Mastery")
+                @Size(max = 200, message = "Roadmap title must not exceed 200 characters")
+                String title,
         @Schema(
                         description = "User-authored learning topic or goal; treated as untrusted data",
                         example = "Học Lập trình Web với React")
@@ -20,14 +25,22 @@ public record SaveRoadmapOnboardingRequest(
                         allowableValues = {"30", "60", "120"},
                         example = "60")
                 Integer dailyCommitmentMinutes,
-        @Schema(
+                @Schema(
                         description = "Expected Roadmap duration in days",
                         allowableValues = {"30", "60", "90"},
                         example = "60")
-                Integer expectedDurationDays) {
+                Integer expectedDurationDays,
+        @Schema(
+                        description = "Last Roadmap entity version observed by the client",
+                        requiredMode = Schema.RequiredMode.REQUIRED,
+                        example = "0")
+                @NotNull(message = "Entity version is required")
+                @PositiveOrZero(message = "Entity version must not be negative")
+                Long entityVersion) {
 
     @Override
     public String toString() {
-        return "SaveRoadmapOnboardingRequest[personalLearningData=<redacted>]";
+        return "SaveRoadmapOnboardingRequest[entityVersion=" + entityVersion
+                + ", personalLearningData=<redacted>]";
     }
 }

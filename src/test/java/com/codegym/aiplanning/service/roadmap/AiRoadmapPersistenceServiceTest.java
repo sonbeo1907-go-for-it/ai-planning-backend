@@ -120,6 +120,7 @@ class AiRoadmapPersistenceServiceTest {
                 service.prepare(userId, roadmapId, List.of(materialId));
 
         assertEquals(1, context.sources().size());
+        assertEquals("Backend Java", context.learningGoal());
         assertEquals(materialId, context.sources().get(0).id());
         assertEquals("Nội dung tài liệu", context.sources().get(0).content());
         verify(roadmapSourceRepository).saveAllAndFlush(anyList());
@@ -227,6 +228,7 @@ class AiRoadmapPersistenceServiceTest {
                 validPlan(),
                 RoadmapVersionOrigin.AI_REGENERATED);
 
+        verify(roadmap).applyAiSuggestedTitle("Lộ trình");
         assertEquals(RoadmapVersionStatus.SUPERSEDED, existingDraft.getStatus());
         assertEquals(2, response.versionNumber());
         assertFalse(response.milestones().iterator().hasNext());

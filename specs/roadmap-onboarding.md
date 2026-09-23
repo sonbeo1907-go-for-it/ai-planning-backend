@@ -2,9 +2,10 @@
 
 ## Responsibility boundary
 
-The frontend owns the three-step wizard presentation, Back/Next navigation,
-suggested-goal display, and in-session form state. The backend owns durable
-resume state, validation, ownership, and the transition to a Roadmap draft.
+The frontend owns the four-step wizard presentation, Back/Next navigation,
+confirmation screen, and in-session form state. The backend owns durable
+resume state, validation, ownership, optimistic concurrency, and the transition
+to a Roadmap draft.
 
 Roadmap onboarding is available only to an authenticated `USER` after general
 profile setup. An `ADMIN` has no access to these personal resources.
@@ -24,13 +25,24 @@ user's Roadmap ID returns `RESOURCE_NOT_FOUND` and never exposes its existence.
 
 ## Fields and fixed choices
 
+- `title`: optional during partial saves, maximum 200 characters. A USER value
+  is authoritative; otherwise completion derives one from the goal.
 - `goal`: trimmed, nonblank when supplied, maximum 500 characters.
 - `proficiencyLevel`: `BEGINNER`, `BASIC`, or `INTERMEDIATE`.
 - `dailyCommitmentMinutes`: `30`, `60`, or `120`.
 - `expectedDurationDays`: `30`, `60`, or `90`.
 
+Every PATCH includes `entityVersion` from the latest response. A stale value
+returns `CONCURRENT_MODIFICATION` rather than overwriting another tab.
+
 Partial saves may omit unfinished fields so Back/Next navigation and later
-resume do not discard earlier answers. Completion requires all four fields.
+resume do not discard earlier answers. Completion requires goal, proficiency,
+daily commitment, and expected duration; title remains optional because the
+server guarantees a deterministic goal-derived or static fallback title.
+
+The four steps are: title and goal, proficiency, commitment/duration, and final
+confirmation. Both Next and Back persist before navigating. Resume opens the
+first incomplete step, or confirmation when all required answers exist.
 
 At most one Roadmap may be in `ONBOARDING` for an owner. Start/resume is
 idempotent only while that onboarding remains unfinished. After completion,

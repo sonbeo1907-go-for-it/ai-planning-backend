@@ -28,6 +28,10 @@ public class Roadmap extends BaseEntity {
     @Column(length = 200)
     private String title;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "title_origin", nullable = false, length = 30)
+    private RoadmapTitleOrigin titleOrigin;
+
     @Column(columnDefinition = "TEXT")
     private String description;
 
@@ -56,6 +60,7 @@ public class Roadmap extends BaseEntity {
         Roadmap roadmap = new Roadmap();
         roadmap.owner = owner;
         roadmap.status = RoadmapStatus.ONBOARDING;
+        roadmap.titleOrigin = RoadmapTitleOrigin.FALLBACK;
         roadmap.onboardingSlotOwnerId = owner.getId();
         return roadmap;
     }
@@ -66,6 +71,7 @@ public class Roadmap extends BaseEntity {
         roadmap.owner = owner;
         roadmap.status = RoadmapStatus.DRAFT;
         roadmap.title = title;
+        roadmap.titleOrigin = RoadmapTitleOrigin.USER;
         roadmap.description = description;
         return roadmap;
     }
@@ -100,6 +106,10 @@ public class Roadmap extends BaseEntity {
         return description;
     }
 
+    public RoadmapTitleOrigin getTitleOrigin() {
+        return titleOrigin;
+    }
+
     public UUID getActiveVersionId() {
         return activeVersionId;
     }
@@ -130,7 +140,45 @@ public class Roadmap extends BaseEntity {
                     "Only a draft Roadmap can have its metadata edited.");
         }
         this.title = title;
+        this.titleOrigin = RoadmapTitleOrigin.USER;
         this.description = description;
+    }
+
+    public void updateOnboardingTitle(String title) {
+        if (status != RoadmapStatus.ONBOARDING) {
+            throw new IllegalStateException("Completed Roadmap onboarding cannot be edited.");
+        }
+        this.title = title;
+        this.titleOrigin = RoadmapTitleOrigin.USER;
+    }
+
+    public void applyOnboardingGeneratedTitle(
+            String title, RoadmapTitleOrigin generatedOrigin) {
+        if (status != RoadmapStatus.ONBOARDING) {
+            throw new IllegalStateException("Roadmap is not in onboarding.");
+        }
+        if (generatedOrigin != RoadmapTitleOrigin.GOAL_DERIVED
+                && generatedOrigin != RoadmapTitleOrigin.FALLBACK) {
+            throw new IllegalArgumentException("Invalid onboarding title origin.");
+        }
+        if (titleOrigin != RoadmapTitleOrigin.USER) {
+            this.title = title;
+            this.titleOrigin = generatedOrigin;
+        }
+    }
+
+    public boolean applyAiSuggestedTitle(String title) {
+        if (status != RoadmapStatus.DRAFT) {
+            throw new IllegalStateException(
+                    "AI can name only a draft Roadmap.");
+        }
+        if (titleOrigin != RoadmapTitleOrigin.GOAL_DERIVED
+                && titleOrigin != RoadmapTitleOrigin.FALLBACK) {
+            return false;
+        }
+        this.title = title;
+        this.titleOrigin = RoadmapTitleOrigin.AI_SUGGESTED;
+        return true;
     }
 
     public void updateOnboarding(

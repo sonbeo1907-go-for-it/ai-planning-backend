@@ -4,6 +4,7 @@ import com.codegym.aiplanning.entity.source.LearningSource;
 import com.codegym.aiplanning.entity.roadmap.ProficiencyLevel;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
+import com.codegym.aiplanning.entity.roadmap.RoadmapTitleOrigin;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
 import java.util.UUID;
@@ -13,6 +14,8 @@ public record RoadmapOnboardingResponse(
         UUID roadmapId,
         long version,
         RoadmapStatus status,
+        String title,
+        RoadmapTitleOrigin titleOrigin,
         String goal,
         ProficiencyLevel proficiencyLevel,
         Integer dailyCommitmentMinutes,
@@ -26,6 +29,8 @@ public record RoadmapOnboardingResponse(
                 roadmap.getId(),
                 roadmap.getVersion(),
                 roadmap.getStatus(),
+                roadmap.getTitle(),
+                roadmap.getTitleOrigin(),
                 goalSource.getContentText(),
                 roadmap.getProficiencyLevel(),
                 roadmap.getDailyCommitmentMinutes(),

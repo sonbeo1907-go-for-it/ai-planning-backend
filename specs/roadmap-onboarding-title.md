@@ -2,8 +2,9 @@
 
 ## Status
 
-Planned. This specification refines Roadmap onboarding without changing the
-ownership or versioning model.
+Implemented on `feature/US-RMP-ONB-04` in the backend and frontend repositories.
+This specification refines Roadmap onboarding without changing the ownership
+or Roadmap content-versioning model.
 
 ## User story
 
@@ -41,7 +42,9 @@ The existing onboarding endpoint group remains unchanged:
 | `POST` | `/api/v1/roadmap-onboarding/{roadmapId}/complete` | Guarantee that the resulting Roadmap has a usable title |
 
 `SaveRoadmapOnboardingRequest` adds an optional `title` field because partial
-saves may occur before the USER reaches or completes the title input.
+saves may occur before the USER completes the title input. It also requires
+`entityVersion`, the last Roadmap version observed by the client, so a stale
+wizard cannot silently overwrite newer values.
 
 `RoadmapOnboardingResponse` adds:
 
@@ -84,8 +87,9 @@ suggestion. Optimistic locking or an equivalent atomic condition is required.
 
 - Reuse the existing `roadmaps.title` column.
 - Persist title provenance explicitly; do not infer authority from title text.
-- Existing nonblank titles should be treated conservatively as USER-owned
-  during transition unless reliable provenance is available.
+- Existing nonblank titles are treated conservatively as USER-owned during
+  transition, except for the exact legacy placeholder “Lộ trình từ khảo sát”,
+  which is classified as `FALLBACK` so it can be replaced safely.
 - Existing null titles require an explicit migration or application repair
   strategy. They must not be silently populated from private content in audit
   metadata or logs.
@@ -125,4 +129,3 @@ application logs.
 - AI renaming an activated Roadmap without explicit USER action.
 - Automatically synchronizing a title with later goal edits.
 - Sharing, public discovery, or collaborative Roadmap naming.
-

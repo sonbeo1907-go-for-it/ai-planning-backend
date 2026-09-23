@@ -63,6 +63,7 @@ class AiRoadmapGeneratorServiceImplTest {
         roadmapId = UUID.randomUUID();
         context = new RoadmapGenerationContext(
                 roadmapId,
+                "Backend Java Mastery",
                 "Backend với Java",
                 null,
                 60,
@@ -98,7 +99,11 @@ class AiRoadmapGeneratorServiceImplTest {
         org.junit.jupiter.api.Assertions.assertTrue(
                 systemPrompt.getValue().contains("untrusted reference data"));
         org.junit.jupiter.api.Assertions.assertTrue(
-                userPrompt.getValue().contains("BEGIN_UNTRUSTED_LEARNING_SOURCE_DATA"));
+                userPrompt.getValue().contains("BEGIN_UNTRUSTED_ROADMAP_CONTEXT"));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                userPrompt.getValue().contains("Backend Java Mastery"));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                userPrompt.getValue().contains("Backend với Java"));
     }
 
     @Test
