@@ -23,13 +23,15 @@ profile setup. An `ADMIN` has no access to these personal resources.
 Every endpoint derives the owner from the JWT subject. Supplying another
 user's Roadmap ID returns `RESOURCE_NOT_FOUND` and never exposes its existence.
 
-## Fields and fixed choices
+## Fields and choices
 
 - `title`: optional during partial saves, maximum 200 characters. A USER value
   is authoritative; otherwise completion derives one from the goal.
 - `goal`: trimmed, nonblank when supplied, maximum 500 characters.
 - `proficiencyLevel`: `BEGINNER`, `BASIC`, or `INTERMEDIATE`.
-- `dailyCommitmentMinutes`: `30`, `60`, or `120`.
+- `dailyCommitmentMinutes`: any integer from `15` through `480`, in
+  15-minute increments. The UI offers quick choices of `30`, `60`, `120`,
+  `240`, `360`, and `480`, plus a custom hours/minutes entry.
 - `expectedDurationDays`: `30`, `60`, or `90`.
 
 Every PATCH includes `entityVersion` from the latest response. A stale value

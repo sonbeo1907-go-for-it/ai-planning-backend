@@ -32,7 +32,9 @@ public class RoadmapOnboardingServiceImpl implements RoadmapOnboardingService {
     private static final int MAX_ROADMAP_TITLE_LENGTH = 200;
     private static final int DERIVED_TITLE_LENGTH = 80;
     private static final String FALLBACK_ROADMAP_TITLE = "Lộ trình từ khảo sát";
-    private static final Set<Integer> DAILY_COMMITMENT_OPTIONS = Set.of(30, 60, 120);
+    private static final int MIN_DAILY_COMMITMENT_MINUTES = 15;
+    private static final int MAX_DAILY_COMMITMENT_MINUTES = 480;
+    private static final int DAILY_COMMITMENT_INCREMENT_MINUTES = 15;
     private static final Set<Integer> EXPECTED_DURATION_OPTIONS = Set.of(30, 60, 90);
 
     private final UserAccountRepository userAccountRepository;
@@ -116,10 +118,7 @@ public class RoadmapOnboardingServiceImpl implements RoadmapOnboardingService {
                     "Roadmap onboarding was changed by another request. Reload it before saving again.");
         }
 
-        validateChoice(
-                request.dailyCommitmentMinutes(),
-                DAILY_COMMITMENT_OPTIONS,
-                "Daily commitment must be 30, 60, or 120 minutes.");
+        validateDailyCommitment(request.dailyCommitmentMinutes());
         validateChoice(
                 request.expectedDurationDays(),
                 EXPECTED_DURATION_OPTIONS,
@@ -289,6 +288,19 @@ public class RoadmapOnboardingServiceImpl implements RoadmapOnboardingService {
     private void validateChoice(Integer value, Set<Integer> allowed, String message) {
         if (value != null && !allowed.contains(value)) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, message);
+        }
+    }
+
+    private void validateDailyCommitment(Integer value) {
+        if (value == null) {
+            return;
+        }
+        if (value < MIN_DAILY_COMMITMENT_MINUTES
+                || value > MAX_DAILY_COMMITMENT_MINUTES
+                || value % DAILY_COMMITMENT_INCREMENT_MINUTES != 0) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Daily commitment must be between 15 and 480 minutes in 15-minute increments.");
         }
     }
 

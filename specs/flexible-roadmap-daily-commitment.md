@@ -2,8 +2,8 @@
 
 ## Status
 
-Planned. This specification replaces the fixed 30/60/120-minute onboarding
-choice with a validated Roadmap-scoped duration.
+Implemented on `feature/US-RMP-ONB-05`. This specification replaces the fixed
+30/60/120-minute onboarding choice with a validated Roadmap-scoped duration.
 
 ## User story
 
@@ -126,4 +126,3 @@ backend remains authoritative even if the frontend already validates.
 - Automatically changing a commitment from observed study behavior.
 - Removing or changing the separate 30/60/90-day expected-duration choices.
 - Treating a Roadmap commitment as actual time spent.
-

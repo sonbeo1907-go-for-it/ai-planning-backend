@@ -245,16 +245,31 @@ class V2FoundationMigrationTest {
                                 """.formatted(userId, userId)))
                         .isInstanceOf(java.sql.SQLException.class);
 
-                assertThatThrownBy(() -> statement.executeUpdate("""
-                                INSERT INTO roadmaps (
-                                    id, owner_id, status, daily_commitment_minutes, title_origin,
-                                    created_at, updated_at
-                                ) VALUES (
-                                    RANDOM_UUID(), '%s', 'ONBOARDING', 45, 'FALLBACK',
-                                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                                )
-                                """.formatted(userId)))
-                        .isInstanceOf(java.sql.SQLException.class);
+                statement.executeUpdate("""
+                        INSERT INTO roadmaps (
+                            id, owner_id, status, daily_commitment_minutes, title_origin,
+                            created_at, updated_at
+                        ) VALUES
+                            (RANDOM_UUID(), '%s', 'DRAFT', 15, 'FALLBACK',
+                             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                            (RANDOM_UUID(), '%s', 'DRAFT', 270, 'FALLBACK',
+                             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                            (RANDOM_UUID(), '%s', 'DRAFT', 480, 'FALLBACK',
+                             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """.formatted(userId, userId, userId));
+
+                for (int invalidCommitment : new int[] {14, 37, 481}) {
+                    assertThatThrownBy(() -> statement.executeUpdate("""
+                                    INSERT INTO roadmaps (
+                                        id, owner_id, status, daily_commitment_minutes, title_origin,
+                                        created_at, updated_at
+                                    ) VALUES (
+                                        RANDOM_UUID(), '%s', 'DRAFT', %d, 'FALLBACK',
+                                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                                    )
+                                    """.formatted(userId, invalidCommitment)))
+                            .isInstanceOf(java.sql.SQLException.class);
+                }
                 assertThatThrownBy(() -> statement.executeUpdate("""
                                 INSERT INTO learning_sources (
                                     id, owner_id, source_type, status,

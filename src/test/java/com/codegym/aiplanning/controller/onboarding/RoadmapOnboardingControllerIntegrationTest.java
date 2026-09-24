@@ -130,7 +130,7 @@ class RoadmapOnboardingControllerIntegrationTest {
     }
 
     @Test
-    void completionRequiresEveryFieldAndFixedChoiceValues() throws Exception {
+    void completionRequiresEveryFieldAndValidChoiceValues() throws Exception {
         UserAccount user = createUser(true);
         String accessToken = login(user);
         UUID roadmapId = start(accessToken);
@@ -148,23 +148,67 @@ class RoadmapOnboardingControllerIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("ROADMAP_ONBOARDING_INCOMPLETE"));
 
-        mockMvc.perform(patch(path(roadmapId))
+        MvcResult commitmentResult = mockMvc.perform(patch(path(roadmapId))
                         .header("Authorization", "Bearer " + accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of(
                                 "dailyCommitmentMinutes", 45,
                                 "entityVersion", currentVersion))))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.dailyCommitmentMinutes").value(45))
+                .andReturn();
+        long versionAfterCommitment = responseVersion(commitmentResult);
 
         mockMvc.perform(patch(path(roadmapId))
                         .header("Authorization", "Bearer " + accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of(
                                 "expectedDurationDays", 120,
-                                "entityVersion", currentVersion))))
+                                "entityVersion", versionAfterCommitment))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void flexibleDailyCommitmentAcceptsQuickChoicesBoundariesAndCustomValues()
+            throws Exception {
+        UserAccount user = createUser(true);
+        String accessToken = login(user);
+        UUID roadmapId = start(accessToken);
+        long currentVersion = currentVersion(accessToken, roadmapId);
+
+        for (int value : new int[] {15, 30, 60, 120, 240, 270, 360, 480}) {
+            MvcResult result = mockMvc.perform(patch(path(roadmapId))
+                            .header("Authorization", "Bearer " + accessToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of(
+                                    "dailyCommitmentMinutes", value,
+                                    "entityVersion", currentVersion))))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.dailyCommitmentMinutes").value(value))
+                    .andReturn();
+            currentVersion = responseVersion(result);
+        }
+    }
+
+    @Test
+    void flexibleDailyCommitmentRejectsOutOfRangeAndNonIncrementValues()
+            throws Exception {
+        UserAccount user = createUser(true);
+        String accessToken = login(user);
+        UUID roadmapId = start(accessToken);
+        long currentVersion = currentVersion(accessToken, roadmapId);
+
+        for (int value : new int[] {0, 14, 37, 481, 540}) {
+            mockMvc.perform(patch(path(roadmapId))
+                            .header("Authorization", "Bearer " + accessToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of(
+                                    "dailyCommitmentMinutes", value,
+                                    "entityVersion", currentVersion))))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        }
     }
 
     private long currentVersion(String accessToken, UUID roadmapId) throws Exception {
@@ -202,7 +246,7 @@ class RoadmapOnboardingControllerIntegrationTest {
                                   "title": "Backend Java Roadmap",
                                   "goal": "Backend with Java",
                                   "proficiencyLevel": "BEGINNER",
-                                  "dailyCommitmentMinutes": 30,
+                                  "dailyCommitmentMinutes": 270,
                                   "expectedDurationDays": 30,
                                   "entityVersion": 0
                                 }
@@ -247,7 +291,7 @@ class RoadmapOnboardingControllerIntegrationTest {
                                   "title": "Frontend React Roadmap",
                                   "goal": "Frontend with React",
                                   "proficiencyLevel": "BASIC",
-                                  "dailyCommitmentMinutes": 120,
+                                  "dailyCommitmentMinutes": 480,
                                   "expectedDurationDays": 90,
                                   "entityVersion": 0
                                 }
@@ -265,7 +309,7 @@ class RoadmapOnboardingControllerIntegrationTest {
                 .andExpect(jsonPath("$.data.goal").value("Backend with Java"))
                 .andExpect(jsonPath("$.data.title").value("Backend Java Roadmap"))
                 .andExpect(jsonPath("$.data.proficiencyLevel").value("BEGINNER"))
-                .andExpect(jsonPath("$.data.dailyCommitmentMinutes").value(30))
+                .andExpect(jsonPath("$.data.dailyCommitmentMinutes").value(270))
                 .andExpect(jsonPath("$.data.expectedDurationDays").value(30));
 
         mockMvc.perform(get(path(secondRoadmapId))
@@ -274,7 +318,7 @@ class RoadmapOnboardingControllerIntegrationTest {
                 .andExpect(jsonPath("$.data.goal").value("Frontend with React"))
                 .andExpect(jsonPath("$.data.title").value("Frontend React Roadmap"))
                 .andExpect(jsonPath("$.data.proficiencyLevel").value("BASIC"))
-                .andExpect(jsonPath("$.data.dailyCommitmentMinutes").value(120))
+                .andExpect(jsonPath("$.data.dailyCommitmentMinutes").value(480))
                 .andExpect(jsonPath("$.data.expectedDurationDays").value(90));
 
         mockMvc.perform(get(ApiConstant.ROADMAP_ONBOARDING + ApiConstant.CURRENT)
@@ -402,7 +446,7 @@ class RoadmapOnboardingControllerIntegrationTest {
     }
 
     @Test
-    void openApiDocumentsRoadmapOnboardingAndItsFixedOptions() throws Exception {
+    void openApiDocumentsRoadmapOnboardingAndFlexibleCommitmentRange() throws Exception {
         MvcResult result = mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andReturn();
@@ -420,11 +464,12 @@ class RoadmapOnboardingControllerIntegrationTest {
                         .at("/paths/~1api~1v1~1roadmap-onboarding~1{roadmapId}~1complete/post")
                         .isMissingNode())
                 .isFalse();
-        assertThat(document
-                        .at("/components/schemas/SaveRoadmapOnboardingRequest/properties/"
-                                + "dailyCommitmentMinutes/enum")
-                        .toString())
-                .contains("30", "60", "120");
+        JsonNode commitmentSchema = document.at(
+                "/components/schemas/SaveRoadmapOnboardingRequest/properties/"
+                        + "dailyCommitmentMinutes");
+        assertThat(commitmentSchema.path("minimum").asInt()).isEqualTo(15);
+        assertThat(commitmentSchema.path("maximum").asInt()).isEqualTo(480);
+        assertThat(commitmentSchema.path("multipleOf").asInt()).isEqualTo(15);
         assertThat(document
                         .at("/components/schemas/SaveRoadmapOnboardingRequest/properties/title")
                         .isMissingNode())
