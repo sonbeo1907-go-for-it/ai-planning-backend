@@ -66,7 +66,7 @@ class AiRoadmapGeneratorServiceImplTest {
                 "Backend Java Mastery",
                 "Backend với Java",
                 null,
-                60,
+                270,
                 90,
                 List.of(new SourceDocument(
                         UUID.randomUUID(),
@@ -99,11 +99,15 @@ class AiRoadmapGeneratorServiceImplTest {
         org.junit.jupiter.api.Assertions.assertTrue(
                 systemPrompt.getValue().contains("untrusted reference data"));
         org.junit.jupiter.api.Assertions.assertTrue(
+                systemPrompt.getValue().contains("planning target and upper budget"));
+        org.junit.jupiter.api.Assertions.assertTrue(
                 userPrompt.getValue().contains("BEGIN_UNTRUSTED_ROADMAP_CONTEXT"));
         org.junit.jupiter.api.Assertions.assertTrue(
                 userPrompt.getValue().contains("Backend Java Mastery"));
         org.junit.jupiter.api.Assertions.assertTrue(
                 userPrompt.getValue().contains("Backend với Java"));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                userPrompt.getValue().contains("\"dailyCommitmentMinutes\":270"));
     }
 
     @Test

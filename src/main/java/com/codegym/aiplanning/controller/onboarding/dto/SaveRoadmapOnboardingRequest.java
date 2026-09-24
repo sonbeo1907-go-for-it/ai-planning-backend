@@ -21,11 +21,13 @@ public record SaveRoadmapOnboardingRequest(
                         allowableValues = {"BEGINNER", "BASIC", "INTERMEDIATE"})
                 ProficiencyLevel proficiencyLevel,
         @Schema(
-                        description = "Roadmap-scoped daily commitment in minutes",
-                        allowableValues = {"30", "60", "120"},
+                        description = "Roadmap-scoped daily commitment in minutes; must use 15-minute increments",
+                        minimum = "15",
+                        maximum = "480",
+                        multipleOf = 15,
                         example = "60")
                 Integer dailyCommitmentMinutes,
-                @Schema(
+        @Schema(
                         description = "Expected Roadmap duration in days",
                         allowableValues = {"30", "60", "90"},
                         example = "60")

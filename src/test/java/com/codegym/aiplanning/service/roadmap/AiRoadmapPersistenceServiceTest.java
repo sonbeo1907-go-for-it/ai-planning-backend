@@ -110,6 +110,7 @@ class AiRoadmapPersistenceServiceTest {
                 .thenReturn(Optional.of(roadmap));
         when(roadmap.getStatus()).thenReturn(RoadmapStatus.DRAFT);
         when(roadmap.getTitle()).thenReturn("Backend Java");
+        when(roadmap.getDailyCommitmentMinutes()).thenReturn(270);
         when(roadmapSourceRepository.findByRoadmapId(roadmapId))
                 .thenReturn(List.of(), List.of(linkedSource));
         when(materialRepository.findAllByIdInAndUserIdAndArchivedAtIsNull(
@@ -121,6 +122,7 @@ class AiRoadmapPersistenceServiceTest {
 
         assertEquals(1, context.sources().size());
         assertEquals("Backend Java", context.learningGoal());
+        assertEquals(270, context.dailyCommitmentMinutes());
         assertEquals(materialId, context.sources().get(0).id());
         assertEquals("Nội dung tài liệu", context.sources().get(0).content());
         verify(roadmapSourceRepository).saveAllAndFlush(anyList());
