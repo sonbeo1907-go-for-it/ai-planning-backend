@@ -381,6 +381,18 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             String ownerEmail,
             String generationRequestKey,
             AiProviderConfig providerConfig) {
+        return generateAiDraftVersionWithProviderConfig(
+                planId, ownerId, ownerEmail, generationRequestKey, providerConfig, null);
+    }
+
+    @Override
+    public DailyPlanVersionResponse generateAiDraftVersionWithProviderConfig(
+            UUID planId,
+            UUID ownerId,
+            String ownerEmail,
+            String generationRequestKey,
+            AiProviderConfig providerConfig,
+            String systemPrompt) {
         if (providerConfig == null) {
             throw new BusinessException(
                     ErrorCode.AI_PROVIDER_INVALID_CONFIGURATION,
@@ -391,7 +403,8 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 ownerId,
                 ownerEmail,
                 normalizeIdempotencyKey(generationRequestKey),
-                providerConfig);
+                providerConfig,
+                systemPrompt);
     }
 
     private DailyPlanVersionResponse generateAiDraft(
@@ -400,6 +413,16 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             String username,
             String normalizedRequestKey,
             AiProviderConfig providerConfig) {
+        return generateAiDraft(planId, userId, username, normalizedRequestKey, providerConfig, null);
+    }
+
+    private DailyPlanVersionResponse generateAiDraft(
+            UUID planId,
+            UUID userId,
+            String username,
+            String normalizedRequestKey,
+            AiProviderConfig providerConfig,
+            String customSystemPrompt) {
 
         DailyPlan plan = requirePlanForUser(planId, userId);
         if (plan.getStatus() != DailyPlanStatus.READY && plan.getStatus() != DailyPlanStatus.DRAFT) {
@@ -418,9 +441,14 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         }
 
         DailyPlanningContext context = contextBuilder.buildContext(planId, userId);
-        DailyPlanAiGenerator.GeneratedDailyPlan generated = providerConfig == null
-                ? aiGenerator.generate(context)
-                : aiGenerator.generate(context, providerConfig);
+        DailyPlanAiGenerator.GeneratedDailyPlan generated;
+        if (customSystemPrompt != null) {
+            generated = aiGenerator.generate(context, providerConfig, customSystemPrompt);
+        } else if (providerConfig != null) {
+            generated = aiGenerator.generate(context, providerConfig);
+        } else {
+            generated = aiGenerator.generate(context);
+        }
         DailyPlanAiResponse response = generated.response();
         int totalPlannedMinutes = response.items().stream()
                 .mapToInt(DailyPlanAiResponse.AiPlanItemDto::plannedMinutes)

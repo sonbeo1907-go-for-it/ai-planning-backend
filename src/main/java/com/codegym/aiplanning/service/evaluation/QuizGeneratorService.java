@@ -29,6 +29,13 @@ public interface QuizGeneratorService {
             List<UUID> completedLearningUnitIds,
             AiProviderConfig providerConfig);
 
+    GeneratedQuizPlan generateDailyQuizQuestions(
+            UUID userId,
+            UUID dailyPlanId,
+            List<UUID> completedLearningUnitIds,
+            AiProviderConfig providerConfig,
+            String systemPrompt);
+
     GeneratedQuizPlan generateMasteryCheckQuestions(
             UUID userId, UUID weakTopicId, UUID roadmapItemId);
 
@@ -37,4 +44,11 @@ public interface QuizGeneratorService {
             UUID weakTopicId,
             UUID roadmapItemId,
             AiProviderConfig providerConfig);
+
+    GeneratedQuizPlan generateMasteryCheckQuestions(
+            UUID userId,
+            UUID weakTopicId,
+            UUID roadmapItemId,
+            AiProviderConfig providerConfig,
+            String systemPrompt);
 }

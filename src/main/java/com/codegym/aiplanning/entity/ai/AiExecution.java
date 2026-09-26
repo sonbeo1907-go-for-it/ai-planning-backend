@@ -84,6 +84,13 @@ public class AiExecution extends BaseEntity {
     @Column(name = "output_tokens")
     private Integer outputTokens;
 
+    @Column(name = "prompt_version_id")
+    private UUID promptVersionId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "prompt_source", length = 20)
+    private AiPromptSource promptSource;
+
     protected AiExecution() {}
 
     public static AiExecution queue(
@@ -244,5 +251,18 @@ public class AiExecution extends BaseEntity {
 
     public Integer getOutputTokens() {
         return outputTokens;
+    }
+
+    public UUID getPromptVersionId() {
+        return promptVersionId;
+    }
+
+    public AiPromptSource getPromptSource() {
+        return promptSource;
+    }
+
+    public void assignPromptReference(UUID promptVersionId, AiPromptSource promptSource) {
+        this.promptVersionId = promptVersionId;
+        this.promptSource = promptSource;
     }
 }

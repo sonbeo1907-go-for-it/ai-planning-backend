@@ -43,6 +43,17 @@ public class QuizGeneratorServiceImpl implements QuizGeneratorService {
             UUID dailyPlanId,
             List<UUID> completedLearningUnitIds,
             AiProviderConfig providerConfig) {
+        return generateDailyQuizQuestions(
+                userId, dailyPlanId, completedLearningUnitIds, providerConfig, null);
+    }
+
+    @Override
+    public GeneratedQuizPlan generateDailyQuizQuestions(
+            UUID userId,
+            UUID dailyPlanId,
+            List<UUID> completedLearningUnitIds,
+            AiProviderConfig providerConfig,
+            String systemPrompt) {
         List<RoadmapItem> items = roadmapItemRepository.findAllOwnedByIdsWithHierarchy(
                 completedLearningUnitIds,
                 userId);
@@ -58,7 +69,7 @@ public class QuizGeneratorServiceImpl implements QuizGeneratorService {
         List<CompletedLearningUnitInfo> learningUnitInfos = items.stream()
                 .map(this::toLearningUnitInfo)
                 .toList();
-        return quizAiGenerator.generateDailyQuiz(learningUnitInfos, providerConfig);
+        return quizAiGenerator.generateDailyQuiz(learningUnitInfos, providerConfig, systemPrompt);
     }
 
     @Override
@@ -70,6 +81,7 @@ public class QuizGeneratorServiceImpl implements QuizGeneratorService {
                 userId,
                 weakTopicId,
                 roadmapItemId,
+                null,
                 null);
     }
 
@@ -79,6 +91,17 @@ public class QuizGeneratorServiceImpl implements QuizGeneratorService {
             UUID weakTopicId,
             UUID roadmapItemId,
             AiProviderConfig providerConfig) {
+        return generateMasteryCheckQuestions(
+                userId, weakTopicId, roadmapItemId, providerConfig, null);
+    }
+
+    @Override
+    public GeneratedQuizPlan generateMasteryCheckQuestions(
+            UUID userId,
+            UUID weakTopicId,
+            UUID roadmapItemId,
+            AiProviderConfig providerConfig,
+            String systemPrompt) {
         RoadmapItem item = roadmapItemRepository.findAllOwnedByIdsWithHierarchy(
                         List.of(roadmapItemId),
                         userId)
@@ -88,7 +111,7 @@ public class QuizGeneratorServiceImpl implements QuizGeneratorService {
                         ErrorCode.RESOURCE_NOT_FOUND,
                         "Roadmap Learning Unit was not found."));
         CompletedLearningUnitInfo learningUnitInfo = toLearningUnitInfo(item);
-        return quizAiGenerator.generateMasteryCheck(learningUnitInfo, providerConfig);
+        return quizAiGenerator.generateMasteryCheck(learningUnitInfo, providerConfig, systemPrompt);
     }
 
     private CompletedLearningUnitInfo toLearningUnitInfo(RoadmapItem learningUnit) {

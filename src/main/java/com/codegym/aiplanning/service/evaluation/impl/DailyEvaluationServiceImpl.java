@@ -90,6 +90,15 @@ public class DailyEvaluationServiceImpl implements DailyEvaluationService {
             UUID userId,
             UUID dailyPlanVersionId,
             AiProviderConfig providerConfig) {
+        return generateDailyQuizWithProviderConfig(userId, dailyPlanVersionId, providerConfig, null);
+    }
+
+    @Override
+    public QuizDetailResponse generateDailyQuizWithProviderConfig(
+            UUID userId,
+            UUID dailyPlanVersionId,
+            AiProviderConfig providerConfig,
+            String systemPrompt) {
         Optional<QuizDetailResponse> existing = persistenceService
                 .findExistingGeneratedQuiz(userId, dailyPlanVersionId);
         if (existing.isPresent()) {
@@ -102,7 +111,8 @@ public class DailyEvaluationServiceImpl implements DailyEvaluationService {
                 userId,
                 context.dailyPlan().getId(),
                 context.completedLearningUnitIds(),
-                providerConfig);
+                providerConfig,
+                systemPrompt);
         return persistenceService.saveGeneratedDailyQuiz(
                 userId,
                 context,

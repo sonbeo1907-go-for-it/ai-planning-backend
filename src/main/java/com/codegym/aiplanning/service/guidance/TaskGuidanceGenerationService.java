@@ -47,6 +47,24 @@ public class TaskGuidanceGenerationService {
             AiExecutionOperation operation,
             String adjustmentInstruction,
             AiProviderConfig providerConfig) {
+        return generate(
+                executionId,
+                ownerId,
+                dailyPlanItemId,
+                operation,
+                adjustmentInstruction,
+                providerConfig,
+                null);
+    }
+
+    public UUID generate(
+            UUID executionId,
+            UUID ownerId,
+            UUID dailyPlanItemId,
+            AiExecutionOperation operation,
+            String adjustmentInstruction,
+            AiProviderConfig providerConfig,
+            String systemPrompt) {
         UUID existingResult = persistenceService.findExistingResult(
                         executionId,
                         ownerId,
@@ -64,7 +82,8 @@ public class TaskGuidanceGenerationService {
         GeneratedTaskGuidance generated = aiGenerator.generate(
                 context,
                 adjustmentInstruction,
-                providerConfig);
+                providerConfig,
+                systemPrompt);
         return persistenceService.persist(
                 executionId,
                 context,

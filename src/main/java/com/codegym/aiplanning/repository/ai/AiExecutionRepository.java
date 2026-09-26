@@ -82,6 +82,21 @@ public interface AiExecutionRepository extends JpaRepository<AiExecution, UUID>,
             """, nativeQuery = true)
     int requeueExpired(@Param("now") Instant now);
 
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+            update ai_executions
+               set prompt_version_id = :promptVersionId,
+                   prompt_source = :promptSource,
+                   updated_at = :now,
+                   version = version + 1
+             where id = :id
+            """, nativeQuery = true)
+    int updatePromptReference(
+            @Param("id") UUID id,
+            @Param("promptVersionId") UUID promptVersionId,
+            @Param("promptSource") String promptSource,
+            @Param("now") Instant now);
+
     @Query("""
             select new com.codegym.aiplanning.controller.admin.ai.dto.AiExecutionAnalyticsResponse(
                 a.providerConfig.provider.displayName,

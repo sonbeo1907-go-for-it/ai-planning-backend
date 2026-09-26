@@ -43,6 +43,7 @@ public class AiExecutionWorker {
     private final DailyEvaluationService dailyEvaluationService;
     private final WeakTopicService weakTopicService;
     private final TaskGuidanceGenerationService taskGuidanceGenerationService;
+    private final com.codegym.aiplanning.service.ai.prompt.SystemPromptResolver systemPromptResolver;
 
     public AiExecutionWorker(
             AiExecutionRepository executionRepository,
@@ -53,7 +54,8 @@ public class AiExecutionWorker {
             TransactionTemplate transactionTemplate,
             DailyEvaluationService dailyEvaluationService,
             WeakTopicService weakTopicService,
-            TaskGuidanceGenerationService taskGuidanceGenerationService) {
+            TaskGuidanceGenerationService taskGuidanceGenerationService,
+            com.codegym.aiplanning.service.ai.prompt.SystemPromptResolver systemPromptResolver) {
         this.executionRepository = executionRepository;
         this.inputRepository = inputRepository;
         this.roadmapGeneratorService = roadmapGeneratorService;
@@ -63,6 +65,7 @@ public class AiExecutionWorker {
         this.dailyEvaluationService = dailyEvaluationService;
         this.weakTopicService = weakTopicService;
         this.taskGuidanceGenerationService = taskGuidanceGenerationService;
+        this.systemPromptResolver = systemPromptResolver;
     }
 
     @Async("aiGenerationExecutor")
@@ -72,9 +75,19 @@ public class AiExecutionWorker {
             return;
         }
 
+        com.codegym.aiplanning.service.ai.prompt.ResolvedPrompt resolvedPrompt =
+                systemPromptResolver.resolve(context.purpose());
+        transactionTemplate.executeWithoutResult(status -> {
+            executionRepository.updatePromptReference(
+                    context.executionId(),
+                    resolvedPrompt.versionId(),
+                    resolvedPrompt.source().name(),
+                    Instant.now());
+        });
+
         long startNanos = System.nanoTime();
         try {
-            GenerationResult result = execute(context);
+            GenerationResult result = execute(context, resolvedPrompt.content());
             long latencyMs = Math.max(0L, (System.nanoTime() - startNanos) / 1_000_000L);
             AiUsage usage = AiUsageHolder.getAndClear();
             completeSuccessfully(context, result.resultType(), result.resultId(), latencyMs, usage);
@@ -106,7 +119,7 @@ public class AiExecutionWorker {
         }
     }
 
-    private GenerationResult execute(JobContext context) {
+    private GenerationResult execute(JobContext context, String systemPrompt) {
         if (context.targetType() == AiExecutionTargetType.DAILY_PLAN_ITEM) {
             UUID revisionId = taskGuidanceGenerationService.generate(
                     context.executionId(),
@@ -114,7 +127,8 @@ public class AiExecutionWorker {
                     context.targetId(),
                     context.operation(),
                     context.adjustmentPrompt(),
-                    context.providerConfig());
+                    context.providerConfig(),
+                    systemPrompt);
             return new GenerationResult(
                     AiExecutionResultType.TASK_GUIDANCE_REVISION,
                     revisionId);
@@ -123,14 +137,16 @@ public class AiExecutionWorker {
             UUID quizId = weakTopicService.generateMasteryCheckQuizWithProviderConfig(
                     context.ownerId(),
                     context.targetId(),
-                    context.providerConfig()).id();
+                    context.providerConfig(),
+                    systemPrompt).id();
             return new GenerationResult(AiExecutionResultType.QUIZ, quizId);
         }
         if (context.targetType() == AiExecutionTargetType.DAILY_PLAN_VERSION) {
             UUID quizId = dailyEvaluationService.generateDailyQuizWithProviderConfig(
                     context.ownerId(),
                     context.targetId(),
-                    context.providerConfig()).id();
+                    context.providerConfig(),
+                    systemPrompt).id();
             return new GenerationResult(AiExecutionResultType.QUIZ, quizId);
         }
         if (context.targetType() == AiExecutionTargetType.DAILY_PLAN) {
@@ -139,19 +155,21 @@ public class AiExecutionWorker {
                     context.ownerId(),
                     context.ownerEmail(),
                     context.executionId().toString(),
-                    context.providerConfig()).id();
+                    context.providerConfig(),
+                    systemPrompt).id();
             return new GenerationResult(
                     AiExecutionResultType.DAILY_PLAN_VERSION, versionId);
         }
 
         RoadmapVersionResponse version = context.operation() == AiExecutionOperation.GENERATE
                 ? roadmapGeneratorService.generateWithProviderConfig(
-                        context.ownerId(), context.targetId(), context.providerConfig())
+                        context.ownerId(), context.targetId(), context.providerConfig(), systemPrompt)
                 : roadmapGeneratorService.regenerateWithProviderConfig(
                         context.ownerId(),
                         context.targetId(),
                         context.adjustmentPrompt(),
-                        context.providerConfig());
+                        context.providerConfig(),
+                        systemPrompt);
         return new GenerationResult(
                 AiExecutionResultType.ROADMAP_VERSION, version.id());
     }
@@ -180,6 +198,7 @@ public class AiExecutionWorker {
                     execution.getTargetId(),
                     execution.getTargetType(),
                     execution.getOperation(),
+                    execution.getPurpose(),
                     execution.getProviderConfig(),
                     prompt);
         });
@@ -338,6 +357,7 @@ public class AiExecutionWorker {
             UUID targetId,
             AiExecutionTargetType targetType,
             AiExecutionOperation operation,
+            com.codegym.aiplanning.entity.ai.AiPurpose purpose,
             AiProviderConfig providerConfig,
             String adjustmentPrompt) {}
 

@@ -30,6 +30,12 @@ public interface WeakTopicService {
             UUID weakTopicId,
             AiProviderConfig providerConfig);
 
+    QuizDetailResponse generateMasteryCheckQuizWithProviderConfig(
+            UUID userId,
+            UUID weakTopicId,
+            AiProviderConfig providerConfig,
+            String systemPrompt);
+
     QuizDetailResponse getMasteryCheckQuiz(UUID userId, UUID weakTopicId, UUID quizId);
 
     List<QuizDetailResponse> getMasteryCheckHistory(UUID userId, UUID weakTopicId);
