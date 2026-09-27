@@ -1,6 +1,7 @@
 package com.codegym.aiplanning.entity.daily;
 
 import com.codegym.aiplanning.common.entity.BaseEntity;
+import com.codegym.aiplanning.common.validation.StudyTimeBudgetPolicy;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -70,7 +71,8 @@ public class DailyPlanVersion extends BaseEntity {
         version.versionNumber = versionNumber != null ? versionNumber : 1;
         version.status = DailyPlanVersionStatus.DRAFT;
         version.origin = origin != null ? origin : DailyPlanVersionOrigin.MANUAL;
-        version.availableMinutes = availableMinutes != null ? availableMinutes : 60;
+        version.availableMinutes = StudyTimeBudgetPolicy.requireValid(
+                availableMinutes, "Available minutes");
         version.totalPlannedMinutes = totalPlannedMinutes != null ? totalPlannedMinutes : 0;
         version.draftSlotDailyPlanId = dailyPlanId;
         version.requiresUserDecision = false;
@@ -80,6 +82,12 @@ public class DailyPlanVersion extends BaseEntity {
     public void updateTotalPlannedMinutes(Integer minutes) {
         requireDraft();
         this.totalPlannedMinutes = minutes != null ? minutes : 0;
+    }
+
+    public void updateAvailableMinutes(Integer minutes) {
+        requireDraft();
+        this.availableMinutes = StudyTimeBudgetPolicy.requireValid(
+                minutes, "Available minutes");
     }
 
     public void updateAiMetadata(String aiExplanation, Boolean requiresUserDecision) {

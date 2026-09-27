@@ -2,6 +2,7 @@ package com.codegym.aiplanning.service.profile.impl;
 
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
+import com.codegym.aiplanning.common.validation.StudyTimeBudgetPolicy;
 import com.codegym.aiplanning.controller.profile.dto.ProfileResponse;
 import com.codegym.aiplanning.controller.profile.dto.CompleteProfileSetupRequest;
 import com.codegym.aiplanning.controller.profile.dto.UpdateProfileRequest;
@@ -58,6 +59,9 @@ public class ProfileServiceImpl implements ProfileService {
         UserProfile profile = requireProfileForUpdate(userId);
         boolean wasCompleted = profile.isSetupCompleted();
 
+        StudyTimeBudgetPolicy.validateIfPresent(
+                request.defaultDailyMinutes(), "Default daily minutes");
+
         profile.completeSetup(
                 normalizeDisplayName(request.displayName()),
                 normalizeTimeZone(request.timeZone()),
@@ -87,6 +91,9 @@ public class ProfileServiceImpl implements ProfileService {
                     ErrorCode.PROFILE_SETUP_REQUIRED,
                     "Complete the first-access profile setup before editing the profile.");
         }
+
+        StudyTimeBudgetPolicy.validateIfPresent(
+                request.defaultDailyMinutes(), "Default daily minutes");
 
         profile.update(
                 normalizeDisplayName(request.displayName()),

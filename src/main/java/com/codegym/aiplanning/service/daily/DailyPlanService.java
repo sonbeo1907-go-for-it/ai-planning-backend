@@ -13,6 +13,7 @@ import java.util.UUID;
 import org.springframework.security.oauth2.jwt.Jwt;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanSummaryResponse;
 import com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest;
+import com.codegym.aiplanning.controller.daily.dto.UpdateDailyPlanBudgetRequest;
 import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
 import java.time.LocalDate;
 import org.springframework.data.domain.Page;
@@ -44,6 +45,12 @@ public interface DailyPlanService {
     DailyPlanVersionResponse getVersion(UUID planId, UUID versionId, Jwt actorJwt);
 
     DailyPlanVersionResponse createDraftVersion(UUID planId, Jwt actorJwt);
+
+    DailyPlanVersionResponse updateDraftBudget(
+            UUID planId,
+            UUID versionId,
+            UpdateDailyPlanBudgetRequest request,
+            Jwt actorJwt);
 
     DailyPlanVersionResponse generateAiDraftVersion(
             UUID planId, String idempotencyKey, Jwt actorJwt);

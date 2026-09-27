@@ -15,6 +15,7 @@ import com.codegym.aiplanning.controller.daily.dto.DailyPlanResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanSummaryResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
 import com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest;
+import com.codegym.aiplanning.controller.daily.dto.UpdateDailyPlanBudgetRequest;
 import com.codegym.aiplanning.entity.daily.DailyPlan;
 import com.codegym.aiplanning.entity.daily.DailyPlanItem;
 import com.codegym.aiplanning.entity.daily.DailyPlanVersion;
@@ -54,6 +55,7 @@ import com.codegym.aiplanning.service.daily.ai.DailyPlanAiGenerator;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext;
 import com.codegym.aiplanning.service.daily.ai.PlanningContextBuilder;
 import com.codegym.aiplanning.service.daily.DailyPlanPersistenceService;
+import com.codegym.aiplanning.service.daily.AvailableMinutesResolver;
 import com.codegym.aiplanning.service.evaluation.WeakTopicService;
 import com.codegym.aiplanning.service.roadmap.RoadmapProgressService;
 import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
@@ -107,12 +109,14 @@ class DailyPlanServiceTest {
     private com.codegym.aiplanning.repository.roadmap.RoadmapItemProgressRepository roadmapItemProgressRepository;
 
     private DailyPlanServiceImpl dailyPlanService;
+    private AvailableMinutesResolver availableMinutesResolver;
 
     private UUID userId;
     private Jwt userJwt;
 
     @BeforeEach
     void setUp() {
+        availableMinutesResolver = new AvailableMinutesResolver(userProfileRepository);
         dailyPlanService = new DailyPlanServiceImpl(
                 dailyPlanRepository,
                 dailyPlanVersionRepository,
@@ -133,7 +137,8 @@ class DailyPlanServiceTest {
                 new TaskStepReadModelBuilder(
                         taskStepRepository,
                         taskStepStateRepository),
-                new TaskStepValidator());
+                new TaskStepValidator(),
+                availableMinutesResolver);
 
         userId = UUID.randomUUID();
         userJwt = Jwt.withTokenValue("mock-token")
@@ -173,6 +178,65 @@ class DailyPlanServiceTest {
         assertThat(response.planDate()).isEqualTo(date);
         assertThat(response.availableMinutes()).isEqualTo(120);
         assertThat(response.completionPercentage()).isEqualTo(0.0);
+    }
+
+    @Test
+    void createDailyPlan_withoutRoadmapOrOverrideUsesProfileAndStaysUnlinked() {
+        LocalDate date = LocalDate.now().plusDays(1);
+        UserAccount account = UserAccount.create(
+                "profile@example.com", "Password@123", UserRole.USER, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(account, "id", userId);
+        com.codegym.aiplanning.entity.profile.UserProfile profile =
+                com.codegym.aiplanning.entity.profile.UserProfile.create(account, "Learner");
+        profile.update(null, null, null, 90);
+
+        when(dailyPlanRepository.findByUserIdAndPlanDate(userId, date))
+                .thenReturn(Optional.empty());
+        when(userProfileRepository.findByUserId(userId)).thenReturn(Optional.of(profile));
+        when(dailyPlanRepository.save(any(DailyPlan.class))).thenAnswer(invocation -> {
+            DailyPlan plan = invocation.getArgument(0);
+            ReflectionTestUtils.setField(plan, "id", UUID.randomUUID());
+            return plan;
+        });
+        when(dailyPlanVersionRepository.save(any(DailyPlanVersion.class)))
+                .thenAnswer(invocation -> {
+                    DailyPlanVersion version = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(version, "id", UUID.randomUUID());
+                    return version;
+                });
+
+        DailyPlanResponse response = dailyPlanService.createDailyPlan(
+                new CreateDailyPlanRequest(date, null, null), userJwt);
+
+        assertThat(response.roadmapId()).isNull();
+        assertThat(response.availableMinutes()).isEqualTo(90);
+        verify(roadmapRepository, never()).findAllByOwnerIdOrderByUpdatedAtDesc(userId);
+    }
+
+    @Test
+    void updateDraftBudget_updatesOnlyTheOwnedDraftSnapshot() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(
+                planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 0);
+        ReflectionTestUtils.setField(version, "id", versionId);
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanIdForUpdate(versionId, planId))
+                .thenReturn(Optional.of(version));
+        when(dailyPlanVersionRepository.saveAndFlush(version)).thenReturn(version);
+
+        DailyPlanVersionResponse response = dailyPlanService.updateDraftBudget(
+                planId,
+                versionId,
+                new UpdateDailyPlanBudgetRequest(270, 0L),
+                userJwt);
+
+        assertThat(response.availableMinutes()).isEqualTo(270);
+        assertThat(response.status()).isEqualTo(com.codegym.aiplanning.entity.daily.DailyPlanVersionStatus.DRAFT);
     }
 
     @Test

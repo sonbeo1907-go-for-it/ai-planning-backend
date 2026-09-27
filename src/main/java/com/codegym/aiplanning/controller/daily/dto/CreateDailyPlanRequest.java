@@ -13,9 +13,14 @@ public record CreateDailyPlanRequest(
         @Schema(description = "Date of the plan (YYYY-MM-DD)", example = "2026-08-12")
         LocalDate planDate,
 
-        @Min(value = 1, message = "Available minutes must be at least 1")
-        @Max(value = 1440, message = "Available minutes cannot exceed 1440")
-        @Schema(description = "Available minutes committed for the day", example = "120")
+        @Min(value = 15, message = "Available minutes must be at least 15")
+        @Max(value = 480, message = "Available minutes cannot exceed 480")
+        @Schema(
+                description = "Optional per-day override. When omitted, the server resolves Roadmap, profile, then system fallback.",
+                minimum = "15",
+                maximum = "480",
+                multipleOf = 15,
+                example = "120")
         Integer availableMinutes,
 
         @Schema(description = "Associated Roadmap ID", example = "594c4df0-7f4d-4cb4-81c4-70735b0db2bf")

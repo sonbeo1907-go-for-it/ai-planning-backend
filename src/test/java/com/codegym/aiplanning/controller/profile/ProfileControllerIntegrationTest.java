@@ -117,6 +117,25 @@ class ProfileControllerIntegrationTest {
     }
 
     @Test
+    void setupRejectsDailyMinutesOutsideTheFifteenMinuteIncrement() throws Exception {
+        UserAccount user = createUser("invalid-duration-step", "Invalid Duration");
+
+        mockMvc.perform(put(ApiConstant.PROFILE + ApiConstant.PROFILE_SETUP)
+                        .header("Authorization", "Bearer " + login(user.getEmail()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Invalid Duration",
+                                  "timeZone": "Asia/Ho_Chi_Minh",
+                                  "locale": "vi",
+                                  "defaultDailyMinutes": 37
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
     void partialUpdateRequiresCompletedInitialSetup() throws Exception {
         UserAccount user = createUser("setup-required", "Setup Required");
 

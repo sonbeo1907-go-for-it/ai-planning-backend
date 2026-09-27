@@ -16,6 +16,7 @@ import com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest;
 import com.codegym.aiplanning.controller.daily.dto.ProgressEntryResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
 import com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest;
+import com.codegym.aiplanning.controller.daily.dto.UpdateDailyPlanBudgetRequest;
 import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
 import com.codegym.aiplanning.service.daily.DailyPlanService;
 import com.codegym.aiplanning.service.ai.execution.AiExecutionService;
@@ -140,6 +141,19 @@ public class DailyPlanController {
     public ApiResponse<DailyPlanVersionResponse> createDraftVersion(
             @PathVariable UUID planId, @AuthenticationPrincipal Jwt actorJwt) {
         return ApiResponse.of(dailyPlanService.createDraftVersion(planId, actorJwt));
+    }
+
+    @PatchMapping(ApiConstant.DAILY_PLAN_VERSION_BUDGET)
+    @Operation(
+            summary = "Update the available-time snapshot of a DRAFT Daily Plan version",
+            description = "Only the owner may update a DRAFT version. ACTIVE and SUPERSEDED budgets are immutable.")
+    public ApiResponse<DailyPlanVersionResponse> updateDraftBudget(
+            @PathVariable UUID planId,
+            @PathVariable UUID versionId,
+            @Valid @RequestBody UpdateDailyPlanBudgetRequest request,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(dailyPlanService.updateDraftBudget(
+                planId, versionId, request, actorJwt));
     }
 
     @PostMapping(ApiConstant.DAILY_PLAN_GENERATE_AI)

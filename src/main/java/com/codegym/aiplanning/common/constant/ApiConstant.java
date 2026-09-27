@@ -59,6 +59,8 @@ public final class ApiConstant {
             DAILY_PLAN_VERSIONS + "/{versionId}";
     public static final String DAILY_PLAN_VERSION_ACTIVATE =
             DAILY_PLAN_VERSION_BY_ID + "/activate";
+    public static final String DAILY_PLAN_VERSION_BUDGET =
+            DAILY_PLAN_VERSION_BY_ID + "/budget";
     public static final String DAILY_PLAN_VERSION_ITEMS =
             DAILY_PLAN_VERSION_BY_ID + "/items";
     public static final String DAILY_PLAN_VERSION_ITEM_BY_ID =

@@ -13,6 +13,9 @@ import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.auth.UserRole;
 import com.codegym.aiplanning.entity.daily.ProgressEntry;
 import com.codegym.aiplanning.entity.daily.ProgressEntryStatus;
+import com.codegym.aiplanning.entity.daily.DailyPlan;
+import com.codegym.aiplanning.entity.daily.DailyPlanVersion;
+import com.codegym.aiplanning.entity.daily.DailyPlanVersionOrigin;
 import com.codegym.aiplanning.entity.evaluation.WeakTopic;
 import com.codegym.aiplanning.entity.evaluation.WeakTopicStatus;
 import com.codegym.aiplanning.entity.evaluation.WeakTopicTrigger;
@@ -25,6 +28,8 @@ import com.codegym.aiplanning.entity.roadmap.RoadmapStatus;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
 import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
 import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanVersionRepository;
 import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
 import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemProgressRepository;
@@ -72,6 +77,12 @@ class DashboardReportServiceTest {
     @Mock
     private WeakTopicRepository weakTopicRepository;
 
+    @Mock
+    private DailyPlanRepository dailyPlanRepository;
+
+    @Mock
+    private DailyPlanVersionRepository dailyPlanVersionRepository;
+
     @InjectMocks
     private DashboardReportServiceImpl dashboardReportService;
 
@@ -117,7 +128,7 @@ class DashboardReportServiceTest {
         when(roadmapRepository.findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(
                 userId, RoadmapStatus.ACTIVE)).thenReturn(Optional.empty());
 
-        DashboardReportResponse response = dashboardReportService.getDashboardReport(userId);
+        DashboardReportResponse response = dashboardReportService.getDashboardReport(userId, null);
 
         assertThat(response.streak().currentStreak()).isEqualTo(3);
         assertThat(response.streak().longestStreak()).isEqualTo(3);
@@ -127,6 +138,30 @@ class DashboardReportServiceTest {
         assertThat(response.studyTime().totalStudyHours()).isEqualTo(2.1);
         assertThat(response.studyTime().dailyPoints()).hasSize(7);
         assertThat(response.masterPlan()).isNull();
+    }
+
+    @Test
+    void getDashboardReport_usesStoredPlanBudgetForItsDate() {
+        LocalDate today = LocalDate.now(zoneId);
+        UUID planId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, today, "Asia/Ho_Chi_Minh");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(
+                planId, 1, DailyPlanVersionOrigin.MANUAL, 270, 0);
+
+        when(progressEntryRepository.findByUserIdOrderByRecordedAtDesc(userId))
+                .thenReturn(List.of());
+        when(roadmapRepository.findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(
+                userId, RoadmapStatus.ACTIVE)).thenReturn(Optional.empty());
+        when(dailyPlanRepository.findByUserIdAndPlanDateBetweenOrderByPlanDateAsc(
+                userId, today.minusDays(6), today)).thenReturn(List.of(plan));
+        when(dailyPlanVersionRepository.findCurrentVersionsByDailyPlanIds(List.of(planId)))
+                .thenReturn(List.of(version));
+
+        DashboardReportResponse response = dashboardReportService.getDashboardReport(userId, null);
+
+        assertThat(response.studyTime().dailyPoints().get(6).targetMinutes()).isEqualTo(270);
+        assertThat(response.studyTime().dailyPoints().get(5).targetMinutes()).isEqualTo(45);
     }
 
     @Test
@@ -148,7 +183,7 @@ class DashboardReportServiceTest {
         when(roadmapRepository.findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(
                 userId, RoadmapStatus.ACTIVE)).thenReturn(Optional.empty());
 
-        DashboardReportResponse response = dashboardReportService.getDashboardReport(userId);
+        DashboardReportResponse response = dashboardReportService.getDashboardReport(userId, null);
 
         assertThat(response.streak().currentStreak()).isEqualTo(2);
         assertThat(response.streak().longestStreak()).isEqualTo(2);
@@ -174,7 +209,7 @@ class DashboardReportServiceTest {
         when(roadmapRepository.findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(
                 userId, RoadmapStatus.ACTIVE)).thenReturn(Optional.empty());
 
-        DashboardReportResponse response = dashboardReportService.getDashboardReport(userId);
+        DashboardReportResponse response = dashboardReportService.getDashboardReport(userId, null);
 
         assertThat(response.streak().currentStreak()).isEqualTo(0);
         assertThat(response.streak().longestStreak()).isEqualTo(2);
@@ -204,7 +239,7 @@ class DashboardReportServiceTest {
         when(roadmapRepository.findFirstByOwnerIdAndStatusOrderByUpdatedAtDescIdAsc(
                 userId, RoadmapStatus.ACTIVE)).thenReturn(Optional.empty());
 
-        DashboardReportResponse response = dashboardReportService.getDashboardReport(userId);
+        DashboardReportResponse response = dashboardReportService.getDashboardReport(userId, null);
 
         assertThat(response.streak().currentStreak()).isZero();
         assertThat(response.studyTime().totalStudyMinutes()).isEqualTo(45);
@@ -230,7 +265,7 @@ class DashboardReportServiceTest {
                 .thenReturn(Optional.of(roadmap));
         when(roadmapProgressService.getProgress(userId, roadmapId)).thenReturn(progressResponse);
 
-        DashboardReportResponse response = dashboardReportService.getDashboardReport(userId);
+        DashboardReportResponse response = dashboardReportService.getDashboardReport(userId, null);
 
         assertThat(response.masterPlan()).isNotNull();
         assertThat(response.masterPlan().roadmapId()).isEqualTo(roadmapId);
