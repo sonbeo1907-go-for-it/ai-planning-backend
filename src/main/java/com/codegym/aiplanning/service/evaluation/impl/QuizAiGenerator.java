@@ -51,11 +51,20 @@ public class QuizAiGenerator {
     public GeneratedQuizPlan generateDailyQuiz(
             List<CompletedLearningUnitInfo> completedLearningUnits,
             AiProviderConfig providerConfig) {
+        return generateDailyQuiz(completedLearningUnits, providerConfig, null);
+    }
+
+    public GeneratedQuizPlan generateDailyQuiz(
+            List<CompletedLearningUnitInfo> completedLearningUnits,
+            AiProviderConfig providerConfig,
+            String customSystemPrompt) {
         Set<UUID> validLearningUnitIds = completedLearningUnits.stream()
                 .map(CompletedLearningUnitInfo::learningUnitId)
                 .collect(java.util.stream.Collectors.toSet());
 
-        String systemPrompt = buildDailyQuizSystemPrompt();
+        String systemPrompt = customSystemPrompt != null && !customSystemPrompt.isBlank()
+                ? customSystemPrompt
+                : buildDailyQuizSystemPrompt();
         String userPrompt = buildDailyQuizUserPrompt(completedLearningUnits);
 
         for (int attempt = 0; attempt <= MAX_SCHEMA_RETRIES; attempt++) {
@@ -82,14 +91,23 @@ public class QuizAiGenerator {
     }
 
     public GeneratedQuizPlan generateMasteryCheck(CompletedLearningUnitInfo learningUnitInfo) {
-        return generateMasteryCheck(learningUnitInfo, null);
+        return generateMasteryCheck(learningUnitInfo, null, null);
     }
 
     public GeneratedQuizPlan generateMasteryCheck(
             CompletedLearningUnitInfo learningUnitInfo,
             AiProviderConfig providerConfig) {
+        return generateMasteryCheck(learningUnitInfo, providerConfig, null);
+    }
+
+    public GeneratedQuizPlan generateMasteryCheck(
+            CompletedLearningUnitInfo learningUnitInfo,
+            AiProviderConfig providerConfig,
+            String customSystemPrompt) {
         Set<UUID> validLearningUnitIds = Set.of(learningUnitInfo.learningUnitId());
-        String systemPrompt = buildMasteryCheckSystemPrompt();
+        String systemPrompt = customSystemPrompt != null && !customSystemPrompt.isBlank()
+                ? customSystemPrompt
+                : buildMasteryCheckSystemPrompt();
         String userPrompt = buildDailyQuizUserPrompt(List.of(learningUnitInfo));
 
         for (int attempt = 0; attempt <= MAX_SCHEMA_RETRIES; attempt++) {

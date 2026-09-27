@@ -69,6 +69,9 @@ class AiExecutionWorkerTest {
     @Mock
     private TaskGuidanceGenerationService taskGuidanceGenerationService;
 
+    @Mock
+    private com.codegym.aiplanning.service.ai.prompt.SystemPromptResolver systemPromptResolver;
+
     private AiExecutionWorker worker;
     private UUID executionId;
     private UUID ownerId;
@@ -87,7 +90,8 @@ class AiExecutionWorkerTest {
                 transactionTemplate,
                 dailyEvaluationService,
                 weakTopicService,
-                taskGuidanceGenerationService);
+                taskGuidanceGenerationService,
+                systemPromptResolver);
         executionId = UUID.randomUUID();
         ownerId = UUID.randomUUID();
         roadmapId = UUID.randomUUID();
@@ -102,7 +106,14 @@ class AiExecutionWorkerTest {
         when(execution.getTargetId()).thenReturn(roadmapId);
         when(execution.getTargetType()).thenReturn(AiExecutionTargetType.ROADMAP);
         when(execution.getOperation()).thenReturn(AiExecutionOperation.GENERATE);
+        when(execution.getPurpose()).thenReturn(com.codegym.aiplanning.entity.ai.AiPurpose.ROADMAP_GENERATION);
         when(execution.getProviderConfig()).thenReturn(providerConfig);
+
+        when(systemPromptResolver.resolve(any())).thenReturn(
+                new com.codegym.aiplanning.service.ai.prompt.ResolvedPrompt(
+                        null,
+                        com.codegym.aiplanning.entity.ai.AiPromptSource.CODE_FALLBACK,
+                        "test prompt"));
 
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
             TransactionCallback<?> callback = invocation.getArgument(0);
@@ -129,7 +140,7 @@ class AiExecutionWorkerTest {
                 .thenReturn(Optional.of(execution));
         when(inputRepository.findById(executionId)).thenReturn(Optional.empty());
         when(roadmapGeneratorService.generateWithProviderConfig(
-                        ownerId, roadmapId, providerConfig))
+                        ownerId, roadmapId, providerConfig, "test prompt"))
                 .thenReturn(version);
         when(executionRepository.findByIdForUpdate(executionId))
                 .thenReturn(Optional.of(execution));
@@ -138,7 +149,7 @@ class AiExecutionWorkerTest {
         worker.executeAsync(executionId);
 
         verify(roadmapGeneratorService).generateWithProviderConfig(
-                ownerId, roadmapId, providerConfig);
+                ownerId, roadmapId, providerConfig, "test prompt");
         verify(execution).markSucceeded(
                 eq(AiExecutionResultType.ROADMAP_VERSION),
                 eq(versionId),
@@ -163,7 +174,7 @@ class AiExecutionWorkerTest {
                 .thenReturn(Optional.of(execution));
         when(inputRepository.findById(executionId)).thenReturn(Optional.empty());
         when(roadmapGeneratorService.generateWithProviderConfig(
-                        ownerId, roadmapId, providerConfig))
+                        ownerId, roadmapId, providerConfig, "test prompt"))
                 .thenThrow(new BusinessException(
                         ErrorCode.AI_PROVIDER_UNAVAILABLE,
                         "Provider unavailable"));
@@ -193,6 +204,7 @@ class AiExecutionWorkerTest {
         DailyPlanVersionResponse version = mock(DailyPlanVersionResponse.class);
         when(version.id()).thenReturn(versionId);
         when(execution.getTargetType()).thenReturn(AiExecutionTargetType.DAILY_PLAN);
+        when(execution.getPurpose()).thenReturn(com.codegym.aiplanning.entity.ai.AiPurpose.DAILY_PLAN_GENERATION);
         when(executionRepository.claimQueued(eq(executionId), any(Instant.class), any(Instant.class)))
                 .thenReturn(1);
         when(executionRepository.findJobContextById(executionId))
@@ -203,7 +215,8 @@ class AiExecutionWorkerTest {
                         ownerId,
                         "user@example.com",
                         executionId.toString(),
-                        providerConfig))
+                        providerConfig,
+                        "test prompt"))
                 .thenReturn(version);
         when(executionRepository.findByIdForUpdate(executionId))
                 .thenReturn(Optional.of(execution));
@@ -216,7 +229,8 @@ class AiExecutionWorkerTest {
                 ownerId,
                 "user@example.com",
                 executionId.toString(),
-                providerConfig);
+                providerConfig,
+                "test prompt");
         verify(execution).markSucceeded(
                 eq(AiExecutionResultType.DAILY_PLAN_VERSION),
                 eq(versionId),
@@ -225,7 +239,7 @@ class AiExecutionWorkerTest {
                 any(),
                 any());
         verify(roadmapGeneratorService, never())
-                .generateWithProviderConfig(any(), any(), any());
+                .generateWithProviderConfig(any(), any(), any(), any());
     }
 
     @Test
@@ -234,11 +248,13 @@ class AiExecutionWorkerTest {
         QuizDetailResponse quiz = mock(QuizDetailResponse.class);
         when(quiz.id()).thenReturn(quizId);
         when(execution.getTargetType()).thenReturn(AiExecutionTargetType.DAILY_PLAN_VERSION);
+        when(execution.getPurpose()).thenReturn(com.codegym.aiplanning.entity.ai.AiPurpose.QUIZ_GENERATION);
         prepareClaimedExecution();
         when(dailyEvaluationService.generateDailyQuizWithProviderConfig(
                         ownerId,
                         roadmapId,
-                        providerConfig))
+                        providerConfig,
+                        "test prompt"))
                 .thenReturn(quiz);
 
         worker.executeAsync(executionId);
@@ -246,7 +262,8 @@ class AiExecutionWorkerTest {
         verify(dailyEvaluationService).generateDailyQuizWithProviderConfig(
                 ownerId,
                 roadmapId,
-                providerConfig);
+                providerConfig,
+                "test prompt");
         verify(execution).markSucceeded(
                 eq(AiExecutionResultType.QUIZ),
                 eq(quizId),
@@ -255,7 +272,7 @@ class AiExecutionWorkerTest {
                 any(),
                 any());
         verify(roadmapGeneratorService, never())
-                .generateWithProviderConfig(any(), any(), any());
+                .generateWithProviderConfig(any(), any(), any(), any());
     }
 
     @Test
@@ -264,11 +281,13 @@ class AiExecutionWorkerTest {
         QuizDetailResponse quiz = mock(QuizDetailResponse.class);
         when(quiz.id()).thenReturn(quizId);
         when(execution.getTargetType()).thenReturn(AiExecutionTargetType.WEAK_TOPIC);
+        when(execution.getPurpose()).thenReturn(com.codegym.aiplanning.entity.ai.AiPurpose.QUIZ_GENERATION);
         prepareClaimedExecution();
         when(weakTopicService.generateMasteryCheckQuizWithProviderConfig(
                         ownerId,
                         roadmapId,
-                        providerConfig))
+                        providerConfig,
+                        "test prompt"))
                 .thenReturn(quiz);
 
         worker.executeAsync(executionId);
@@ -276,7 +295,8 @@ class AiExecutionWorkerTest {
         verify(weakTopicService).generateMasteryCheckQuizWithProviderConfig(
                 ownerId,
                 roadmapId,
-                providerConfig);
+                providerConfig,
+                "test prompt");
         verify(execution).markSucceeded(
                 eq(AiExecutionResultType.QUIZ),
                 eq(quizId),
@@ -285,13 +305,14 @@ class AiExecutionWorkerTest {
                 any(),
                 any());
         verify(dailyEvaluationService, never())
-                .generateDailyQuizWithProviderConfig(any(), any(), any());
+                .generateDailyQuizWithProviderConfig(any(), any(), any(), any());
     }
 
     @Test
     void dailyPlanItemExecutionPublishesTaskGuidanceRevision() {
         UUID revisionId = UUID.randomUUID();
         when(execution.getTargetType()).thenReturn(AiExecutionTargetType.DAILY_PLAN_ITEM);
+        when(execution.getPurpose()).thenReturn(com.codegym.aiplanning.entity.ai.AiPurpose.TASK_GUIDANCE_GENERATION);
         prepareClaimedExecution();
         when(taskGuidanceGenerationService.generate(
                         executionId,
@@ -299,7 +320,8 @@ class AiExecutionWorkerTest {
                         roadmapId,
                         AiExecutionOperation.GENERATE,
                         null,
-                        providerConfig))
+                        providerConfig,
+                        "test prompt"))
                 .thenReturn(revisionId);
 
         worker.executeAsync(executionId);
@@ -310,7 +332,8 @@ class AiExecutionWorkerTest {
                 roadmapId,
                 AiExecutionOperation.GENERATE,
                 null,
-                providerConfig);
+                providerConfig,
+                "test prompt");
         verify(execution).markSucceeded(
                 eq(AiExecutionResultType.TASK_GUIDANCE_REVISION),
                 eq(revisionId),
@@ -329,6 +352,7 @@ class AiExecutionWorkerTest {
     @Test
     void taskGuidanceFailureIsAuditedWithoutPersonalPromptContent() {
         when(execution.getTargetType()).thenReturn(AiExecutionTargetType.DAILY_PLAN_ITEM);
+        when(execution.getPurpose()).thenReturn(com.codegym.aiplanning.entity.ai.AiPurpose.TASK_GUIDANCE_GENERATION);
         prepareClaimedExecution();
         when(taskGuidanceGenerationService.generate(
                         executionId,
@@ -336,7 +360,8 @@ class AiExecutionWorkerTest {
                         roadmapId,
                         AiExecutionOperation.GENERATE,
                         null,
-                        providerConfig))
+                        providerConfig,
+                        "test prompt"))
                 .thenThrow(new BusinessException(
                         ErrorCode.AI_OUTPUT_INVALID,
                         "raw provider response with personal task content"));
@@ -364,7 +389,7 @@ class AiExecutionWorkerTest {
                 .thenReturn(Optional.of(execution));
         when(inputRepository.findById(executionId)).thenReturn(Optional.empty());
         when(roadmapGeneratorService.generateWithProviderConfig(
-                        ownerId, roadmapId, providerConfig))
+                        ownerId, roadmapId, providerConfig, "test prompt"))
                 .thenThrow(new BusinessException(
                         ErrorCode.AI_TIMEOUT,
                         "The AI provider timed out during generation."));
@@ -386,6 +411,42 @@ class AiExecutionWorkerTest {
                 "AiExecution",
                 executionId.toString());
         verify(execution, never()).markSucceeded(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void ac7CrashSafety_promptReferencePersistedBeforeWorkerFailure() {
+        UUID promptVersionId = UUID.randomUUID();
+        when(systemPromptResolver.resolve(com.codegym.aiplanning.entity.ai.AiPurpose.ROADMAP_GENERATION)).thenReturn(
+                new com.codegym.aiplanning.service.ai.prompt.ResolvedPrompt(
+                        promptVersionId,
+                        com.codegym.aiplanning.entity.ai.AiPromptSource.DB_VERSION,
+                        "custom db prompt"));
+
+        when(executionRepository.claimQueued(eq(executionId), any(Instant.class), any(Instant.class)))
+                .thenReturn(1);
+        when(executionRepository.findJobContextById(executionId))
+                .thenReturn(Optional.of(execution));
+        when(inputRepository.findById(executionId)).thenReturn(Optional.empty());
+        when(roadmapGeneratorService.generateWithProviderConfig(
+                ownerId, roadmapId, providerConfig, "custom db prompt"))
+                .thenThrow(new RuntimeException("Simulated crash before LLM call completes"));
+        when(executionRepository.findByIdForUpdate(executionId))
+                .thenReturn(Optional.of(execution));
+        when(execution.isRunning()).thenReturn(true);
+
+        worker.executeAsync(executionId);
+
+        // Verify that prompt reference was updated and committed to DB BEFORE LLM completion/failure
+        verify(executionRepository).updatePromptReference(
+                eq(executionId),
+                eq(promptVersionId),
+                eq("DB_VERSION"),
+                any(Instant.class));
+        verify(execution).markFailed(
+                eq(ErrorCode.AI_GENERATION_FAILED.name()),
+                eq("AI execution failed unexpectedly."),
+                any(Instant.class),
+                any(Long.class));
     }
 
     private void prepareClaimedExecution() {

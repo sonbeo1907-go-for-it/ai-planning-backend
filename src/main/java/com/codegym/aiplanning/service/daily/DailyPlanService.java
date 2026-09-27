@@ -62,6 +62,14 @@ public interface DailyPlanService {
             String generationRequestKey,
             AiProviderConfig providerConfig);
 
+    DailyPlanVersionResponse generateAiDraftVersionWithProviderConfig(
+            UUID planId,
+            UUID ownerId,
+            String ownerEmail,
+            String generationRequestKey,
+            AiProviderConfig providerConfig,
+            String systemPrompt);
+
 
     DailyPlanItemResponse addTaskToPlan(
             UUID planId, UUID versionId, CreateDailyTaskRequest request, Jwt actorJwt);

@@ -43,15 +43,20 @@ public class DailyPlanAiGenerator {
     }
 
     public GeneratedDailyPlan generate(DailyPlanningContext context) {
-        return generate(context, null);
+        return generate(context, null, null);
     }
 
     public GeneratedDailyPlan generate(
             DailyPlanningContext context, AiProviderConfig providerConfig) {
+        return generate(context, providerConfig, null);
+    }
+
+    public GeneratedDailyPlan generate(
+            DailyPlanningContext context, AiProviderConfig providerConfig, String customSystemPrompt) {
         DailyPlanPromptContext promptContext = promptContextBuilder.build(context);
-        String systemPrompt = buildSystemPrompt(
-                context.availableMinutes(),
-                context.locale());
+        String systemPrompt = customSystemPrompt != null && !customSystemPrompt.isBlank()
+                ? renderCustomSystemPrompt(customSystemPrompt, context.availableMinutes(), context.locale())
+                : buildSystemPrompt(context.availableMinutes(), context.locale());
         String userPrompt = buildUserPrompt(promptContext);
 
         InvalidAiDailyPlanResponseException previousFailure = null;
@@ -190,6 +195,15 @@ public class DailyPlanAiGenerator {
                 The adjustments array must be empty when no advisory decision is needed.
                 Write all user-facing content using BCP 47 locale %s.
                 """.formatted(availableMinutes, availableMinutes * 30 / 100, responseLocale);
+    }
+
+    private String renderCustomSystemPrompt(String template, int availableMinutes, String locale) {
+        String responseLocale = normalizeLocale(locale);
+        int reviewMinutes = availableMinutes * 30 / 100;
+        return template
+                .replace("{{availableMinutes}}", String.valueOf(availableMinutes))
+                .replace("{{maxReviewMinutes}}", String.valueOf(reviewMinutes))
+                .replace("{{language}}", responseLocale);
     }
 
     private String normalizeLocale(String locale) {

@@ -51,6 +51,14 @@ public final class ApiConstant {
     public static final String AI_PROVIDER_TEST_CONNECTION =
             AI_PROVIDER_CONFIG_BY_ID + "/test-connection";
     public static final String ADMIN_AI_ANALYTICS = ADMIN + "/ai-analytics";
+    public static final String ADMIN_AI_EXECUTIONS = ADMIN + "/ai-executions";
+    public static final String ADMIN_AI_PROMPTS = ADMIN + "/ai-prompts";
+    public static final String AI_PROMPT_BY_ID = "/{promptId}";
+    public static final String AI_PROMPT_PUBLISH = AI_PROMPT_BY_ID + "/publish";
+    public static final String AI_PROMPT_ACTIVATE = AI_PROMPT_BY_ID + "/activate";
+    public static final String AI_PROMPT_ROLLBACK = AI_PROMPT_BY_ID + "/rollback";
+    public static final String AI_PROMPT_ARCHIVE = AI_PROMPT_BY_ID + "/archive";
+    public static final String AI_PROMPT_PREVIEW = "/preview";
     public static final String DAILY_PLANS = API_V1 + "/daily-plans";
     public static final String DAILY_PLAN_TODAY = "/today";
     public static final String DAILY_PLAN_BY_ID = "/{planId}";

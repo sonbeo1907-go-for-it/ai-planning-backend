@@ -20,6 +20,12 @@ public interface DailyEvaluationService {
             UUID dailyPlanVersionId,
             AiProviderConfig providerConfig);
 
+    QuizDetailResponse generateDailyQuizWithProviderConfig(
+            UUID userId,
+            UUID dailyPlanVersionId,
+            AiProviderConfig providerConfig,
+            String systemPrompt);
+
     QuizDetailResponse submitDailyQuiz(
             UUID userId, UUID dailyPlanId, UUID quizId, SubmitQuizRequest request);
 

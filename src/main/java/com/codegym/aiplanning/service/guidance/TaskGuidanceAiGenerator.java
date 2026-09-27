@@ -38,7 +38,17 @@ public class TaskGuidanceAiGenerator {
             TaskGuidanceContext context,
             String adjustmentInstruction,
             AiProviderConfig providerConfig) {
-        String systemPrompt = systemPrompt();
+        return generate(context, adjustmentInstruction, providerConfig, null);
+    }
+
+    public GeneratedTaskGuidance generate(
+            TaskGuidanceContext context,
+            String adjustmentInstruction,
+            AiProviderConfig providerConfig,
+            String customSystemPrompt) {
+        String systemPrompt = customSystemPrompt != null && !customSystemPrompt.isBlank()
+                ? customSystemPrompt
+                : systemPrompt();
         String userPrompt = userPrompt(context, adjustmentInstruction);
 
         for (int attempt = 0; attempt <= MAX_SCHEMA_RETRIES; attempt++) {

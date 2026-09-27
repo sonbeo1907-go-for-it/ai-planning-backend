@@ -236,6 +236,15 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
             UUID userId,
             UUID weakTopicId,
             AiProviderConfig providerConfig) {
+        return generateMasteryCheckQuizWithProviderConfig(userId, weakTopicId, providerConfig, null);
+    }
+
+    @Override
+    public QuizDetailResponse generateMasteryCheckQuizWithProviderConfig(
+            UUID userId,
+            UUID weakTopicId,
+            AiProviderConfig providerConfig,
+            String systemPrompt) {
         WeakTopic weakTopic = requireOwnedWeakTopic(userId, weakTopicId);
         if (weakTopic.getStatus() == WeakTopicStatus.MASTERED) {
             throw new BusinessException(
@@ -260,7 +269,8 @@ public class WeakTopicServiceImpl implements WeakTopicService, WeakTopicContextR
                 userId,
                 weakTopicId,
                 weakTopic.getRoadmapItem().getId(),
-                providerConfig);
+                providerConfig,
+                systemPrompt);
         Quiz quiz = Quiz.createMasteryCheck(
                 weakTopic.getUser(),
                 weakTopic.getRoadmap(),

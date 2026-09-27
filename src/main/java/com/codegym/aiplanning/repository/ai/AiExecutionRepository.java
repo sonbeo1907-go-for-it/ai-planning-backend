@@ -17,7 +17,11 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-public interface AiExecutionRepository extends JpaRepository<AiExecution, UUID> {
+public interface AiExecutionRepository extends JpaRepository<AiExecution, UUID>, AiExecutionAdminRepositoryCustom {
+
+    @EntityGraph(attributePaths = {"providerConfig", "providerConfig.provider"})
+    @Query("select execution from AiExecution execution where execution.id = :id")
+    Optional<AiExecution> findAdminDetailById(@Param("id") UUID id);
 
     Optional<AiExecution> findByIdAndOwnerId(UUID id, UUID ownerId);
 
@@ -77,6 +81,21 @@ public interface AiExecutionRepository extends JpaRepository<AiExecution, UUID> 
                and lease_expires_at < :now
             """, nativeQuery = true)
     int requeueExpired(@Param("now") Instant now);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+            update ai_executions
+               set prompt_version_id = :promptVersionId,
+                   prompt_source = :promptSource,
+                   updated_at = :now,
+                   version = version + 1
+             where id = :id
+            """, nativeQuery = true)
+    int updatePromptReference(
+            @Param("id") UUID id,
+            @Param("promptVersionId") UUID promptVersionId,
+            @Param("promptSource") String promptSource,
+            @Param("now") Instant now);
 
     @Query("""
             select new com.codegym.aiplanning.controller.admin.ai.dto.AiExecutionAnalyticsResponse(

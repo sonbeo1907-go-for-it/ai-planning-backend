@@ -21,9 +21,19 @@ public interface AiRoadmapGeneratorService {
     RoadmapVersionResponse generateWithProviderConfig(
             UUID userId, UUID roadmapId, AiProviderConfig providerConfig);
 
+    RoadmapVersionResponse generateWithProviderConfig(
+            UUID userId, UUID roadmapId, AiProviderConfig providerConfig, String systemPrompt);
+
     RoadmapVersionResponse regenerateWithProviderConfig(
             UUID userId,
             UUID roadmapId,
             String adjustmentPrompt,
             AiProviderConfig providerConfig);
+
+    RoadmapVersionResponse regenerateWithProviderConfig(
+            UUID userId,
+            UUID roadmapId,
+            String adjustmentPrompt,
+            AiProviderConfig providerConfig,
+            String systemPrompt);
 }
