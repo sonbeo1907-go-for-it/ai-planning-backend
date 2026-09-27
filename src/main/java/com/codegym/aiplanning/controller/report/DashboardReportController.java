@@ -34,9 +34,11 @@ public class DashboardReportController {
     @Operation(
             summary = "Get user dashboard statistics (US-REP-01)",
             description = "Returns active Master Plan progress, consecutive learning streak accurate to user time zone, and total study time with 7-day breakdown.")
-    public ApiResponse<DashboardReportResponse> getDashboardReport(@AuthenticationPrincipal Jwt jwt) {
+    public ApiResponse<DashboardReportResponse> getDashboardReport(
+            @RequestParam(required = false) UUID roadmapId,
+            @AuthenticationPrincipal Jwt jwt) {
         UUID userId = UUID.fromString(jwt.getSubject());
-        return ApiResponse.of(dashboardReportService.getDashboardReport(userId));
+        return ApiResponse.of(dashboardReportService.getDashboardReport(userId, roadmapId));
     }
 
     @GetMapping(ApiConstant.KNOWLEDGE_MAP)

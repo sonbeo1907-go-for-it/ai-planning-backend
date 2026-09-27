@@ -4,6 +4,7 @@ import com.codegym.aiplanning.entity.daily.DailyPlan;
 import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
 import com.codegym.aiplanning.entity.daily.DailyTaskStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
+import com.codegym.aiplanning.common.validation.StudyTimeBudgetPolicy;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -53,7 +54,9 @@ public record DailyPlanResponse(
                 plan.getStatus(),
                 plan.getActiveVersionId(),
                 latestVersionId,
-                availableMinutes != null ? availableMinutes : 60,
+                availableMinutes != null
+                        ? availableMinutes
+                        : StudyTimeBudgetPolicy.SYSTEM_FALLBACK_MINUTES,
                 totalPlannedMinutes != null ? totalPlannedMinutes : 0,
                 total,
                 completed,

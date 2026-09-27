@@ -8,7 +8,7 @@ import java.util.UUID;
 
 public interface DashboardReportService {
 
-    DashboardReportResponse getDashboardReport(UUID userId);
+    DashboardReportResponse getDashboardReport(UUID userId, UUID roadmapId);
 
     KnowledgeMapResponse getKnowledgeMap(UUID userId, UUID roadmapId);
 

@@ -1,6 +1,7 @@
 package com.codegym.aiplanning.entity.profile;
 
 import com.codegym.aiplanning.common.entity.BaseEntity;
+import com.codegym.aiplanning.common.validation.StudyTimeBudgetPolicy;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -16,7 +17,7 @@ public class UserProfile extends BaseEntity {
 
     public static final String DEFAULT_TIME_ZONE = "UTC";
     public static final String DEFAULT_LOCALE = "en";
-    public static final int DEFAULT_DAILY_MINUTES = 60;
+    public static final int DEFAULT_DAILY_MINUTES = StudyTimeBudgetPolicy.SYSTEM_FALLBACK_MINUTES;
 
     @OneToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false, unique = true)
@@ -92,7 +93,8 @@ public class UserProfile extends BaseEntity {
             this.locale = locale;
         }
         if (defaultDailyMinutes != null) {
-            this.defaultDailyMinutes = defaultDailyMinutes;
+            this.defaultDailyMinutes = StudyTimeBudgetPolicy.requireValid(
+                    defaultDailyMinutes, "Default daily minutes");
         }
     }
 

@@ -2,6 +2,7 @@ package com.codegym.aiplanning.service.daily.impl;
 
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
+import com.codegym.aiplanning.common.validation.StudyTimeBudgetPolicy;
 import com.codegym.aiplanning.controller.daily.dto.AvailableLearningUnitResponse;
 import com.codegym.aiplanning.controller.daily.dto.CreateDailyPlanRequest;
 import com.codegym.aiplanning.controller.daily.dto.CreateDailyTaskRequest;
@@ -14,6 +15,7 @@ import com.codegym.aiplanning.controller.daily.dto.ProgressEntryResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanTaskProgressHistoryResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
 import com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest;
+import com.codegym.aiplanning.controller.daily.dto.UpdateDailyPlanBudgetRequest;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.entity.daily.DailyPlan;
@@ -47,6 +49,8 @@ import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.daily.DailyPlanPersistenceService;
 import com.codegym.aiplanning.service.daily.DailyPlanService;
+import com.codegym.aiplanning.service.daily.AvailableMinutesResolver;
+import com.codegym.aiplanning.service.daily.ResolvedAvailableMinutes;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanAiGenerator;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanAiResponse;
 import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext;
@@ -96,6 +100,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
     private final RoadmapProgressService roadmapProgressService;
     private final TaskStepReadModelBuilder taskStepReadModelBuilder;
     private final TaskStepValidator taskStepValidator;
+    private final AvailableMinutesResolver availableMinutesResolver;
 
     public DailyPlanServiceImpl(
             DailyPlanRepository dailyPlanRepository,
@@ -115,7 +120,8 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             WeakTopicService weakTopicService,
             RoadmapProgressService roadmapProgressService,
             TaskStepReadModelBuilder taskStepReadModelBuilder,
-            TaskStepValidator taskStepValidator) {
+            TaskStepValidator taskStepValidator,
+            AvailableMinutesResolver availableMinutesResolver) {
         this.dailyPlanRepository = dailyPlanRepository;
         this.dailyPlanVersionRepository = dailyPlanVersionRepository;
         this.dailyPlanItemRepository = dailyPlanItemRepository;
@@ -134,6 +140,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         this.roadmapProgressService = roadmapProgressService;
         this.taskStepReadModelBuilder = taskStepReadModelBuilder;
         this.taskStepValidator = taskStepValidator;
+        this.availableMinutesResolver = availableMinutesResolver;
     }
 
     @Override
@@ -156,18 +163,11 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             if (roadmap.getStatus() == RoadmapStatus.ONBOARDING || roadmap.getStatus() == RoadmapStatus.ARCHIVED) {
                 throw new BusinessException(ErrorCode.INVALID_PLAN_TRANSITION, "Roadmap is not in a valid state");
             }
-        } else {
-            List<Roadmap> activeRoadmaps = roadmapRepository.findAllByOwnerIdOrderByUpdatedAtDesc(userId).stream()
-                    .filter(r -> r.getStatus() == RoadmapStatus.ACTIVE)
-                    .toList();
-            if (!activeRoadmaps.isEmpty()) {
-                roadmap = activeRoadmaps.get(0);
-                resolvedRoadmapId = roadmap.getId();
-            }
         }
 
         String timeZone = getUserTimeZone(userId);
-        int availableMinutes = request.availableMinutes() != null ? request.availableMinutes() : 60;
+        ResolvedAvailableMinutes resolvedMinutes = availableMinutesResolver.resolve(
+                userId, request.availableMinutes(), roadmap);
 
         DailyPlan plan = DailyPlan.create(userId, request.planDate(), timeZone, resolvedRoadmapId);
         DailyPlan savedPlan = dailyPlanRepository.save(plan);
@@ -176,7 +176,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 savedPlan.getId(),
                 1,
                 DailyPlanVersionOrigin.MANUAL,
-                availableMinutes,
+                resolvedMinutes.minutes(),
                 0);
         DailyPlanVersion savedVersion = dailyPlanVersionRepository.save(version);
 
@@ -362,6 +362,44 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 "DailyPlanVersion",
                 draft.getId().toString());
         return DailyPlanVersionResponse.of(draft, enrichTaskResponses(savedCopies, userId));
+    }
+
+    @Override
+    @Transactional
+    public DailyPlanVersionResponse updateDraftBudget(
+            UUID planId,
+            UUID versionId,
+            UpdateDailyPlanBudgetRequest request,
+            Jwt actorJwt) {
+        UUID userId = extractUserId(actorJwt);
+        String username = extractUsername(actorJwt);
+        DailyPlan plan = requirePlanForUserForUpdate(planId, userId);
+        DailyPlanVersion version = dailyPlanVersionRepository
+                .findByIdAndDailyPlanIdForUpdate(versionId, plan.getId())
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.DAILY_PLAN_VERSION_NOT_FOUND,
+                        "Daily Plan version not found."));
+
+        if (!version.isDraft()) {
+            throw new BusinessException(
+                    ErrorCode.DAILY_PLAN_VERSION_NOT_EDITABLE,
+                    "Only a DRAFT Daily Plan version can change its available-time budget.");
+        }
+        if (version.getVersion() != request.entityVersion()) {
+            throw new BusinessException(
+                    ErrorCode.CONCURRENT_MODIFICATION,
+                    "The Daily Plan version changed. Reload it before saving the budget again.");
+        }
+
+        version.updateAvailableMinutes(request.availableMinutes());
+        DailyPlanVersion saved = dailyPlanVersionRepository.saveAndFlush(version);
+        auditLogService.logAction(
+                userId,
+                username,
+                AuditEventAction.DAILY_PLAN_UPDATED,
+                "DailyPlanVersion",
+                saved.getId().toString());
+        return versionResponse(saved, userId);
     }
 
     @Override
@@ -1496,7 +1534,12 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         }
 
         if (versionId == null) {
-            return DailyPlanResponse.of(plan, null, 60, 0, List.of());
+            return DailyPlanResponse.of(
+                    plan,
+                    null,
+                    StudyTimeBudgetPolicy.SYSTEM_FALLBACK_MINUTES,
+                    0,
+                    List.of());
         }
 
         DailyPlanVersion version = dailyPlanVersionRepository
@@ -1509,7 +1552,9 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 : List.of();
         List<DailyPlanItemResponse> itemResponses = enrichTaskResponses(items, plan.getUserId());
 
-        int available = version != null ? version.getAvailableMinutes() : 60;
+        int available = version != null
+                ? version.getAvailableMinutes()
+                : StudyTimeBudgetPolicy.SYSTEM_FALLBACK_MINUTES;
         int planned = version != null ? version.getTotalPlannedMinutes() : 0;
 
         return DailyPlanResponse.of(plan, versionId, available, planned, itemResponses);
@@ -1518,7 +1563,12 @@ public class DailyPlanServiceImpl implements DailyPlanService {
     private DailyPlanResponse buildDailyPlanResponse(
             DailyPlan plan, DailyPlanVersion version, List<DailyPlanItem> items) {
         if (version == null) {
-            return DailyPlanResponse.of(plan, null, 60, 0, List.of());
+            return DailyPlanResponse.of(
+                    plan,
+                    null,
+                    StudyTimeBudgetPolicy.SYSTEM_FALLBACK_MINUTES,
+                    0,
+                    List.of());
         }
         return DailyPlanResponse.of(
                 plan,

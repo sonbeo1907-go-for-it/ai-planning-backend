@@ -2,6 +2,7 @@ package com.codegym.aiplanning.service.onboarding.impl;
 
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
+import com.codegym.aiplanning.common.validation.StudyTimeBudgetPolicy;
 import com.codegym.aiplanning.controller.onboarding.dto.RoadmapOnboardingResponse;
 import com.codegym.aiplanning.controller.onboarding.dto.SaveRoadmapOnboardingRequest;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
@@ -32,9 +33,6 @@ public class RoadmapOnboardingServiceImpl implements RoadmapOnboardingService {
     private static final int MAX_ROADMAP_TITLE_LENGTH = 200;
     private static final int DERIVED_TITLE_LENGTH = 80;
     private static final String FALLBACK_ROADMAP_TITLE = "Lộ trình từ khảo sát";
-    private static final int MIN_DAILY_COMMITMENT_MINUTES = 15;
-    private static final int MAX_DAILY_COMMITMENT_MINUTES = 480;
-    private static final int DAILY_COMMITMENT_INCREMENT_MINUTES = 15;
     private static final Set<Integer> EXPECTED_DURATION_OPTIONS = Set.of(30, 60, 90);
 
     private final UserAccountRepository userAccountRepository;
@@ -292,16 +290,7 @@ public class RoadmapOnboardingServiceImpl implements RoadmapOnboardingService {
     }
 
     private void validateDailyCommitment(Integer value) {
-        if (value == null) {
-            return;
-        }
-        if (value < MIN_DAILY_COMMITMENT_MINUTES
-                || value > MAX_DAILY_COMMITMENT_MINUTES
-                || value % DAILY_COMMITMENT_INCREMENT_MINUTES != 0) {
-            throw new BusinessException(
-                    ErrorCode.VALIDATION_FAILED,
-                    "Daily commitment must be between 15 and 480 minutes in 15-minute increments.");
-        }
+        StudyTimeBudgetPolicy.validateIfPresent(value, "Daily commitment");
     }
 
     private BusinessException onboardingNotFound() {

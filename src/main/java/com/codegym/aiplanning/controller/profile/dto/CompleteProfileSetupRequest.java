@@ -26,6 +26,12 @@ public record CompleteProfileSetupRequest(
                 @NotBlank(message = "Locale is required")
                 @Size(max = 35, message = "Locale must not exceed 35 characters")
                 String locale,
-        @Min(value = 1, message = "Default daily minutes must be at least 1")
-        @Max(value = 1440, message = "Default daily minutes must not exceed 1440")
+        @Min(value = 15, message = "Default daily minutes must be at least 15")
+        @Max(value = 480, message = "Default daily minutes must not exceed 480")
+        @Schema(
+                description = "Account fallback used when a Roadmap or day does not provide a study-time budget",
+                minimum = "15",
+                maximum = "480",
+                multipleOf = 15,
+                example = "60")
                 Integer defaultDailyMinutes) {}
