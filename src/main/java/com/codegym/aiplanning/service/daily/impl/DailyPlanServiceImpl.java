@@ -16,6 +16,7 @@ import com.codegym.aiplanning.controller.daily.dto.DailyPlanTaskProgressHistoryR
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
 import com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest;
 import com.codegym.aiplanning.controller.daily.dto.UpdateDailyPlanBudgetRequest;
+import com.codegym.aiplanning.controller.daily.dto.UpdateTaskStatusRequest;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.ai.AiProviderConfig;
 import com.codegym.aiplanning.entity.daily.DailyPlan;
@@ -866,6 +867,83 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 item.getRoadmapItemId(),
                 savedEntry,
                 request.status());
+
+        auditLogService.logAction(
+                userId,
+                username,
+                AuditEventAction.PROGRESS_RECORDED,
+                "DailyPlanItem",
+                savedItem.getId().toString());
+
+        return enrichTaskResponse(savedItem, userId);
+    }
+
+    @Override
+    @Transactional
+    public DailyPlanItemResponse updateTaskStatus(
+            UUID planId,
+            UUID itemId,
+            UpdateTaskStatusRequest request,
+            Jwt actorJwt) {
+        UUID userId = extractUserId(actorJwt);
+        String username = extractUsername(actorJwt);
+
+        DailyPlan plan = requirePlanForUserForUpdate(planId, userId);
+
+        DailyPlanItem item = dailyPlanItemRepository
+                .findById(itemId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.DAILY_PLAN_ITEM_NOT_FOUND,
+                        "Task item not found: " + itemId));
+        requireNotRemoved(item);
+
+        DailyPlanVersion itemVersion = dailyPlanVersionRepository
+                .findByIdAndDailyPlanId(item.getDailyPlanVersionId(), plan.getId())
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.DAILY_PLAN_ITEM_NOT_FOUND,
+                        "Task item does not belong to this daily plan."));
+
+        boolean isActiveVersion = plan.getActiveVersionId() != null
+                && plan.getActiveVersionId().equals(itemVersion.getId());
+
+        if (isActiveVersion && plan.getStatus() == DailyPlanStatus.READY && request.status() != DailyTaskStatus.NOT_STARTED) {
+            plan.startExecution(Instant.now());
+            dailyPlanRepository.save(plan);
+        }
+
+        DailyTaskStatus previousStatus = item.getStatus();
+        DailyTaskStatus newStatus = request.status();
+        item.updateStatus(newStatus);
+        DailyPlanItem savedItem = dailyPlanItemRepository.save(item);
+
+        if (isActiveVersion && newStatus == DailyTaskStatus.COMPLETED && previousStatus != DailyTaskStatus.COMPLETED) {
+            RoadmapItem learningUnit = resolveLearningUnit(item, userId);
+            int actualMinutes = request.actualMinutes() != null && request.actualMinutes() > 0
+                    ? request.actualMinutes()
+                    : item.getPlannedMinutes();
+            int percentage = newStatus.completionPercentage();
+
+            ProgressEntry entry = ProgressEntry.create(
+                    userId,
+                    itemId,
+                    learningUnit != null ? learningUnit.getRoadmapVersion().getId() : null,
+                    learningUnit != null ? learningUnit.getId() : null,
+                    ProgressEntryStatus.COMPLETED,
+                    actualMinutes,
+                    percentage,
+                    "Hoàn thành qua bảng Kanban",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null);
+            ProgressEntry savedEntry = progressEntryRepository.save(entry);
+            roadmapProgressService.recordOutcome(
+                    userId,
+                    item.getRoadmapItemId(),
+                    savedEntry,
+                    ProgressEntryStatus.COMPLETED);
+        }
 
         auditLogService.logAction(
                 userId,

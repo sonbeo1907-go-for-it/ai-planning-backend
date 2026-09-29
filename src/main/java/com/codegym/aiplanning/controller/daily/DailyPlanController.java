@@ -17,6 +17,7 @@ import com.codegym.aiplanning.controller.daily.dto.ProgressEntryResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
 import com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest;
 import com.codegym.aiplanning.controller.daily.dto.UpdateDailyPlanBudgetRequest;
+import com.codegym.aiplanning.controller.daily.dto.UpdateTaskStatusRequest;
 import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
 import com.codegym.aiplanning.service.daily.DailyPlanService;
 import com.codegym.aiplanning.service.ai.execution.AiExecutionService;
@@ -267,6 +268,22 @@ public class DailyPlanController {
                 itemId,
                 request,
                 idempotencyKey,
+                actorJwt));
+    }
+
+    @PatchMapping(ApiConstant.DAILY_PLAN_ITEM_STATUS)
+    @Operation(
+            summary = "Update task status (US-TSK-01-MANUAL)",
+            description = "Updates task status between NOT_STARTED, IN_PROGRESS, and COMPLETED for Kanban board.")
+    public ApiResponse<DailyPlanItemResponse> updateTaskStatus(
+            @PathVariable UUID planId,
+            @PathVariable UUID itemId,
+            @Valid @RequestBody UpdateTaskStatusRequest request,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(dailyPlanService.updateTaskStatus(
+                planId,
+                itemId,
+                request,
                 actorJwt));
     }
 

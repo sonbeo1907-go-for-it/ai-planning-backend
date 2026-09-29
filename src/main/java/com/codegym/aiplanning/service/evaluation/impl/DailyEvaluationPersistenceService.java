@@ -193,8 +193,8 @@ public class DailyEvaluationPersistenceService {
         for (DailyPlanItem item : items) {
             ProgressEntryStatus status = latestStatus.get(item.getId());
             boolean completed = status == ProgressEntryStatus.COMPLETED
-                    || (status == null
-                    && item.getStatus() == DailyTaskStatus.COMPLETED);
+                    || item.getStatus() == DailyTaskStatus.COMPLETED
+                    || item.getStatus() == DailyTaskStatus.REVIEWING;
             if (completed && item.getRoadmapItemId() != null) {
                 learningUnitIds.add(item.getRoadmapItemId());
             }

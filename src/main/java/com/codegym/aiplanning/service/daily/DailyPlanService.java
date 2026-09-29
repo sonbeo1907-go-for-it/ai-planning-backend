@@ -81,6 +81,12 @@ public interface DailyPlanService {
             UpdateDailyTaskRequest request,
             Jwt actorJwt);
 
+    DailyPlanItemResponse updateTaskStatus(
+            UUID planId,
+            UUID itemId,
+            com.codegym.aiplanning.controller.daily.dto.UpdateTaskStatusRequest request,
+            Jwt actorJwt);
+
     DailyPlanResponse activateVersion(UUID planId, UUID versionId, Jwt actorJwt);
 
     DailyPlanItemResponse recordProgress(

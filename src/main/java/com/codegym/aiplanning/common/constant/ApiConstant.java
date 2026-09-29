@@ -91,6 +91,8 @@ public final class ApiConstant {
             DAILY_PLAN_ITEM_GUIDANCE + "/execution/current";
     public static final String DAILY_PLAN_ITEM_PROGRESS =
             DAILY_PLAN_BY_ID + "/items/{itemId}/progress";
+    public static final String DAILY_PLAN_ITEM_STATUS =
+            DAILY_PLAN_BY_ID + "/items/{itemId}/status";
     public static final String DAILY_PLAN_ITEM_PROGRESS_CORRECTION =
             DAILY_PLAN_ITEM_PROGRESS + "/{progressEntryId}/corrections";
     public static final String DAILY_PLAN_ITEM_POMODORO =

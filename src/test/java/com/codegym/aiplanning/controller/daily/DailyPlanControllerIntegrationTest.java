@@ -884,4 +884,97 @@ class DailyPlanControllerIntegrationTest {
                         + ".learningUnits[0].progress.latestOutcome")
                         .value("PARTIALLY_COMPLETED"));
     }
+
+    @Test
+    void updateTaskStatus_transitionsTaskBetweenKanbanStatuses() throws Exception {
+        UserAccount user = createUser("daily-user-kanban", "Kanban User");
+        String token = login("daily-user-kanban");
+
+        LocalDate today = LocalDate.now();
+        String createPlanPayload = String.format("""
+                {
+                    "planDate": "%s",
+                    "availableMinutes": 120
+                }
+                """, today);
+
+        MvcResult createResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createPlanPayload))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String planId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+        String versionId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("latestVersionId").asText();
+
+        String createPayload = """
+                {
+                    "title": "Kanban Test Task",
+                    "description": "Testing status update",
+                    "category": "PRACTICE",
+                    "plannedMinutes": 30
+                }
+                """;
+        MvcResult addResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/versions/" + versionId + "/items")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("NOT_STARTED"))
+                .andReturn();
+        String taskId = objectMapper.readTree(addResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/versions/" + versionId + "/activate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/status")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "status": "IN_PROGRESS"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"));
+
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/status")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "status": "REVIEWING"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("REVIEWING"));
+
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/status")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "status": "COMPLETED",
+                                    "actualMinutes": 35
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"));
+
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/status")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "status": "NOT_STARTED"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("NOT_STARTED"));
+    }
 }
