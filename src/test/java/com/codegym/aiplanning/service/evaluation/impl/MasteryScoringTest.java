@@ -24,7 +24,7 @@ class MasteryScoringTest {
     private final DailyEvaluationPersistenceService service =
             new DailyEvaluationPersistenceService(
                     null, null, null, null, null, null, null,
-                    null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null);
 
     @Test
     void fourOfFivePassesMasteryAndThreeOfFiveDoesNot() {

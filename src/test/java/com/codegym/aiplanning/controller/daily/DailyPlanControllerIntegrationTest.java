@@ -963,6 +963,18 @@ class DailyPlanControllerIntegrationTest {
                                     "actualMinutes": 35
                                 }
                                 """))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/status")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "status": "COMPLETED",
+                                    "actualMinutes": 35,
+                                    "manualFallbackReason": "TASK_NOT_QUIZ_ELIGIBLE"
+                                }
+                                """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("COMPLETED"));
 
@@ -974,7 +986,151 @@ class DailyPlanControllerIntegrationTest {
                                     "status": "NOT_STARTED"
                                 }
                                 """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void uskb01_testWorkflowValidationAndDraftMutationGuard() throws Exception {
+        UserAccount user = createUser("uskb01-user", "USKB User");
+        String token = login("uskb01-user");
+
+        LocalDate today = LocalDate.now();
+        String createPlanPayload = String.format("""
+                {
+                    "planDate": "%s",
+                    "availableMinutes": 120
+                }
+                """, today);
+
+        MvcResult createResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createPlanPayload))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("NOT_STARTED"));
+                .andReturn();
+
+        String planId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+        String versionId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("latestVersionId").asText();
+
+        String createPayload = """
+                {
+                    "title": "USKB-01 Task",
+                    "description": "Workflow verification",
+                    "category": "PRACTICE",
+                    "plannedMinutes": 60
+                }
+                """;
+        MvcResult addResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/versions/" + versionId + "/items")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createPayload))
+                .andExpect(status().isOk())
+                .andReturn();
+        String taskId = objectMapper.readTree(addResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+
+        // 1. Guard against mutation on DRAFT version (not active yet)
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/status")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "status": "IN_PROGRESS"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        // Activate version
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/versions/" + versionId + "/activate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        // 2. Direct jump from NOT_STARTED to COMPLETED is rejected
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/status")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "status": "COMPLETED"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        // 3. Direct jump from NOT_STARTED to REVIEWING is rejected
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/status")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "status": "REVIEWING"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        // 4. NOT_STARTED -> IN_PROGRESS succeeds
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/status")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "status": "IN_PROGRESS"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"));
+
+        // 5. IN_PROGRESS -> REVIEWING succeeds, and completion percentage is 0% (NOT 75%)
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/status")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "status": "REVIEWING"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("REVIEWING"));
+
+        // Verify plan progress: completionPercentage is 0.0, NOT 75.0
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.completionPercentage").value(0.0));
+
+        // 6. REVIEWING -> COMPLETED requires quiz pass or manual fallback
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/status")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "status": "COMPLETED"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        // 7. REVIEWING -> COMPLETED with manual fallback succeeds
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/status")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "status": "COMPLETED",
+                                    "manualFallbackReason": "AI_UNAVAILABLE"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"));
+
+        // Verify plan progress after COMPLETED: now 100.0%
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.completionPercentage").value(100.0));
     }
 }

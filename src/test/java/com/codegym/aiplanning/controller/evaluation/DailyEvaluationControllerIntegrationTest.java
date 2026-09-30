@@ -2,6 +2,7 @@ package com.codegym.aiplanning.controller.evaluation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -21,6 +22,11 @@ import com.codegym.aiplanning.entity.evaluation.QuizQuestion;
 import com.codegym.aiplanning.entity.evaluation.WeakTopic;
 import com.codegym.aiplanning.entity.evaluation.WeakTopicStatus;
 import com.codegym.aiplanning.entity.evaluation.WeakTopicTrigger;
+import com.codegym.aiplanning.entity.daily.DailyPlanItem;
+import com.codegym.aiplanning.entity.daily.DailyTaskCategory;
+import com.codegym.aiplanning.entity.evaluation.QuizReviewItem;
+import com.codegym.aiplanning.repository.daily.DailyPlanItemRepository;
+import com.codegym.aiplanning.repository.evaluation.QuizReviewItemRepository;
 import com.codegym.aiplanning.entity.profile.UserProfile;
 import com.codegym.aiplanning.entity.roadmap.Roadmap;
 import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
@@ -65,7 +71,9 @@ class DailyEvaluationControllerIntegrationTest {
     @Autowired private RoadmapItemRepository roadmapItemRepository;
     @Autowired private DailyPlanRepository dailyPlanRepository;
     @Autowired private DailyPlanVersionRepository dailyPlanVersionRepository;
+    @Autowired private DailyPlanItemRepository dailyPlanItemRepository;
     @Autowired private QuizRepository quizRepository;
+    @Autowired private QuizReviewItemRepository quizReviewItemRepository;
     @Autowired private WeakTopicRepository weakTopicRepository;
     @Autowired private PasswordEncoder passwordEncoder;
 
@@ -444,6 +452,113 @@ class DailyEvaluationControllerIntegrationTest {
                 learningUnit,
                 plan,
                 dailyVersion);
+    }
+
+    @Test
+    void uskb01_quizPassOnlyUnlocksTasksInReviewScope() throws Exception {
+        EvaluationFixture fixture = createFixture("uskb01-scope@example.com");
+
+        // Create Task A and Task B
+        DailyPlanItem taskA = dailyPlanItemRepository.saveAndFlush(DailyPlanItem.create(
+                fixture.dailyPlanVersion().getId(),
+                DailyTaskCategory.PRACTICE,
+                "Task A",
+                "Learn topic A",
+                30,
+                0,
+                fixture.topic().getId()));
+
+        DailyPlanItem taskB = dailyPlanItemRepository.saveAndFlush(DailyPlanItem.create(
+                fixture.dailyPlanVersion().getId(),
+                DailyTaskCategory.PRACTICE,
+                "Task B",
+                "Learn topic B",
+                30,
+                1,
+                fixture.topic().getId()));
+
+        // Move Task A to REVIEWING
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + fixture.plan().getId() + "/items/" + taskA.getId() + "/status")
+                        .header("Authorization", "Bearer " + fixture.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"IN_PROGRESS\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + fixture.plan().getId() + "/items/" + taskA.getId() + "/status")
+                        .header("Authorization", "Bearer " + fixture.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"REVIEWING\"}"))
+                .andExpect(status().isOk());
+
+        // Create Quiz covering Task A
+        Quiz quiz = createFiveQuestionQuiz(fixture);
+        quizReviewItemRepository.saveAndFlush(QuizReviewItem.create(quiz, taskA, fixture.topic()));
+
+        // Verify coveredItemIds contains Task A
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + fixture.plan().getId() + "/quiz/" + quiz.getId())
+                        .header("Authorization", "Bearer " + fixture.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.coveredItemIds[0]").value(taskA.getId().toString()));
+
+        // Move Task B to REVIEWING AFTER Quiz was generated
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + fixture.plan().getId() + "/items/" + taskB.getId() + "/status")
+                        .header("Authorization", "Bearer " + fixture.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"IN_PROGRESS\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + fixture.plan().getId() + "/items/" + taskB.getId() + "/status")
+                        .header("Authorization", "Bearer " + fixture.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"REVIEWING\"}"))
+                .andExpect(status().isOk());
+
+        // Submit quiz with 80% passing score
+        SubmitQuizRequest submitRequest = new SubmitQuizRequest(List.of(
+                answer(quiz, 0, "A"),
+                answer(quiz, 1, "B"),
+                answer(quiz, 2, "A"),
+                answer(quiz, 3, "A"),
+                answer(quiz, 4, "A")));
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + fixture.plan().getId() + "/quiz/" + quiz.getId() + "/submit")
+                        .header("Authorization", "Bearer " + fixture.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(submitRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.passed").value(true))
+                .andExpect(jsonPath("$.data.coveredItemIds[0]").value(taskA.getId().toString()));
+
+        // Verify version tasks: Task A has unlockedForCompletion = true, Task B has unlockedForCompletion = false
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + fixture.plan().getId() + "/versions/" + fixture.dailyPlanVersion().getId())
+                        .header("Authorization", "Bearer " + fixture.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[?(@.id == '" + taskA.getId() + "')].unlockedForCompletion").value(true))
+                .andExpect(jsonPath("$.data.items[?(@.id == '" + taskB.getId() + "')].unlockedForCompletion").value(false));
+
+        // Task A can be completed without manual fallback
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + fixture.plan().getId() + "/items/" + taskA.getId() + "/status")
+                        .header("Authorization", "Bearer " + fixture.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"COMPLETED\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"));
+
+        // Task B CANNOT be completed without manual fallback (returns 400 VALIDATION_FAILED)
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + fixture.plan().getId() + "/items/" + taskB.getId() + "/status")
+                        .header("Authorization", "Bearer " + fixture.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"COMPLETED\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        // Task B CAN be completed with manual fallback reason
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + fixture.plan().getId() + "/items/" + taskB.getId() + "/status")
+                        .header("Authorization", "Bearer " + fixture.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"COMPLETED\", \"manualFallbackReason\": \"TASK_NOT_QUIZ_ELIGIBLE\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"));
     }
 
     private UserAccount createUser(String email, String displayName) {

@@ -43,6 +43,7 @@ import com.codegym.aiplanning.repository.daily.DailyPlanTaskStepRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanTaskStepStateRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanVersionRepository;
 import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
+import com.codegym.aiplanning.repository.evaluation.QuizReviewItemRepository;
 import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemProgressRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
@@ -93,6 +94,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
     private final RoadmapRepository roadmapRepository;
     private final RoadmapItemRepository roadmapItemRepository;
     private final RoadmapItemProgressRepository roadmapItemProgressRepository;
+    private final QuizReviewItemRepository quizReviewItemRepository;
     private final AuditLogService auditLogService;
     private final PlanningContextBuilder contextBuilder;
     private final DailyPlanAiGenerator aiGenerator;
@@ -114,6 +116,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             RoadmapRepository roadmapRepository,
             RoadmapItemRepository roadmapItemRepository,
             RoadmapItemProgressRepository roadmapItemProgressRepository,
+            QuizReviewItemRepository quizReviewItemRepository,
             AuditLogService auditLogService,
             PlanningContextBuilder contextBuilder,
             DailyPlanAiGenerator aiGenerator,
@@ -133,6 +136,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         this.roadmapRepository = roadmapRepository;
         this.roadmapItemRepository = roadmapItemRepository;
         this.roadmapItemProgressRepository = roadmapItemProgressRepository;
+        this.quizReviewItemRepository = quizReviewItemRepository;
         this.auditLogService = auditLogService;
         this.contextBuilder = contextBuilder;
         this.aiGenerator = aiGenerator;
@@ -905,23 +909,58 @@ public class DailyPlanServiceImpl implements DailyPlanService {
 
         boolean isActiveVersion = plan.getActiveVersionId() != null
                 && plan.getActiveVersionId().equals(itemVersion.getId());
+        if (!isActiveVersion) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Only tasks in the active Daily Plan version can be updated.");
+        }
 
-        if (isActiveVersion && plan.getStatus() == DailyPlanStatus.READY && request.status() != DailyTaskStatus.NOT_STARTED) {
-            plan.startExecution(Instant.now());
-            dailyPlanRepository.save(plan);
+        if (plan.getStatus() != DailyPlanStatus.READY && plan.getStatus() != DailyPlanStatus.IN_PROGRESS) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Tasks cannot be updated when daily plan status is " + plan.getStatus());
         }
 
         DailyTaskStatus previousStatus = item.getStatus();
         DailyTaskStatus newStatus = request.status();
+
+        if (previousStatus == newStatus) {
+            return enrichTaskResponse(item, userId);
+        }
+
+        validateTaskStatusTransition(previousStatus, newStatus);
+
+        boolean quizPassed = quizReviewItemRepository != null
+                && quizReviewItemRepository.isItemPassedByQuiz(item.getId());
+        String fallbackReason = request.manualFallbackReason();
+        boolean validFallback = fallbackReason != null && (
+                fallbackReason.equals("AI_UNAVAILABLE")
+                || fallbackReason.equals("TASK_NOT_QUIZ_ELIGIBLE")
+                || fallbackReason.equals("USER_MANUAL_OVERRIDE"));
+
+        if (newStatus == DailyTaskStatus.COMPLETED && !quizPassed && !validFallback) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Task requires passing the daily micro-quiz or providing a valid manual fallback reason to be marked as completed.");
+        }
+
+        if (plan.getStatus() == DailyPlanStatus.READY && newStatus != DailyTaskStatus.NOT_STARTED) {
+            plan.startExecution(Instant.now());
+            dailyPlanRepository.save(plan);
+        }
+
         item.updateStatus(newStatus);
         DailyPlanItem savedItem = dailyPlanItemRepository.save(item);
 
-        if (isActiveVersion && newStatus == DailyTaskStatus.COMPLETED && previousStatus != DailyTaskStatus.COMPLETED) {
+        if (newStatus == DailyTaskStatus.COMPLETED) {
             RoadmapItem learningUnit = resolveLearningUnit(item, userId);
             int actualMinutes = request.actualMinutes() != null && request.actualMinutes() > 0
                     ? request.actualMinutes()
                     : item.getPlannedMinutes();
             int percentage = newStatus.completionPercentage();
+            String note = validFallback
+                    ? "Hoàn thành thủ công qua bảng Kanban [" + fallbackReason + "]"
+                    : "Hoàn thành qua bảng Kanban (Đạt Micro-Quiz)";
 
             ProgressEntry entry = ProgressEntry.create(
                     userId,
@@ -931,28 +970,58 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                     ProgressEntryStatus.COMPLETED,
                     actualMinutes,
                     percentage,
-                    "Hoàn thành qua bảng Kanban",
+                    note,
                     null,
                     null,
                     null,
                     null,
                     null);
             ProgressEntry savedEntry = progressEntryRepository.save(entry);
-            roadmapProgressService.recordOutcome(
+            if (item.getRoadmapItemId() != null) {
+                roadmapProgressService.recordOutcome(
+                        userId,
+                        item.getRoadmapItemId(),
+                        savedEntry,
+                        ProgressEntryStatus.COMPLETED);
+            }
+            auditLogService.logAction(
                     userId,
-                    item.getRoadmapItemId(),
-                    savedEntry,
-                    ProgressEntryStatus.COMPLETED);
+                    username,
+                    AuditEventAction.PROGRESS_RECORDED,
+                    "DailyPlanItem",
+                    savedItem.getId().toString());
+        } else {
+            auditLogService.logAction(
+                    userId,
+                    username,
+                    AuditEventAction.DAILY_TASK_STATUS_CHANGED,
+                    "DailyPlanItem",
+                    savedItem.getId().toString());
         }
 
-        auditLogService.logAction(
-                userId,
-                username,
-                AuditEventAction.PROGRESS_RECORDED,
-                "DailyPlanItem",
-                savedItem.getId().toString());
-
         return enrichTaskResponse(savedItem, userId);
+    }
+
+    private void validateTaskStatusTransition(DailyTaskStatus from, DailyTaskStatus to) {
+        if (from == to) {
+            return;
+        }
+        if (from == DailyTaskStatus.COMPLETED || from == DailyTaskStatus.PARTIALLY_COMPLETED || from == DailyTaskStatus.SKIPPED) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Tasks with recorded outcomes (" + from + ") cannot be modified via status update. Use correction flow.");
+        }
+        boolean valid = switch (from) {
+            case NOT_STARTED -> to == DailyTaskStatus.IN_PROGRESS;
+            case IN_PROGRESS -> to == DailyTaskStatus.NOT_STARTED || to == DailyTaskStatus.REVIEWING;
+            case REVIEWING -> to == DailyTaskStatus.IN_PROGRESS || to == DailyTaskStatus.COMPLETED;
+            default -> false;
+        };
+        if (!valid) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Invalid task status transition from " + from + " to " + to + ".");
+        }
     }
 
     @Override
@@ -1399,6 +1468,11 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 taskStepReadModelBuilder.buildForItems(
                         items.stream().map(DailyPlanItem::getId).toList());
 
+        UUID versionId = items.get(0).getDailyPlanVersionId();
+        Set<UUID> passedItemIds = quizReviewItemRepository != null
+                ? quizReviewItemRepository.findPassedDailyPlanItemIdsByVersionId(versionId)
+                : Set.of();
+
         return items.stream()
                 .map(item -> {
                     RoadmapItem roadmapItem = item.getRoadmapItemId() != null
@@ -1415,13 +1489,16 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                                     && roadmapItem.getItemType() == RoadmapItemType.LEARNING_UNIT
                             ? roadmapItem.getId()
                             : null;
+                    boolean unlocked = item.getStatus() == DailyTaskStatus.COMPLETED
+                            || passedItemIds.contains(item.getId());
                     return DailyPlanItemResponse.from(
                             item,
                             learningUnitId,
                             roadmapItemTitle,
                             parentTopicId,
                             parentTopicTitle,
-                            taskStepsByItemId.get(item.getId()));
+                            taskStepsByItemId.get(item.getId()),
+                            unlocked);
                 })
                 .toList();
     }
@@ -1431,13 +1508,15 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             return null;
         }
         if (item.getRoadmapItemId() == null) {
+            boolean unlocked = item.getStatus() == DailyTaskStatus.COMPLETED;
             return DailyPlanItemResponse.from(
                     item,
                     null,
                     null,
                     null,
                     null,
-                    taskStepReadModelBuilder.buildForItem(item.getId()));
+                    taskStepReadModelBuilder.buildForItem(item.getId()),
+                    unlocked);
         }
         RoadmapItem roadmapItem = roadmapItemRepository
                 .findOwnedById(item.getRoadmapItemId(), userId)
@@ -1453,13 +1532,16 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                         && roadmapItem.getItemType() == RoadmapItemType.LEARNING_UNIT
                 ? roadmapItem.getId()
                 : null;
+        boolean unlocked = item.getStatus() == DailyTaskStatus.COMPLETED
+                || (quizReviewItemRepository != null && quizReviewItemRepository.isItemPassedByQuiz(item.getId()));
         return DailyPlanItemResponse.from(
                 item,
                 learningUnitId,
                 roadmapItemTitle,
                 parentTopicId,
                 parentTopicTitle,
-                taskStepReadModelBuilder.buildForItem(item.getId()));
+                taskStepReadModelBuilder.buildForItem(item.getId()),
+                unlocked);
     }
 
     private DailyPlan requirePlanForUser(UUID planId, UUID userId) {

@@ -19,5 +19,21 @@ public record QuizDetailResponse(
         BigDecimal score,
         Boolean passed,
         Instant submittedAt,
-        List<QuizQuestionResponse> questions
-) {}
+        List<QuizQuestionResponse> questions,
+        List<UUID> coveredItemIds
+) {
+    public QuizDetailResponse(
+            UUID id,
+            UUID dailyPlanId,
+            UUID dailyPlanVersionId,
+            UUID roadmapId,
+            QuizType quizType,
+            QuizStatus status,
+            BigDecimal score,
+            Boolean passed,
+            Instant submittedAt,
+            List<QuizQuestionResponse> questions
+    ) {
+        this(id, dailyPlanId, dailyPlanVersionId, roadmapId, quizType, status, score, passed, submittedAt, questions, null);
+    }
+}

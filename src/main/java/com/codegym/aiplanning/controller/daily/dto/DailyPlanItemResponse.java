@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-@Schema(description = "Daily plan task item details (US-TSK-01-MANUAL)")
+@Schema(description = "Daily plan task item details (US-TSK-01-MANUAL, USKB-01)")
 public record DailyPlanItemResponse(
         UUID id,
         UUID versionId,
@@ -32,10 +32,11 @@ public record DailyPlanItemResponse(
         AiAdjustmentAction aiAdjustmentAction,
         String aiAdjustmentReason,
         List<DailyPlanTaskStepResponse> steps,
-        TaskStepProgressResponse stepProgress
+        TaskStepProgressResponse stepProgress,
+        Boolean unlockedForCompletion
 ) {
     public static DailyPlanItemResponse from(DailyPlanItem item) {
-        return from(item, null, null, null, null, null);
+        return from(item, null, null, null, null, null, false);
     }
 
     public static DailyPlanItemResponse from(
@@ -50,7 +51,8 @@ public record DailyPlanItemResponse(
                 roadmapItemTitle,
                 parentTopicId,
                 parentTopicTitle,
-                null);
+                null,
+                false);
     }
 
     public static DailyPlanItemResponse from(
@@ -60,6 +62,24 @@ public record DailyPlanItemResponse(
             UUID parentTopicId,
             String parentTopicTitle,
             DailyPlanTaskStepsResponse taskSteps) {
+        return from(
+                item,
+                learningUnitId,
+                roadmapItemTitle,
+                parentTopicId,
+                parentTopicTitle,
+                taskSteps,
+                item.getStatus() == DailyTaskStatus.COMPLETED);
+    }
+
+    public static DailyPlanItemResponse from(
+            DailyPlanItem item,
+            UUID learningUnitId,
+            String roadmapItemTitle,
+            UUID parentTopicId,
+            String parentTopicTitle,
+            DailyPlanTaskStepsResponse taskSteps,
+            boolean unlockedForCompletion) {
         return new DailyPlanItemResponse(
                 item.getId(),
                 item.getDailyPlanVersionId(),
@@ -90,7 +110,8 @@ public record DailyPlanItemResponse(
                 taskSteps == null ? List.of() : taskSteps.steps(),
                 taskSteps == null
                         ? new TaskStepProgressResponse(0, 0, 0.0, false)
-                        : taskSteps.progress()
+                        : taskSteps.progress(),
+                unlockedForCompletion
         );
     }
 
@@ -101,6 +122,7 @@ public record DailyPlanItemResponse(
                 + ", category=" + category
                 + ", status=" + status
                 + ", stepCount=" + (steps == null ? 0 : steps.size())
+                + ", unlocked=" + unlockedForCompletion
                 + ", personalLearningData=<redacted>]";
     }
 }

@@ -107,6 +107,8 @@ class DailyPlanServiceTest {
     private RoadmapProgressService roadmapProgressService;
     @Mock
     private com.codegym.aiplanning.repository.roadmap.RoadmapItemProgressRepository roadmapItemProgressRepository;
+    @Mock
+    private com.codegym.aiplanning.repository.evaluation.QuizReviewItemRepository quizReviewItemRepository;
 
     private DailyPlanServiceImpl dailyPlanService;
     private AvailableMinutesResolver availableMinutesResolver;
@@ -128,6 +130,7 @@ class DailyPlanServiceTest {
                 roadmapRepository,
                 roadmapItemRepository,
                 roadmapItemProgressRepository,
+                quizReviewItemRepository,
                 auditLogService,
                 contextBuilder,
                 aiGenerator,

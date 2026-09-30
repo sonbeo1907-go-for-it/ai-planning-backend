@@ -36,8 +36,10 @@ import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanVersionRepository;
 import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
 import com.codegym.aiplanning.repository.evaluation.DailyEvaluationRepository;
+import com.codegym.aiplanning.entity.evaluation.QuizReviewItem;
 import com.codegym.aiplanning.repository.evaluation.QuizAttemptRepository;
 import com.codegym.aiplanning.repository.evaluation.QuizRepository;
+import com.codegym.aiplanning.repository.evaluation.QuizReviewItemRepository;
 import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
 import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
@@ -83,6 +85,7 @@ public class DailyEvaluationPersistenceService {
     private final WeakTopicRepository weakTopicRepository;
     private final UserProfileRepository userProfileRepository;
     private final DailyEvaluationRepository dailyEvaluationRepository;
+    private final QuizReviewItemRepository quizReviewItemRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
@@ -100,6 +103,7 @@ public class DailyEvaluationPersistenceService {
             WeakTopicRepository weakTopicRepository,
             UserProfileRepository userProfileRepository,
             DailyEvaluationRepository dailyEvaluationRepository,
+            QuizReviewItemRepository quizReviewItemRepository,
             ApplicationEventPublisher eventPublisher,
             AuditLogService auditLogService,
             ObjectMapper objectMapper) {
@@ -115,6 +119,7 @@ public class DailyEvaluationPersistenceService {
         this.weakTopicRepository = weakTopicRepository;
         this.userProfileRepository = userProfileRepository;
         this.dailyEvaluationRepository = dailyEvaluationRepository;
+        this.quizReviewItemRepository = quizReviewItemRepository;
         this.eventPublisher = eventPublisher;
         this.auditLogService = auditLogService;
         this.objectMapper = objectMapper;
@@ -125,7 +130,8 @@ public class DailyEvaluationPersistenceService {
             DailyPlanVersion dailyPlanVersion,
             Roadmap roadmap,
             RoadmapVersion roadmapVersion,
-            List<UUID> completedLearningUnitIds) {}
+            List<UUID> completedLearningUnitIds,
+            List<DailyPlanItem> reviewingItems) {}
 
     @Transactional(readOnly = true)
     public DailyQuizContext prepareDailyQuizContext(
@@ -143,7 +149,13 @@ public class DailyEvaluationPersistenceService {
         Roadmap roadmap = roadmapRepository.findByIdAndOwnerId(plan.getRoadmapId(), userId)
                 .orElseThrow(() -> notFound("Roadmap was not found."));
 
-        List<UUID> completedLearningUnitIds = findCompletedLearningUnitIds(version.getId());
+        List<DailyPlanItem> eligibleReviewingItems = findEligibleReviewingItems(version.getId());
+        List<UUID> completedLearningUnitIds = eligibleReviewingItems.stream()
+                .map(DailyPlanItem::getRoadmapItemId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+
         RoadmapVersion roadmapVersion = validateCompletedLearningUnits(
                 userId,
                 roadmap,
@@ -153,7 +165,8 @@ public class DailyEvaluationPersistenceService {
                 version,
                 roadmap,
                 roadmapVersion,
-                completedLearningUnitIds);
+                completedLearningUnitIds,
+                eligibleReviewingItems);
     }
 
     @Transactional(readOnly = true)
@@ -168,41 +181,25 @@ public class DailyEvaluationPersistenceService {
         return plan.getActiveVersionId();
     }
 
-    private List<UUID> findCompletedLearningUnitIds(UUID versionId) {
+    private List<DailyPlanItem> findEligibleReviewingItems(UUID versionId) {
         List<DailyPlanItem> items = dailyPlanItemRepository
                 .findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId);
         if (items.isEmpty()) {
             throw insufficientCompletedTasks();
         }
 
-        List<UUID> itemIds = items.stream()
-                .map(DailyPlanItem::getId)
-                .toList();
-        List<ProgressEntry> entries = progressEntryRepository
-                .findByDailyPlanItemIdInOrderByRecordedAtDesc(itemIds);
-        Map<UUID, ProgressEntryStatus> latestStatus = new HashMap<>();
-        for (ProgressEntry entry : entries) {
-            if (entry.getDailyPlanItemId() != null) {
-                latestStatus.putIfAbsent(
-                        entry.getDailyPlanItemId(),
-                        entry.getStatus());
-            }
-        }
+        Set<UUID> passedItemIds = quizReviewItemRepository.findPassedDailyPlanItemIdsByVersionId(versionId);
 
-        Set<UUID> learningUnitIds = new HashSet<>();
-        for (DailyPlanItem item : items) {
-            ProgressEntryStatus status = latestStatus.get(item.getId());
-            boolean completed = status == ProgressEntryStatus.COMPLETED
-                    || item.getStatus() == DailyTaskStatus.COMPLETED
-                    || item.getStatus() == DailyTaskStatus.REVIEWING;
-            if (completed && item.getRoadmapItemId() != null) {
-                learningUnitIds.add(item.getRoadmapItemId());
-            }
-        }
-        if (learningUnitIds.isEmpty()) {
+        List<DailyPlanItem> reviewingItems = items.stream()
+                .filter(item -> item.getStatus() == DailyTaskStatus.REVIEWING)
+                .filter(item -> item.getRoadmapItemId() != null)
+                .filter(item -> !passedItemIds.contains(item.getId()))
+                .toList();
+
+        if (reviewingItems.isEmpty()) {
             throw insufficientCompletedTasks();
         }
-        return new ArrayList<>(learningUnitIds);
+        return reviewingItems;
     }
 
     private RoadmapVersion validateCompletedLearningUnits(
@@ -330,7 +327,24 @@ public class DailyEvaluationPersistenceService {
                 context.roadmap(),
                 context.roadmapVersion());
         addQuestions(quiz, generatedPlan, allowedLearningUnits);
-        return mapToQuizDetailResponse(quizRepository.saveAndFlush(quiz));
+        Quiz savedQuiz = quizRepository.saveAndFlush(quiz);
+
+        if (context.reviewingItems() != null) {
+            for (DailyPlanItem item : context.reviewingItems()) {
+                if (item.getRoadmapItemId() != null) {
+                    RoadmapItem roadmapItem = allowedLearningUnits.get(item.getRoadmapItemId());
+                    if (roadmapItem == null) {
+                        roadmapItem = roadmapItemRepository.findOwnedById(item.getRoadmapItemId(), userId).orElse(null);
+                    }
+                    if (roadmapItem != null) {
+                        QuizReviewItem reviewItem = QuizReviewItem.create(savedQuiz, item, roadmapItem);
+                        quizReviewItemRepository.save(reviewItem);
+                    }
+                }
+            }
+        }
+
+        return mapToQuizDetailResponse(savedQuiz);
     }
 
     private Map<UUID, RoadmapItem> loadAllowedLearningUnits(
@@ -657,6 +671,9 @@ public class DailyEvaluationPersistenceService {
         List<QuizQuestionResponse> questions = quiz.getQuestions().stream()
                 .map(question -> mapQuestion(question, answers.get(question.getId()), submitted))
                 .toList();
+        List<UUID> coveredItemIds = quizReviewItemRepository != null
+                ? quizReviewItemRepository.findCoveredItemIdsByQuizId(quiz.getId())
+                : List.of();
         return new QuizDetailResponse(
                 quiz.getId(),
                 quiz.getDailyPlan() == null ? null : quiz.getDailyPlan().getId(),
@@ -669,7 +686,8 @@ public class DailyEvaluationPersistenceService {
                 submitted ? attempt.getScore() : null,
                 submitted ? attempt.isPassed() : null,
                 submitted ? attempt.getSubmittedAt() : null,
-                questions);
+                questions,
+                coveredItemIds);
     }
 
     private QuizQuestionResponse mapQuestion(
