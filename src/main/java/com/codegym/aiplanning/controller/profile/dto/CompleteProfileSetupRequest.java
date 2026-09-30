@@ -1,5 +1,6 @@
 package com.codegym.aiplanning.controller.profile.dto;
 
+import com.codegym.aiplanning.common.validation.IanaTimeZone;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -16,7 +17,8 @@ public record CompleteProfileSetupRequest(
                         description = "IANA time-zone ID detected by the browser and confirmed by the user",
                         example = "Asia/Ho_Chi_Minh",
                         requiredMode = Schema.RequiredMode.REQUIRED)
-                @NotBlank(message = "Time zone is required")
+                @NotBlank(message = "TIMEZONE_REQUIRED")
+                @IanaTimeZone(message = "TIMEZONE_INVALID")
                 @Size(max = 50, message = "Time zone must not exceed 50 characters")
                 String timeZone,
         @Schema(
