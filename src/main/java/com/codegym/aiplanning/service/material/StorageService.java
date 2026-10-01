@@ -6,4 +6,5 @@ public interface StorageService {
     void store(MultipartFile file, String storageKey);
     void delete(String storageKey);
     java.io.InputStream load(String storageKey);
+    boolean exists(String storageKey);
 }

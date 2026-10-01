@@ -140,4 +140,28 @@ class MaterialTest {
 
         assertThat(material.getArchivedAt()).isEqualTo(firstTime);
     }
+
+    @Test
+    void restore_ShouldClearArchivedAt() {
+        Material material = Material.createText(user, MaterialType.TEXT, "Some text");
+        material.archive();
+        assertThat(material.isArchived()).isTrue();
+
+        material.restore();
+
+        assertThat(material.isArchived()).isFalse();
+        assertThat(material.getArchivedAt()).isNull();
+    }
+
+    @Test
+    void requeuePendingExtraction_WhenProcessing_ShouldResetToPending() {
+        Material material = Material.create(user, "test.pdf", "application/pdf", 1024L, "s3://key");
+        material.markAsProcessing();
+        assertThat(material.getStatus()).isEqualTo(MaterialStatus.PROCESSING);
+
+        material.requeuePendingExtraction();
+
+        assertThat(material.getStatus()).isEqualTo(MaterialStatus.PENDING);
+        assertThat(material.getProcessingStartedAt()).isNull();
+    }
 }

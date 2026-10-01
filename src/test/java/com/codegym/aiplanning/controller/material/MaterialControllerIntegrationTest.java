@@ -35,7 +35,11 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import com.codegym.aiplanning.entity.audit.AuditEventAction;
+import com.codegym.aiplanning.entity.audit.AuditLog;
+import com.codegym.aiplanning.repository.audit.AuditLogRepository;
 import java.io.IOException;
 import java.util.UUID;
 import org.springframework.web.multipart.MultipartFile;
@@ -59,6 +63,9 @@ class MaterialControllerIntegrationTest {
 
     @Autowired
     private MaterialRepository materialRepository;
+
+    @Autowired
+    private AuditLogRepository auditLogRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -401,6 +408,203 @@ class MaterialControllerIntegrationTest {
         org.assertj.core.api.Assertions.assertThat(
                         materialRepository.findById(material.getId()).orElseThrow().isArchived())
                 .isTrue();
+    }
+
+    @Test
+    void getArchivedMaterials_ShouldOnlyReturnOwnedArchivedMaterials() throws Exception {
+        UserAccount user1 = createUser("archived-u1", "Archived User 1");
+        String token1 = login(user1.getEmail());
+
+        UserAccount user2 = createUser("archived-u2", "Archived User 2");
+        String token2 = login(user2.getEmail());
+
+        // User 1 active material
+        createTextMaterial(token1, "Active material for user 1 " + "a".repeat(50));
+
+        // User 1 archived material
+        UUID u1ArchivedId = createTextMaterial(token1, "Archived material for user 1 " + "b".repeat(50));
+        mockMvc.perform(delete(ApiConstant.MATERIALS + "/" + u1ArchivedId)
+                        .header("Authorization", "Bearer " + token1))
+                .andExpect(status().isNoContent());
+
+        // User 2 archived material
+        UUID u2ArchivedId = createTextMaterial(token2, "Archived material for user 2 " + "c".repeat(50));
+        mockMvc.perform(delete(ApiConstant.MATERIALS + "/" + u2ArchivedId)
+                        .header("Authorization", "Bearer " + token2))
+                .andExpect(status().isNoContent());
+
+        // User 1 queries archived materials
+        mockMvc.perform(get(ApiConstant.MATERIALS)
+                        .param("archived", "true")
+                        .header("Authorization", "Bearer " + token1))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content[0].id").value(u1ArchivedId.toString()))
+                .andExpect(jsonPath("$.data.content[0].archivedAt").isNotEmpty());
+    }
+
+    @Test
+    void restoreMaterial_Success_ShouldClearArchivedAtAndReturn200() throws Exception {
+        UserAccount user = createUser("restore-success-u", "Restore User");
+        String token = login(user.getEmail());
+
+        UUID materialId = createTextMaterial(token, "Material to be restored " + "d".repeat(50));
+        mockMvc.perform(delete(ApiConstant.MATERIALS + "/" + materialId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNoContent());
+
+        long countBefore = materialRepository.count();
+
+        // Restore material
+        mockMvc.perform(post(ApiConstant.MATERIALS + "/" + materialId + "/restore")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(materialId.toString()));
+
+        // Matrix #3: Retains Material.id
+        // Matrix #4: Does not create new resource
+        org.assertj.core.api.Assertions.assertThat(materialRepository.count()).isEqualTo(countBefore);
+
+        Material restored = materialRepository.findById(materialId).orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(restored.isArchived()).isFalse();
+
+        // Matrix #13: Disappears from archived, appears in active
+        mockMvc.perform(get(ApiConstant.MATERIALS)
+                        .param("archived", "true")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(0));
+
+        mockMvc.perform(get(ApiConstant.MATERIALS)
+                        .param("archived", "false")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content[0].id").value(materialId.toString()));
+    }
+
+    @Test
+    void restoreActiveMaterial_ShouldReturn409MaterialNotArchived() throws Exception {
+        UserAccount user = createUser("restore-active-u", "Active User");
+        String token = login(user.getEmail());
+
+        UUID materialId = createTextMaterial(token, "Active material " + "e".repeat(50));
+
+        // Try to restore already active material
+        mockMvc.perform(post(ApiConstant.MATERIALS + "/" + materialId + "/restore")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MATERIAL_NOT_ARCHIVED"));
+    }
+
+    @Test
+    void restoreMaterial_ByAnotherUser_ShouldReturn404ResourceNotFound() throws Exception {
+        UserAccount owner = createUser("owner-u", "Owner User");
+        String ownerToken = login(owner.getEmail());
+
+        UserAccount attacker = createUser("attacker-u", "Attacker User");
+        String attackerToken = login(attacker.getEmail());
+
+        UUID materialId = createTextMaterial(ownerToken, "Owner material " + "f".repeat(50));
+        mockMvc.perform(delete(ApiConstant.MATERIALS + "/" + materialId)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isNoContent());
+
+        // Attacker attempts restore
+        mockMvc.perform(post(ApiConstant.MATERIALS + "/" + materialId + "/restore")
+                        .header("Authorization", "Bearer " + attackerToken))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    void restoreMaterial_WhenStorageMissing_ShouldReturn404AndKeepMaterialArchived() throws Exception {
+        UserAccount owner = createUser("storage-missing-u", "Storage Missing User");
+        String ownerToken = login(owner.getEmail());
+
+        Material material = Material.create(
+                owner,
+                "missing.pdf",
+                "application/pdf",
+                128L,
+                owner.getId() + "/missing.pdf");
+        material.archive();
+        material = materialRepository.saveAndFlush(material);
+
+        when(storageService.exists(material.getStorageKey())).thenReturn(false);
+
+        mockMvc.perform(post(ApiConstant.MATERIALS + "/" + material.getId() + "/restore")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("STORAGE_OBJECT_MISSING"));
+
+        // Matrix #8: Resource remains archived
+        Material unchanged = materialRepository.findById(material.getId()).orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(unchanged.isArchived()).isTrue();
+    }
+
+    @Test
+    void restoreMaterial_WhenProcessing_ShouldResetToPending() throws Exception {
+        UserAccount owner = createUser("processing-restore-u", "Processing Restore User");
+        String ownerToken = login(owner.getEmail());
+
+        Material material = Material.create(
+                owner,
+                "proc.pdf",
+                "application/pdf",
+                128L,
+                owner.getId() + "/proc.pdf");
+        material.markAsProcessing();
+        material.archive();
+        material = materialRepository.saveAndFlush(material);
+
+        when(storageService.exists(material.getStorageKey())).thenReturn(true);
+
+        mockMvc.perform(post(ApiConstant.MATERIALS + "/" + material.getId() + "/restore")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk());
+
+        Material restored = materialRepository.findById(material.getId()).orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(restored.isArchived()).isFalse();
+        // Matrix #10: status is PENDING (or was claimed to PROCESSING by worker if run immediately)
+        org.assertj.core.api.Assertions.assertThat(restored.getStatus())
+                .isIn(com.codegym.aiplanning.entity.material.MaterialStatus.PENDING,
+                      com.codegym.aiplanning.entity.material.MaterialStatus.PROCESSING,
+                      com.codegym.aiplanning.entity.material.MaterialStatus.READY,
+                      com.codegym.aiplanning.entity.material.MaterialStatus.FAILED);
+    }
+
+    @Test
+    void archiveAndRestore_ShouldRecordAuditLogsWithoutContent() throws Exception {
+        UserAccount owner = createUser("audit-test-u", "Audit Test User");
+        String ownerToken = login(owner.getEmail());
+
+        UUID materialId = createTextMaterial(ownerToken, "Super secret material text content " + "g".repeat(50));
+
+        mockMvc.perform(delete(ApiConstant.MATERIALS + "/" + materialId)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(post(ApiConstant.MATERIALS + "/" + materialId + "/restore")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk());
+
+        java.util.List<AuditLog> logs = auditLogRepository.findAll().stream()
+                .filter(l -> l.getTargetId() != null && l.getTargetId().equals(materialId.toString()))
+                .toList();
+
+        org.assertj.core.api.Assertions.assertThat(logs)
+                .extracting(AuditLog::getAction)
+                .contains(AuditEventAction.MATERIAL_ARCHIVED, AuditEventAction.MATERIAL_RESTORED);
+
+        for (AuditLog log : logs) {
+            org.assertj.core.api.Assertions.assertThat(log.getActorId()).isEqualTo(owner.getId());
+            org.assertj.core.api.Assertions.assertThat(log.getTargetResource()).isEqualTo("Material");
+            // Matrix #11 & #12: Audit has requestId, and NO document content
+            org.assertj.core.api.Assertions.assertThat(log.getRequestId()).isNotNull();
+            org.assertj.core.api.Assertions.assertThat(log.getDetails()).isNull();
+            org.assertj.core.api.Assertions.assertThat(log.getMetadata()).isNull();
+        }
     }
 
     private UUID createTextMaterial(String accessToken, String content) throws Exception {

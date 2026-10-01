@@ -4,12 +4,14 @@ import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.controller.material.dto.CreateTextMaterialRequest;
 import com.codegym.aiplanning.controller.material.dto.MaterialResponse;
+import com.codegym.aiplanning.entity.audit.AuditEventAction;
 import com.codegym.aiplanning.entity.auth.UserAccount;
 import com.codegym.aiplanning.entity.material.Material;
 import com.codegym.aiplanning.entity.material.MaterialStatus;
 import com.codegym.aiplanning.entity.material.MaterialType;
 import com.codegym.aiplanning.repository.MaterialRepository;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import com.codegym.aiplanning.service.audit.AuditLogService;
 import com.codegym.aiplanning.service.material.MaterialExtractionService;
 import com.codegym.aiplanning.service.material.MaterialService;
 import com.codegym.aiplanning.service.material.StorageService;
@@ -37,6 +39,7 @@ public class MaterialServiceImpl implements MaterialService {
     private final UserAccountRepository userAccountRepository;
     private final StorageService storageService;
     private final MaterialExtractionService materialExtractionService;
+    private final AuditLogService auditLogService;
     private final Tika tika;
 
     private static final Set<String> ALLOWED_MIME_TYPES = Set.of(
@@ -50,11 +53,13 @@ public class MaterialServiceImpl implements MaterialService {
     public MaterialServiceImpl(MaterialRepository materialRepository,
                                UserAccountRepository userAccountRepository,
                                StorageService storageService,
-                               MaterialExtractionService materialExtractionService) {
+                               MaterialExtractionService materialExtractionService,
+                               AuditLogService auditLogService) {
         this.materialRepository = materialRepository;
         this.userAccountRepository = userAccountRepository;
         this.storageService = storageService;
         this.materialExtractionService = materialExtractionService;
+        this.auditLogService = auditLogService;
         this.tika = new Tika();
     }
 
@@ -186,12 +191,19 @@ public class MaterialServiceImpl implements MaterialService {
             String query,
             MaterialType type,
             MaterialStatus status,
+            boolean archived,
             Pageable pageable) {
         String normalizedQuery = query == null || query.isBlank() ? null : query.trim();
-        Page<Material> materials = normalizedQuery == null
-                ? materialRepository.listOwnedActive(userId, type, status, pageable)
-                : materialRepository.searchOwnedActive(
-                        userId, normalizedQuery, type, status, pageable);
+        Page<Material> materials;
+        if (archived) {
+            materials = normalizedQuery == null
+                    ? materialRepository.listOwnedArchived(userId, type, status, pageable)
+                    : materialRepository.searchOwnedArchived(userId, normalizedQuery, type, status, pageable);
+        } else {
+            materials = normalizedQuery == null
+                    ? materialRepository.listOwnedActive(userId, type, status, pageable)
+                    : materialRepository.searchOwnedActive(userId, normalizedQuery, type, status, pageable);
+        }
         return materials.map(MaterialListResponse::from);
     }
 
@@ -209,5 +221,82 @@ public class MaterialServiceImpl implements MaterialService {
         material.archive();
         materialRepository.save(material);
         log.info("User {} archived material {}", userId, materialId);
+
+        auditLogService.logAction(
+                userId,
+                material.getUser().getEmail(),
+                AuditEventAction.MATERIAL_ARCHIVED,
+                "Material",
+                material.getId().toString());
+    }
+
+    @Override
+    @Transactional
+    public MaterialResponse restoreMaterial(UUID userId, UUID materialId) {
+        // 1. Authorization: owner-scoped lookup
+        Material material = materialRepository.findByIdAndUserId(materialId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Material not found or not owned by user."));
+
+        // 2. Idempotency/Conflict Behavior: Must return 409 MATERIAL_NOT_ARCHIVED if already active
+        if (!material.isArchived()) {
+            throw new BusinessException(ErrorCode.MATERIAL_NOT_ARCHIVED, "Material is not archived.");
+        }
+
+        // 3. Storage validation: MUST happen BEFORE archivedAt is cleared
+        if (material.getType() == MaterialType.FILE || (material.getStorageKey() != null && !material.getStorageKey().isBlank())) {
+            if (material.getStorageKey() == null || !storageService.exists(material.getStorageKey())) {
+                throw new BusinessException(ErrorCode.STORAGE_OBJECT_MISSING, "Physical storage file is missing.");
+            }
+        }
+
+        // 4. Handle PROCESSING state: reset PROCESSING -> PENDING -> extractTextAsync()
+        boolean needExtraction = false;
+        if (material.getStatus() == MaterialStatus.PROCESSING) {
+            material.requeuePendingExtraction();
+            needExtraction = true;
+        }
+
+        // 5. Restore state (Entity only changes state: archivedAt = null)
+        material.restore();
+        Material saved = materialRepository.save(material);
+
+        // 6. Trigger background extraction if needed
+        if (needExtraction) {
+            if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+                org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            materialExtractionService.extractTextAsync(saved.getId());
+                        }
+                    }
+                );
+            } else {
+                materialExtractionService.extractTextAsync(saved.getId());
+            }
+        }
+
+        // 7. Audit log: actor, action, resource, requestId (automatic via MDC), no sensitive content
+        auditLogService.logAction(
+                userId,
+                saved.getUser().getEmail(),
+                AuditEventAction.MATERIAL_RESTORED,
+                "Material",
+                saved.getId().toString());
+
+        log.info("User {} restored material {}", userId, materialId);
+
+        return new MaterialResponse(
+                saved.getId(),
+                saved.getOriginalFileName(),
+                saved.getContentType(),
+                saved.getFileSize(),
+                saved.getCreatedAt(),
+                saved.getType(),
+                saved.getStatus(),
+                saved.getType() == MaterialType.FILE ? null : saved.getContent(),
+                saved.getErrorCode(),
+                saved.getErrorMessage()
+        );
     }
 }
