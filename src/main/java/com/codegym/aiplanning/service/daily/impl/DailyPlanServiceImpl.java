@@ -234,6 +234,12 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                     ErrorCode.VALIDATION_FAILED,
                     "The from date must not be after the to date.");
         }
+        if (roadmapId != null) {
+            roadmapRepository.findByIdAndOwnerId(roadmapId, userId)
+                    .orElseThrow(() -> new BusinessException(
+                            ErrorCode.RESOURCE_NOT_FOUND,
+                            "Roadmap not found or not owned by user."));
+        }
         Page<DailyPlan> plans = dailyPlanRepository.searchOwned(
                 userId, status, roadmapId, fromDate, toDate, pageable);
         if (plans.isEmpty()) {
@@ -1610,6 +1616,14 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         return userProfileRepository
                 .findByUserId(userId)
                 .map(UserProfile::getTimeZone)
+                .filter(tz -> tz != null && !tz.isBlank())
+                .map(tz -> {
+                    try {
+                        return java.time.ZoneId.of(tz.trim()).getId();
+                    } catch (Exception e) {
+                        return "UTC";
+                    }
+                })
                 .orElse("UTC");
     }
 
