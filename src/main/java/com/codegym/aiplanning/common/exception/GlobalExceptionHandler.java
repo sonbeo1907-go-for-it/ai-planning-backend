@@ -2,6 +2,7 @@ package com.codegym.aiplanning.common.exception;
 
 import com.codegym.aiplanning.common.api.ApiError;
 import com.codegym.aiplanning.common.api.FieldViolation;
+import com.codegym.aiplanning.common.validation.password.PasswordPolicy;
 import com.codegym.aiplanning.config.RequestIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -58,8 +59,20 @@ public class GlobalExceptionHandler {
     ResponseEntity<ApiError> handleConstraintViolation(
             ConstraintViolationException exception, HttpServletRequest request) {
         List<FieldViolation> violations = exception.getConstraintViolations().stream()
-                .map(violation -> new FieldViolation(
-                        violation.getPropertyPath().toString(), violation.getMessage()))
+                .map(violation -> {
+                    String template = violation.getMessageTemplate();
+                    String message = violation.getMessage();
+                    String code = null;
+                    if (template != null && PasswordPolicy.isPasswordPolicyCode(template)) {
+                        code = template;
+                        message = PasswordPolicy.resolveMessage(code);
+                    } else if (message != null && PasswordPolicy.isPasswordPolicyCode(message)) {
+                        code = message;
+                        message = PasswordPolicy.resolveMessage(code);
+                    }
+                    return new FieldViolation(
+                            violation.getPropertyPath().toString(), code, message);
+                })
                 .toList();
         return build(
                 HttpStatus.BAD_REQUEST,
@@ -186,7 +199,16 @@ public class GlobalExceptionHandler {
     }
 
     private FieldViolation toViolation(FieldError error) {
-        return new FieldViolation(error.getField(), error.getDefaultMessage());
+        String templateOrMessage = error.getDefaultMessage();
+        String code = error.getCode();
+        String message = templateOrMessage;
+
+        if (templateOrMessage != null && PasswordPolicy.isPasswordPolicyCode(templateOrMessage)) {
+            code = templateOrMessage;
+            message = PasswordPolicy.resolveMessage(code);
+        }
+
+        return new FieldViolation(error.getField(), code, message);
     }
 
     private ResponseEntity<ApiError> build(
