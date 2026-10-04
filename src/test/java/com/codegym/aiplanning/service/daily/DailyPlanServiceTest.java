@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.codegym.aiplanning.common.exception.BusinessException;
+import com.codegym.aiplanning.common.exception.ErrorCode;
 import com.codegym.aiplanning.controller.daily.dto.CreateDailyPlanRequest;
 import com.codegym.aiplanning.controller.daily.dto.CreateDailyTaskRequest;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanItemResponse;
@@ -313,6 +314,32 @@ class DailyPlanServiceTest {
         verify(dailyPlanVersionRepository, never()).findById(any());
         verify(dailyPlanItemRepository, never())
                 .findByDailyPlanVersionIdOrderByOrderIndexAsc(any());
+    }
+
+    @Test
+    void getUserDailyPlans_invalidDateRange_throwsValidationException() {
+        LocalDate from = LocalDate.now();
+        LocalDate to = from.minusDays(1);
+        PageRequest pageable = PageRequest.of(0, 20);
+
+        assertThatThrownBy(() -> dailyPlanService.getUserDailyPlans(
+                null, null, from, to, pageable, userJwt))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.VALIDATION_FAILED);
+    }
+
+    @Test
+    void getUserDailyPlans_roadmapNotOwned_throwsNotFound() {
+        UUID roadmapId = UUID.randomUUID();
+        PageRequest pageable = PageRequest.of(0, 20);
+
+        when(roadmapRepository.findByIdAndOwnerId(roadmapId, userId))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> dailyPlanService.getUserDailyPlans(
+                null, roadmapId, null, null, pageable, userJwt))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RESOURCE_NOT_FOUND);
     }
 
     @Test

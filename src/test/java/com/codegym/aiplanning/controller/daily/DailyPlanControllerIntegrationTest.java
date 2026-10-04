@@ -193,6 +193,75 @@ class DailyPlanControllerIntegrationTest {
     }
 
     @Test
+    void getTodayPlan_notFound_whenNoPlanExistsForToday() throws Exception {
+        createUser("daily-notfound-user", "No Plan User");
+        String token = login("daily-notfound-user");
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/today")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("DAILY_PLAN_NOT_FOUND"));
+    }
+
+    @Test
+    void getTodayPlan_respectsUserProfileIanaTimezone() throws Exception {
+        UserAccount user = createUser("daily-tz-user", "Timezone User");
+        String token = login("daily-tz-user");
+
+        // Set user profile timezone to Pacific/Auckland
+        UserProfile profile = userProfileRepository.findByUserId(user.getId()).orElseThrow();
+        profile.update("Timezone User", "Pacific/Auckland", "vi-VN", 60);
+        userProfileRepository.saveAndFlush(profile);
+
+        LocalDate aucklandToday = LocalDate.now(java.time.ZoneId.of("Pacific/Auckland"));
+        String payload = String.format("{\"planDate\": \"%s\", \"availableMinutes\": 60}", aucklandToday);
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/today")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.planDate").value(aucklandToday.toString()))
+                .andExpect(jsonPath("$.data.timeZoneSnapshot").value("Pacific/Auckland"));
+    }
+
+    @Test
+    void getTodayPlan_forbiddenForAdmin() throws Exception {
+        createAccount("daily-admin-test", "Admin User", UserRole.ADMIN);
+        String adminToken = login("daily-admin-test");
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/today")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void createDailyPlan_duplicateDate_returnsConflict() throws Exception {
+        createUser("daily-dup-user", "Duplicate Date User");
+        String token = login("daily-dup-user");
+
+        LocalDate date = LocalDate.now().plusDays(20);
+        String payload = String.format("{\"planDate\": \"%s\", \"availableMinutes\": 60}", date);
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DAILY_PLAN_EXISTS"));
+    }
+
+    @Test
     void draftTaskCanBeEditedButAnActivatedTaskCannot() throws Exception {
         createUser("daily-edit-task", "Daily Edit Task");
         String token = login("daily-edit-task");
@@ -286,6 +355,38 @@ class DailyPlanControllerIntegrationTest {
                 .andExpect(jsonPath("$.data.content[0].latestVersionId").isNotEmpty())
                 .andExpect(jsonPath("$.data.content[1].planDate").value(yesterday.toString()))
                 .andExpect(jsonPath("$.data.content[1].latestVersionId").isNotEmpty());
+
+        // AC1 - Tìm theo ngày (single local date)
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS)
+                        .param("from", today.toString())
+                        .param("to", today.toString())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content[0].planDate").value(today.toString()));
+
+        // AC2 - Lọc theo khoảng ngày (from and to inclusive)
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS)
+                        .param("from", yesterday.toString())
+                        .param("to", today.toString())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(2));
+
+        // AC2 validation - from sau to -> 400
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS)
+                        .param("from", today.toString())
+                        .param("to", yesterday.toString())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        // AC3 - roadmap không thuộc sở hữu -> 404
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS)
+                        .param("roadmapId", UUID.randomUUID().toString())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
     }
 
     @Test
