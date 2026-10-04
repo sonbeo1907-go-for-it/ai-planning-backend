@@ -79,6 +79,8 @@ public final class ApiConstant {
             DAILY_PLAN_ITEM_STEPS + "/{stepId}";
     public static final String DAILY_PLAN_ITEM_STEP_COMPLETION =
             DAILY_PLAN_ITEM_STEP_BY_ID + "/completion";
+    public static final String DAILY_PLAN_ITEM_STEP_COMPLETE_WITH_OUTCOME =
+            DAILY_PLAN_ITEM_STEP_BY_ID + "/complete-with-outcome";
     public static final String DAILY_PLAN_ITEM_GUIDANCE =
             DAILY_PLAN_VERSION_ITEM_BY_ID + "/guidance";
     public static final String DAILY_PLAN_ITEM_GUIDANCE_BY_REVISION =

@@ -3,6 +3,8 @@ package com.codegym.aiplanning.controller.daily;
 import com.codegym.aiplanning.common.api.ApiResponse;
 import com.codegym.aiplanning.common.constant.ApiConstant;
 import com.codegym.aiplanning.controller.daily.dto.CreateTaskStepRequest;
+import com.codegym.aiplanning.controller.daily.dto.CompleteTaskStepAndRecordProgressRequest;
+import com.codegym.aiplanning.controller.daily.dto.CompleteTaskStepAndRecordProgressResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanTaskStepsResponse;
 import com.codegym.aiplanning.controller.daily.dto.UpdateTaskStepCompletionRequest;
 import com.codegym.aiplanning.controller.daily.dto.UpdateTaskStepRequest;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -120,6 +123,28 @@ public class DailyPlanTaskStepController {
                 itemId,
                 stepId,
                 request,
+                actorJwt));
+    }
+
+    @PostMapping(ApiConstant.DAILY_PLAN_ITEM_STEP_COMPLETE_WITH_OUTCOME)
+    @Operation(
+            summary = "Complete the final required step and record the parent task outcome",
+            description = "Commits both changes atomically. The same Idempotency-Key safely replays the operation without duplicate progress history.")
+    public ApiResponse<CompleteTaskStepAndRecordProgressResponse> completeStepAndRecordOutcome(
+            @PathVariable UUID planId,
+            @PathVariable UUID versionId,
+            @PathVariable UUID itemId,
+            @PathVariable UUID stepId,
+            @Valid @RequestBody CompleteTaskStepAndRecordProgressRequest request,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(taskStepService.completeStepAndRecordOutcome(
+                planId,
+                versionId,
+                itemId,
+                stepId,
+                request,
+                idempotencyKey,
                 actorJwt));
     }
 }

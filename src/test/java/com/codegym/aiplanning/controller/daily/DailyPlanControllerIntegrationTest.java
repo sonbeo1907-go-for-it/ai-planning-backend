@@ -516,16 +516,17 @@ class DailyPlanControllerIntegrationTest {
                         + "/items/" + copiedTaskId + "/progress")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"status\":\"PARTIALLY_COMPLETED\",\"actualMinutes\":10}"))
+                        .content("{\"status\":\"PARTIALLY_COMPLETED\",\"completionPercentage\":35,\"actualMinutes\":10}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("PARTIALLY_COMPLETED"))
+                .andExpect(jsonPath("$.data.completionPercentage").value(35))
                 .andExpect(jsonPath("$.data.completedAt").doesNotExist());
 
         mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"))
-                .andExpect(jsonPath("$.data.completionPercentage").value(25.0));
+                .andExpect(jsonPath("$.data.completionPercentage").value(17.5));
 
         mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/versions")
                         .header("Authorization", "Bearer " + token))
@@ -942,6 +943,7 @@ class DailyPlanControllerIntegrationTest {
         String correctionPayload = """
                 {
                     "status": "PARTIALLY_COMPLETED",
+                    "completionPercentage": 40,
                     "actualMinutes": 40,
                     "actualResult": "Needs more practice",
                     "difficulty": 4,
@@ -958,6 +960,7 @@ class DailyPlanControllerIntegrationTest {
                         .content(correctionPayload))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("PARTIALLY_COMPLETED"))
+                .andExpect(jsonPath("$.data.completionPercentage").value(40))
                 .andExpect(jsonPath("$.data.supersedesEntryId")
                         .value(completedEntryId.toString()));
 

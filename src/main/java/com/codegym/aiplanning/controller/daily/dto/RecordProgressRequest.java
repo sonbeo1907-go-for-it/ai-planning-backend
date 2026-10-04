@@ -10,6 +10,10 @@ public record RecordProgressRequest(
         @NotNull(message = "Status is required")
         ProgressEntryStatus status,
 
+        @Schema(description = "Exact task completion percentage. Required from 1 to 99 for PARTIALLY_COMPLETED; COMPLETED is 100 and SKIPPED is 0.")
+        @Min(0) @Max(100)
+        Integer completionPercentage,
+
         @Min(0)
         Integer actualMinutes,
 
@@ -24,4 +28,21 @@ public record RecordProgressRequest(
 
         @Schema(description = "Additional notes")
         String note
-) {}
+) {
+    public RecordProgressRequest(
+            ProgressEntryStatus status,
+            Integer actualMinutes,
+            String actualResult,
+            Integer difficulty,
+            Integer understandingRating,
+            String note) {
+        this(
+                status,
+                null,
+                actualMinutes,
+                actualResult,
+                difficulty,
+                understandingRating,
+                note);
+    }
+}

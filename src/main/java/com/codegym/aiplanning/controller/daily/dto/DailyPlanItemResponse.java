@@ -19,6 +19,7 @@ public record DailyPlanItemResponse(
         Integer plannedMinutes,
         Integer orderIndex,
         DailyTaskStatus status,
+        Integer completionPercentage,
         Instant completedAt,
         Instant createdAt,
         UUID roadmapItemId,
@@ -35,7 +36,7 @@ public record DailyPlanItemResponse(
         TaskStepProgressResponse stepProgress
 ) {
     public static DailyPlanItemResponse from(DailyPlanItem item) {
-        return from(item, null, null, null, null, null);
+        return from(item, null, null, null, null, null, null);
     }
 
     public static DailyPlanItemResponse from(
@@ -50,6 +51,7 @@ public record DailyPlanItemResponse(
                 roadmapItemTitle,
                 parentTopicId,
                 parentTopicTitle,
+                null,
                 null);
     }
 
@@ -60,6 +62,24 @@ public record DailyPlanItemResponse(
             UUID parentTopicId,
             String parentTopicTitle,
             DailyPlanTaskStepsResponse taskSteps) {
+        return from(
+                item,
+                learningUnitId,
+                roadmapItemTitle,
+                parentTopicId,
+                parentTopicTitle,
+                taskSteps,
+                null);
+    }
+
+    public static DailyPlanItemResponse from(
+            DailyPlanItem item,
+            UUID learningUnitId,
+            String roadmapItemTitle,
+            UUID parentTopicId,
+            String parentTopicTitle,
+            DailyPlanTaskStepsResponse taskSteps,
+            Integer completionPercentage) {
         return new DailyPlanItemResponse(
                 item.getId(),
                 item.getDailyPlanVersionId(),
@@ -69,6 +89,9 @@ public record DailyPlanItemResponse(
                 item.getPlannedMinutes(),
                 item.getOrderIndex(),
                 item.getStatus(),
+                completionPercentage != null
+                        ? completionPercentage
+                        : item.getStatus().completionPercentage(),
                 item.getCompletedAt(),
                 item.getCreatedAt(),
                 item.getRoadmapItemId(),

@@ -425,7 +425,6 @@ class DailyPlanServiceTest {
         DailyPlanItem item = DailyPlanItem.create(
                 versionId, DailyTaskCategory.CUSTOM, "Task outcome", null, 30, 0);
         ReflectionTestUtils.setField(item, "id", itemId);
-        item.updateStatus(DailyTaskStatus.COMPLETED);
 
         when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId))
                 .thenReturn(Optional.of(plan));
@@ -438,7 +437,14 @@ class DailyPlanServiceTest {
         DailyPlanItemResponse response = dailyPlanService.recordProgress(
                 planId,
                 itemId,
-                new RecordProgressRequest(progressStatus, 10, null, null, null, null),
+                new RecordProgressRequest(
+                        progressStatus,
+                        progressStatus == ProgressEntryStatus.PARTIALLY_COMPLETED ? 45 : null,
+                        10,
+                        null,
+                        null,
+                        null,
+                        null),
                 userJwt);
 
         DailyTaskStatus expectedTaskStatus = DailyTaskStatus.valueOf(progressStatus.name());
@@ -450,7 +456,7 @@ class DailyPlanServiceTest {
         verify(progressEntryRepository).save(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getStatus()).isEqualTo(progressStatus);
         assertThat(entryCaptor.getValue().getCompletionPercentage())
-                .isEqualTo(expectedTaskStatus.completionPercentage());
+                .isEqualTo(progressStatus == ProgressEntryStatus.PARTIALLY_COMPLETED ? 45 : 0);
     }
 
     @Test
@@ -482,6 +488,14 @@ class DailyPlanServiceTest {
 
         assertThat(response).isNotNull();
         assertThat(response.status()).isEqualTo(DailyTaskStatus.IN_PROGRESS);
+
+        ArgumentCaptor<ProgressEntry> entryCaptor =
+                ArgumentCaptor.forClass(ProgressEntry.class);
+        verify(progressEntryRepository).save(entryCaptor.capture());
+        assertThat(entryCaptor.getValue().getActualMinutes()).isEqualTo(25);
+        assertThat(entryCaptor.getValue().getCompletionPercentage()).isZero();
+        verify(roadmapProgressService, never())
+                .recordOutcome(any(), any(), any(), any());
     }
 
     @Test

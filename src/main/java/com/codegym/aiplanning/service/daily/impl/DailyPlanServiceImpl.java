@@ -14,6 +14,7 @@ import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
 import com.codegym.aiplanning.controller.daily.dto.ProgressEntryResponse;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanTaskProgressHistoryResponse;
 import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
+import com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest;
 import com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest;
 import com.codegym.aiplanning.controller.daily.dto.UpdateDailyPlanBudgetRequest;
 import com.codegym.aiplanning.entity.audit.AuditEventAction;
@@ -255,23 +256,30 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         }
 
         Map<UUID, List<DailyPlanItem>> itemsByVersionId = new HashMap<>();
+        List<DailyPlanItem> currentItems = List.of();
         if (!versions.isEmpty()) {
-            List<DailyPlanItem> items = dailyPlanItemRepository.findByDailyPlanVersionIds(
+            currentItems = dailyPlanItemRepository.findByDailyPlanVersionIds(
                     versions.stream().map(DailyPlanVersion::getId).toList());
-            for (DailyPlanItem item : items) {
+            for (DailyPlanItem item : currentItems) {
                 itemsByVersionId
                         .computeIfAbsent(
                                 item.getDailyPlanVersionId(), ignored -> new ArrayList<>())
                         .add(item);
             }
         }
+        Map<UUID, Integer> completionPercentageByItemId =
+                resolveCompletionPercentages(currentItems, userId);
 
         return plans.map(plan -> {
             DailyPlanVersion version = versionByPlanId.get(plan.getId());
             List<DailyPlanItem> items = version == null
                     ? List.of()
                     : itemsByVersionId.getOrDefault(version.getId(), List.of());
-            return DailyPlanSummaryResponse.from(plan, version, items);
+            return DailyPlanSummaryResponse.from(
+                    plan,
+                    version,
+                    items,
+                    completionPercentageByItemId);
         });
     }
 
@@ -795,7 +803,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
     public DailyPlanItemResponse recordProgress(
             UUID planId,
             UUID itemId,
-            com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest request,
+            RecordProgressRequest request,
             String idempotencyKey,
             Jwt actorJwt) {
         UUID userId = extractUserId(actorJwt);
@@ -840,6 +848,11 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 return enrichTaskResponse(item, userId);
             }
         }
+        if (isTerminal(item.getStatus())) {
+            throw new BusinessException(
+                    ErrorCode.CONFLICT,
+                    "This task already has a final outcome. Use a progress correction instead.");
+        }
 
         RoadmapItem learningUnit = resolveLearningUnit(item, userId);
 
@@ -850,7 +863,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         int actualMinutes = request.actualMinutes() != null
                 ? request.actualMinutes()
                 : item.getPlannedMinutes();
-        int percentage = taskStatus.completionPercentage();
+        int percentage = resolveCompletionPercentage(request);
 
         ProgressEntry entry = ProgressEntry.create(
                 userId,
@@ -943,7 +956,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             UUID planId,
             UUID itemId,
             UUID progressEntryId,
-            com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest request,
+            RecordProgressRequest request,
             String idempotencyKey,
             Jwt actorJwt) {
         UUID userId = extractUserId(actorJwt);
@@ -986,6 +999,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         RoadmapItem learningUnit = resolveCorrectionLearningUnit(
                 original, userId);
         DailyTaskStatus correctedTaskStatus = toDailyTaskStatus(request.status());
+        int correctedCompletionPercentage = resolveCompletionPercentage(request);
 
         ProgressEntry correction = ProgressEntry.create(
                 userId,
@@ -996,7 +1010,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 request.actualMinutes() != null
                         ? request.actualMinutes()
                         : item.getPlannedMinutes(),
-                correctedTaskStatus.completionPercentage(),
+                correctedCompletionPercentage,
                 request.actualResult(),
                 request.difficulty(),
                 request.understandingRating(),
@@ -1067,10 +1081,11 @@ public class DailyPlanServiceImpl implements DailyPlanService {
 
         int pomodoroMinutes = request.completedMinutes() != null ? request.completedMinutes() : 25;
 
-        com.codegym.aiplanning.entity.daily.ProgressEntryStatus progressStatus = 
-                item.getStatus() == DailyTaskStatus.COMPLETED 
-                        ? com.codegym.aiplanning.entity.daily.ProgressEntryStatus.COMPLETED 
-                        : com.codegym.aiplanning.entity.daily.ProgressEntryStatus.PARTIALLY_COMPLETED;
+        int currentCompletionPercentage = resolveCompletionPercentages(List.of(item), userId)
+                .getOrDefault(item.getId(), item.getStatus().completionPercentage());
+        ProgressEntryStatus progressStatus = item.getStatus() == DailyTaskStatus.COMPLETED
+                ? ProgressEntryStatus.COMPLETED
+                : ProgressEntryStatus.PARTIALLY_COMPLETED;
 
         RoadmapItem learningUnit = resolveLearningUnit(item, userId);
         ProgressEntry entry = ProgressEntry.create(
@@ -1080,21 +1095,14 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 learningUnit != null ? learningUnit.getId() : null,
                 progressStatus,
                 pomodoroMinutes,
-                item.getStatus() == DailyTaskStatus.COMPLETED ? 100 : 50,
+                currentCompletionPercentage,
                 "Pomodoro session",
                 null,
                 null,
                 null,
                 null,
                 null);
-        ProgressEntry savedEntry = progressEntryRepository.save(entry);
-        if (learningUnit != null) {
-            roadmapProgressService.recordOutcome(
-                    userId,
-                    learningUnit.getId(),
-                    savedEntry,
-                    progressStatus);
-        }
+        progressEntryRepository.save(entry);
 
         auditLogService.logAction(
                 userId,
@@ -1326,6 +1334,8 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         Map<UUID, DailyPlanTaskStepsResponse> taskStepsByItemId =
                 taskStepReadModelBuilder.buildForItems(
                         items.stream().map(DailyPlanItem::getId).toList());
+        Map<UUID, Integer> completionPercentageByItemId =
+                resolveCompletionPercentages(items, userId);
 
         return items.stream()
                 .map(item -> {
@@ -1349,7 +1359,8 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                             roadmapItemTitle,
                             parentTopicId,
                             parentTopicTitle,
-                            taskStepsByItemId.get(item.getId()));
+                            taskStepsByItemId.get(item.getId()),
+                            completionPercentageByItemId.get(item.getId()));
                 })
                 .toList();
     }
@@ -1365,7 +1376,8 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                     null,
                     null,
                     null,
-                    taskStepReadModelBuilder.buildForItem(item.getId()));
+                    taskStepReadModelBuilder.buildForItem(item.getId()),
+                    resolveCompletionPercentages(List.of(item), userId).get(item.getId()));
         }
         RoadmapItem roadmapItem = roadmapItemRepository
                 .findOwnedById(item.getRoadmapItemId(), userId)
@@ -1387,7 +1399,74 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 roadmapItemTitle,
                 parentTopicId,
                 parentTopicTitle,
-                taskStepReadModelBuilder.buildForItem(item.getId()));
+                taskStepReadModelBuilder.buildForItem(item.getId()),
+                resolveCompletionPercentages(List.of(item), userId).get(item.getId()));
+    }
+
+    private Map<UUID, Integer> resolveCompletionPercentages(
+            List<DailyPlanItem> items,
+            UUID userId) {
+        if (items == null || items.isEmpty()) {
+            return Map.of();
+        }
+
+        List<UUID> itemIds = items.stream()
+                .map(DailyPlanItem::getId)
+                .toList();
+        Map<UUID, List<ProgressEntry>> historyByItemId = progressEntryRepository
+                .findByUserIdAndDailyPlanItemIdInOrderByRecordedAtDesc(userId, itemIds)
+                .stream()
+                .collect(Collectors.groupingBy(ProgressEntry::getDailyPlanItemId));
+
+        Map<UUID, Integer> percentages = new HashMap<>();
+        for (DailyPlanItem item : items) {
+            List<ProgressEntry> effectiveEntries = ProgressHistoryResolver.effectiveEntries(
+                    historyByItemId.getOrDefault(item.getId(), List.of()));
+            int percentage = effectiveEntries.isEmpty()
+                    ? item.getStatus().completionPercentage()
+                    : effectiveEntries.get(effectiveEntries.size() - 1).getCompletionPercentage();
+            percentages.put(item.getId(), percentage);
+        }
+        return Map.copyOf(percentages);
+    }
+
+    private int resolveCompletionPercentage(
+            RecordProgressRequest request) {
+        Integer requestedPercentage = request.completionPercentage();
+        return switch (request.status()) {
+            case COMPLETED -> {
+                if (requestedPercentage != null && requestedPercentage != 100) {
+                    throw new BusinessException(
+                            ErrorCode.VALIDATION_FAILED,
+                            "COMPLETED progress must have completionPercentage 100.");
+                }
+                yield 100;
+            }
+            case SKIPPED -> {
+                if (requestedPercentage != null && requestedPercentage != 0) {
+                    throw new BusinessException(
+                            ErrorCode.VALIDATION_FAILED,
+                            "SKIPPED progress must have completionPercentage 0.");
+                }
+                yield 0;
+            }
+            case PARTIALLY_COMPLETED -> {
+                if (requestedPercentage == null
+                        || requestedPercentage < 1
+                        || requestedPercentage > 99) {
+                    throw new BusinessException(
+                            ErrorCode.VALIDATION_FAILED,
+                            "PARTIALLY_COMPLETED progress requires completionPercentage from 1 to 99.");
+                }
+                yield requestedPercentage;
+            }
+        };
+    }
+
+    private boolean isTerminal(DailyTaskStatus status) {
+        return status == DailyTaskStatus.COMPLETED
+                || status == DailyTaskStatus.PARTIALLY_COMPLETED
+                || status == DailyTaskStatus.SKIPPED;
     }
 
     private DailyPlan requirePlanForUser(UUID planId, UUID userId) {

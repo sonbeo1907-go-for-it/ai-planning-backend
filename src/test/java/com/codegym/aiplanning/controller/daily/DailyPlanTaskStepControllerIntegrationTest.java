@@ -16,6 +16,7 @@ import com.codegym.aiplanning.entity.profile.UserProfile;
 import com.codegym.aiplanning.repository.auth.UserAccountRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanItemRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanTaskStepStateRepository;
+import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
 import com.codegym.aiplanning.repository.profile.UserProfileRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -53,6 +54,9 @@ class DailyPlanTaskStepControllerIntegrationTest {
 
     @Autowired
     private DailyPlanTaskStepStateRepository taskStepStateRepository;
+
+    @Autowired
+    private ProgressEntryRepository progressEntryRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -451,6 +455,94 @@ class DailyPlanTaskStepControllerIntegrationTest {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("TASK_STEP_TIME_EXCEEDED"));
+    }
+
+    @Test
+    void finalRequiredStepAndParentOutcomeAreAtomicAndIdempotent() throws Exception {
+        UserAccount owner = createAccount("task-step-atomic", UserRole.USER);
+        String token = login(owner);
+        PlanPath path = createPlanAndTask(token, "2032-01-19");
+        JsonNode created = createStep(token, stepsPath(path), "Finish the required example");
+        String stepId = created.path("data").path("steps").get(0).path("id").asText();
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + path.planId()
+                        + "/versions/" + path.versionId() + "/activate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        String endpoint = stepsPath(path) + "/" + stepId + "/complete-with-outcome";
+        String request = """
+                {
+                  "stateVersion": 0,
+                  "outcome": {
+                    "status": "PARTIALLY_COMPLETED",
+                    "completionPercentage": 35,
+                    "actualMinutes": 20,
+                    "actualResult": "Completed the main example"
+                  }
+                }
+                """;
+
+        mockMvc.perform(post(endpoint)
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", "atomic-step-outcome")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.taskSteps.progress.allRequiredStepsCompleted")
+                        .value(true))
+                .andExpect(jsonPath("$.data.task.status").value("PARTIALLY_COMPLETED"))
+                .andExpect(jsonPath("$.data.task.completionPercentage").value(35));
+
+        mockMvc.perform(post(endpoint)
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", "atomic-step-outcome")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.task.completionPercentage").value(35));
+
+        org.assertj.core.api.Assertions.assertThat(progressEntryRepository
+                        .findByUserIdAndDailyPlanItemIdOrderByRecordedAtDesc(
+                                owner.getId(),
+                                java.util.UUID.fromString(path.itemId())))
+                .hasSize(1);
+    }
+
+    @Test
+    void invalidOutcomeRollsBackFinalStepCompletion() throws Exception {
+        UserAccount owner = createAccount("task-step-rollback", UserRole.USER);
+        String token = login(owner);
+        PlanPath path = createPlanAndTask(token, "2032-01-20");
+        JsonNode created = createStep(token, stepsPath(path), "Finish before recording");
+        String stepId = created.path("data").path("steps").get(0).path("id").asText();
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + path.planId()
+                        + "/versions/" + path.versionId() + "/activate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post(stepsPath(path) + "/" + stepId + "/complete-with-outcome")
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", "invalid-atomic-step-outcome")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "stateVersion": 0,
+                                  "outcome": {
+                                    "status": "PARTIALLY_COMPLETED",
+                                    "actualMinutes": 20
+                                  }
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        mockMvc.perform(get(stepsPath(path))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.steps[0].completed").value(false))
+                .andExpect(jsonPath("$.data.progress.allRequiredStepsCompleted").value(false));
     }
 
     private PlanPath createPlanAndTask(String token, String date) throws Exception {

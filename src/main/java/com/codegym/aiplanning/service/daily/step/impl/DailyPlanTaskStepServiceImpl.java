@@ -2,6 +2,8 @@ package com.codegym.aiplanning.service.daily.step.impl;
 
 import com.codegym.aiplanning.common.exception.BusinessException;
 import com.codegym.aiplanning.common.exception.ErrorCode;
+import com.codegym.aiplanning.controller.daily.dto.CompleteTaskStepAndRecordProgressRequest;
+import com.codegym.aiplanning.controller.daily.dto.CompleteTaskStepAndRecordProgressResponse;
 import com.codegym.aiplanning.controller.daily.dto.CreateTaskStepRequest;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanTaskStepsResponse;
 import com.codegym.aiplanning.controller.daily.dto.UpdateTaskStepCompletionRequest;
@@ -21,6 +23,7 @@ import com.codegym.aiplanning.repository.daily.DailyPlanTaskStepRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanTaskStepStateRepository;
 import com.codegym.aiplanning.repository.daily.DailyPlanVersionRepository;
 import com.codegym.aiplanning.service.audit.AuditLogService;
+import com.codegym.aiplanning.service.daily.DailyPlanService;
 import com.codegym.aiplanning.service.daily.step.DailyPlanTaskStepService;
 import com.codegym.aiplanning.service.daily.step.TaskStepOrderNormalizer;
 import com.codegym.aiplanning.service.daily.step.TaskStepReadModelBuilder;
@@ -47,6 +50,7 @@ public class DailyPlanTaskStepServiceImpl implements DailyPlanTaskStepService {
     private final TaskStepOrderNormalizer orderNormalizer;
     private final TaskStepReadModelBuilder readModelBuilder;
     private final AuditLogService auditLogService;
+    private final DailyPlanService dailyPlanService;
 
     public DailyPlanTaskStepServiceImpl(
             DailyPlanRepository dailyPlanRepository,
@@ -57,7 +61,8 @@ public class DailyPlanTaskStepServiceImpl implements DailyPlanTaskStepService {
             TaskStepValidator validator,
             TaskStepOrderNormalizer orderNormalizer,
             TaskStepReadModelBuilder readModelBuilder,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            DailyPlanService dailyPlanService) {
         this.dailyPlanRepository = dailyPlanRepository;
         this.dailyPlanVersionRepository = dailyPlanVersionRepository;
         this.dailyPlanItemRepository = dailyPlanItemRepository;
@@ -67,6 +72,7 @@ public class DailyPlanTaskStepServiceImpl implements DailyPlanTaskStepService {
         this.orderNormalizer = orderNormalizer;
         this.readModelBuilder = readModelBuilder;
         this.auditLogService = auditLogService;
+        this.dailyPlanService = dailyPlanService;
     }
 
     @Override
@@ -245,12 +251,6 @@ public class DailyPlanTaskStepServiceImpl implements DailyPlanTaskStepService {
                 .filter(candidate -> candidate.getDailyPlanVersionId().equals(versionId))
                 .filter(candidate -> !candidate.isRemoved())
                 .orElseThrow(this::stepNotFound);
-        if (isTerminal(item.getStatus())) {
-            throw new BusinessException(
-                    ErrorCode.DAILY_PLAN_LOCKED,
-                    "Task Step completion cannot change after the parent task has a final outcome.");
-        }
-
         if (request.completed() == null) {
             throw new BusinessException(
                     ErrorCode.TASK_STEP_INVALID,
@@ -267,6 +267,11 @@ public class DailyPlanTaskStepServiceImpl implements DailyPlanTaskStepService {
         if (state != null && Boolean.valueOf(requestedCompletion).equals(state.getCompleted())) {
             return buildResponse(itemId);
         }
+        if (isTerminal(item.getStatus())) {
+            throw new BusinessException(
+                    ErrorCode.DAILY_PLAN_LOCKED,
+                    "Task Step completion cannot change after the parent task has a final outcome.");
+        }
         requireExpectedStateVersion(state, request.stateVersion());
         if (state == null) {
             state = DailyPlanTaskStepState.create(step.getId());
@@ -280,6 +285,45 @@ public class DailyPlanTaskStepServiceImpl implements DailyPlanTaskStepService {
                 AuditEventAction.TASK_STEP_COMPLETION_CHANGED,
                 stepId);
         return buildResponse(itemId);
+    }
+
+    @Override
+    @Transactional
+    public CompleteTaskStepAndRecordProgressResponse completeStepAndRecordOutcome(
+            UUID planId,
+            UUID versionId,
+            UUID itemId,
+            UUID stepId,
+            CompleteTaskStepAndRecordProgressRequest request,
+            String idempotencyKey,
+            Jwt actorJwt) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Idempotency-Key is required for combined Task Step completion.");
+        }
+
+        DailyPlanTaskStepsResponse taskSteps = setCompletion(
+                planId,
+                versionId,
+                itemId,
+                stepId,
+                new UpdateTaskStepCompletionRequest(true, request.stateVersion()),
+                actorJwt);
+        if (!taskSteps.progress().allRequiredStepsCompleted()) {
+            throw new BusinessException(
+                    ErrorCode.TASK_STEP_INVALID,
+                    "Complete all required Task Steps before recording the parent task outcome.");
+        }
+
+        return new CompleteTaskStepAndRecordProgressResponse(
+                taskSteps,
+                dailyPlanService.recordProgress(
+                        planId,
+                        itemId,
+                        request.outcome(),
+                        idempotencyKey,
+                        actorJwt));
     }
 
     private DailyPlanVersion requireOwnedVersionForUpdate(

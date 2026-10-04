@@ -1,5 +1,7 @@
 package com.codegym.aiplanning.service.daily.step;
 
+import com.codegym.aiplanning.controller.daily.dto.CompleteTaskStepAndRecordProgressRequest;
+import com.codegym.aiplanning.controller.daily.dto.CompleteTaskStepAndRecordProgressResponse;
 import com.codegym.aiplanning.controller.daily.dto.CreateTaskStepRequest;
 import com.codegym.aiplanning.controller.daily.dto.DailyPlanTaskStepsResponse;
 import com.codegym.aiplanning.controller.daily.dto.UpdateTaskStepCompletionRequest;
@@ -44,5 +46,14 @@ public interface DailyPlanTaskStepService {
             UUID itemId,
             UUID stepId,
             UpdateTaskStepCompletionRequest request,
+            Jwt actorJwt);
+
+    CompleteTaskStepAndRecordProgressResponse completeStepAndRecordOutcome(
+            UUID planId,
+            UUID versionId,
+            UUID itemId,
+            UUID stepId,
+            CompleteTaskStepAndRecordProgressRequest request,
+            String idempotencyKey,
             Jwt actorJwt);
 }

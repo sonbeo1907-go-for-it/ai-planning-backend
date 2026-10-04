@@ -8,6 +8,7 @@ import com.codegym.aiplanning.entity.daily.DailyTaskStatus;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public record DailyPlanSummaryResponse(
@@ -32,8 +33,18 @@ public record DailyPlanSummaryResponse(
             DailyPlan plan,
             DailyPlanVersion currentVersion,
             List<DailyPlanItem> items) {
+        return from(plan, currentVersion, items, Map.of());
+    }
+
+    public static DailyPlanSummaryResponse from(
+            DailyPlan plan,
+            DailyPlanVersion currentVersion,
+            List<DailyPlanItem> items,
+            Map<UUID, Integer> completionPercentageByItemId) {
         int earnedPercentage = items.stream()
-                .mapToInt(item -> item.getStatus().completionPercentage())
+                .mapToInt(item -> completionPercentageByItemId.getOrDefault(
+                        item.getId(),
+                        item.getStatus().completionPercentage()))
                 .sum();
         double completionPercentage = items.isEmpty()
                 ? 0.0
