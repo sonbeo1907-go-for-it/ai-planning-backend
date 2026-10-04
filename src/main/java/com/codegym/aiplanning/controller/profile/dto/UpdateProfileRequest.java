@@ -1,5 +1,6 @@
 package com.codegym.aiplanning.controller.profile.dto;
 
+import com.codegym.aiplanning.common.validation.IanaTimeZone;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -9,6 +10,7 @@ import jakarta.validation.constraints.Size;
 public record UpdateProfileRequest(
         @Size(max = 150, message = "Display name must not exceed 150 characters")
                 String displayName,
+        @IanaTimeZone(message = "TIMEZONE_INVALID")
         @Size(max = 50, message = "Time zone must not exceed 50 characters")
                 String timeZone,
         @Size(max = 35, message = "Locale must not exceed 35 characters")

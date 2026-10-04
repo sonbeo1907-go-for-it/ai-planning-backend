@@ -151,11 +151,10 @@ public class ProfileServiceImpl implements ProfileService {
         if (timeZone == null) {
             return null;
         }
-        try {
-            return ZoneId.of(timeZone.trim()).getId();
-        } catch (DateTimeException exception) {
+        if (timeZone.isBlank() || !ZoneId.getAvailableZoneIds().contains(timeZone)) {
             throw invalidProfileField("Time zone must be a valid IANA zone ID.");
         }
+        return timeZone;
     }
 
     private String normalizeLocale(String locale) {
