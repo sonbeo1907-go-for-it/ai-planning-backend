@@ -17,7 +17,8 @@ public record MaterialListResponse(
         ExtractionErrorCode errorCode,
         String errorMessage,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        Instant archivedAt) {
 
     public static MaterialListResponse from(Material material) {
         return new MaterialListResponse(
@@ -30,6 +31,7 @@ public record MaterialListResponse(
                 material.getErrorCode(),
                 material.getErrorMessage(),
                 material.getCreatedAt(),
-                material.getUpdatedAt());
+                material.getUpdatedAt(),
+                material.getArchivedAt());
     }
 }

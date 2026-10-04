@@ -80,6 +80,19 @@ public class LocalFileSystemStorageServiceImpl implements StorageService {
         }
     }
 
+    @Override
+    public boolean exists(String storageKey) {
+        if (storageKey == null || storageKey.isBlank()) {
+            return false;
+        }
+        try {
+            Path file = resolveStorageKey(storageKey);
+            return Files.exists(file);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private Path resolveStorageKey(String storageKey) {
         if (storageKey == null || storageKey.isBlank()) {
             throw new BusinessException(ErrorCode.FILE_STORAGE_ERROR, "Storage key is missing.");

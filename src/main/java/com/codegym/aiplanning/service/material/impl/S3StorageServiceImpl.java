@@ -15,6 +15,8 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
@@ -114,6 +116,26 @@ public class S3StorageServiceImpl implements StorageService {
         } catch (S3Exception e) {
             log.error("S3 error occurred while loading file: {}", storageKey, e);
             throw new BusinessException(ErrorCode.FILE_STORAGE_ERROR, "Failed to read file from S3.");
+        }
+    }
+
+    @Override
+    public boolean exists(String storageKey) {
+        if (storageKey == null || storageKey.isBlank()) {
+            return false;
+        }
+        try {
+            HeadObjectRequest headObjectRequest = HeadObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(storageKey)
+                    .build();
+            s3Client.headObject(headObjectRequest);
+            return true;
+        } catch (NoSuchKeyException e) {
+            return false;
+        } catch (Exception e) {
+            log.error("Error checking S3 object existence: {}", storageKey, e);
+            return false;
         }
     }
 }

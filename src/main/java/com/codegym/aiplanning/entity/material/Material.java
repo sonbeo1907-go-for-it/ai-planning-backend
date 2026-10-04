@@ -119,6 +119,17 @@ public class Material extends BaseEntity {
         this.archivedAt = java.time.Instant.now();
     }
 
+    public void restore() {
+        this.archivedAt = null;
+    }
+
+    public void requeuePendingExtraction() {
+        if (this.status == MaterialStatus.PROCESSING) {
+            this.status = MaterialStatus.PENDING;
+            this.processingStartedAt = null;
+        }
+    }
+
     public UserAccount getUser() {
         return user;
     }

@@ -96,16 +96,17 @@ public class MaterialController {
     @PreAuthorize("hasRole('USER')")
     @Operation(
             summary = "Get my learning materials",
-            description = "Returns a paginated list of learning materials owned by the current user. Archived materials are excluded.")
+            description = "Returns a paginated list of learning materials owned by the current user. Supports filtering by archived state.")
     public ApiResponse<Page<MaterialListResponse>> getMyMaterials(
             @RequestParam(required = false, name = "q") String query,
             @RequestParam(required = false) MaterialType type,
             @RequestParam(required = false) MaterialStatus status,
+            @RequestParam(required = false, defaultValue = "false") boolean archived,
             @ParameterObject @PageableDefault(size = 20, sort = "createdAt", direction = org.springframework.data.domain.Sort.Direction.DESC) Pageable pageable,
             @AuthenticationPrincipal Jwt jwt) {
         UUID userId = UUID.fromString(jwt.getSubject());
         Page<MaterialListResponse> response = materialService.getMyMaterials(
-                userId, query, type, status, pageable);
+                userId, query, type, status, archived, pageable);
         return ApiResponse.of(response);
     }
 
@@ -120,5 +121,18 @@ public class MaterialController {
             @AuthenticationPrincipal Jwt jwt) {
         UUID userId = UUID.fromString(jwt.getSubject());
         materialService.archiveMaterial(userId, id);
+    }
+
+    @PostMapping("/{id}/restore")
+    @PreAuthorize("hasRole('USER')")
+    @Operation(
+            summary = "Restore an archived learning material",
+            description = "Restores an archived material back to active state. If the material was in PROCESSING status, extraction is re-triggered.")
+    public ApiResponse<MaterialResponse> restoreMaterial(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal Jwt jwt) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        MaterialResponse response = materialService.restoreMaterial(userId, id);
+        return ApiResponse.of(response);
     }
 }

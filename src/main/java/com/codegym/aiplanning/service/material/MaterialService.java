@@ -20,6 +20,8 @@ public interface MaterialService {
             String query,
             MaterialType type,
             MaterialStatus status,
+            boolean archived,
             Pageable pageable);
     void archiveMaterial(UUID userId, UUID materialId);
+    MaterialResponse restoreMaterial(UUID userId, UUID materialId);
 }
