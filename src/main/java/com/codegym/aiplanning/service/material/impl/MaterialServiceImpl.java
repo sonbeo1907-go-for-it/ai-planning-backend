@@ -249,11 +249,17 @@ public class MaterialServiceImpl implements MaterialService {
             }
         }
 
-        // 4. Handle PROCESSING state: reset PROCESSING -> PENDING -> extractTextAsync()
+        // 4. Resume extraction for files that were archived before or during processing.
+        // A PENDING file may have had its original async claim rejected because archivedAt
+        // was already set, so it must be scheduled again after restore as well.
         boolean needExtraction = false;
-        if (material.getStatus() == MaterialStatus.PROCESSING) {
-            material.requeuePendingExtraction();
-            needExtraction = true;
+        if (material.getType() == MaterialType.FILE) {
+            if (material.getStatus() == MaterialStatus.PROCESSING) {
+                material.requeuePendingExtraction();
+                needExtraction = true;
+            } else if (material.getStatus() == MaterialStatus.PENDING) {
+                needExtraction = true;
+            }
         }
 
         // 5. Restore state (Entity only changes state: archivedAt = null)

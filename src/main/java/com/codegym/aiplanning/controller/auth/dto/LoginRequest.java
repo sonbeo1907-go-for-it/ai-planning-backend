@@ -18,4 +18,10 @@ public record LoginRequest(
                         accessMode = Schema.AccessMode.WRITE_ONLY)
                 @NotBlank
                 @Size(max = 200)
-                String password) {}
+                String password) {
+
+    @Override
+    public String toString() {
+        return "LoginRequest[email=" + email + ", password='[PROTECTED]']";
+    }
+}

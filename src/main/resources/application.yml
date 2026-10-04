@@ -108,3 +108,8 @@ app:
 logging:
   pattern:
     level: "%5p [requestId:%X{requestId:-}]"
+  level:
+    # Spring's DEBUG rendering of MethodArgumentNotValidException includes rejected
+    # field values. Keep that resolver at INFO so passwords and other submitted
+    # secrets cannot be echoed when application-wide DEBUG logging is enabled.
+    org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver: INFO

@@ -12,6 +12,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.codegym.aiplanning.common.constant.ApiConstant;
 import com.codegym.aiplanning.common.validation.password.PasswordPolicy;
+import com.codegym.aiplanning.controller.auth.dto.LoginRequest;
 import com.codegym.aiplanning.controller.auth.dto.PasswordResetConfirmRequest;
 import com.codegym.aiplanning.controller.auth.dto.RegisterRequest;
 import com.codegym.aiplanning.controller.profile.dto.ChangePasswordRequest;
@@ -31,11 +32,13 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
 class UnifiedPasswordPolicyIntegrationTest {
 
     @Autowired
@@ -237,6 +240,10 @@ class UnifiedPasswordPolicyIntegrationTest {
             RegisterRequest reg = new RegisterRequest("test@example.com", secret, "Name");
             assertThat(reg.toString()).doesNotContain(secret);
             assertThat(reg.toString()).contains("[PROTECTED]");
+
+            LoginRequest login = new LoginRequest("test@example.com", secret);
+            assertThat(login.toString()).doesNotContain(secret);
+            assertThat(login.toString()).contains("[PROTECTED]");
 
             PasswordResetConfirmRequest reset = new PasswordResetConfirmRequest("token", secret);
             assertThat(reset.toString()).doesNotContain(secret);

@@ -133,9 +133,19 @@ public class S3StorageServiceImpl implements StorageService {
             return true;
         } catch (NoSuchKeyException e) {
             return false;
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                return false;
+            }
+            log.error("S3 error checking object existence: {}", storageKey, e);
+            throw new BusinessException(
+                    ErrorCode.FILE_STORAGE_ERROR,
+                    "Could not verify the stored file at this time.");
         } catch (Exception e) {
             log.error("Error checking S3 object existence: {}", storageKey, e);
-            return false;
+            throw new BusinessException(
+                    ErrorCode.FILE_STORAGE_ERROR,
+                    "Could not verify the stored file at this time.");
         }
     }
 }
