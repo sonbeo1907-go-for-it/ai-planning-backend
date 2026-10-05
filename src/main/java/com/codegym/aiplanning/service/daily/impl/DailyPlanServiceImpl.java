@@ -853,6 +853,7 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                     ErrorCode.CONFLICT,
                     "This task already has a final outcome. Use a progress correction instead.");
         }
+        requireRequiredStepsCompleted(itemId, request.status());
 
         RoadmapItem learningUnit = resolveLearningUnit(item, userId);
 
@@ -893,6 +894,57 @@ public class DailyPlanServiceImpl implements DailyPlanService {
                 "DailyPlanItem",
                 savedItem.getId().toString());
 
+        return enrichTaskResponse(savedItem, userId);
+    }
+
+    @Override
+    @Transactional
+    public DailyPlanItemResponse startTask(
+            UUID planId,
+            UUID itemId,
+            Jwt actorJwt) {
+        UUID userId = extractUserId(actorJwt);
+        String username = extractUsername(actorJwt);
+
+        DailyPlan plan = requirePlanForUserForUpdate(planId, userId);
+        DailyPlanVersion version = requireActiveVersion(plan);
+        if (plan.getStatus() != DailyPlanStatus.READY
+                && plan.getStatus() != DailyPlanStatus.IN_PROGRESS) {
+            throw new BusinessException(
+                    ErrorCode.DAILY_PLAN_LOCKED,
+                    "Tasks can be started only in a READY or IN_PROGRESS Daily Plan.");
+        }
+
+        DailyPlanItem item = dailyPlanItemRepository
+                .findById(itemId)
+                .filter(candidate -> candidate.getDailyPlanVersionId().equals(version.getId()))
+                .filter(candidate -> !candidate.isRemoved())
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.DAILY_PLAN_ITEM_NOT_FOUND,
+                        "Task item was not found in the active Daily Plan version."));
+
+        if (item.getStatus() == DailyTaskStatus.IN_PROGRESS) {
+            return enrichTaskResponse(item, userId);
+        }
+        if (item.getStatus() != DailyTaskStatus.NOT_STARTED) {
+            throw new BusinessException(
+                    ErrorCode.CONFLICT,
+                    "A task with a final outcome cannot be started again. Use a progress correction instead.");
+        }
+
+        if (plan.getStatus() == DailyPlanStatus.READY) {
+            plan.startExecution(Instant.now());
+            dailyPlanRepository.save(plan);
+        }
+        item.updateStatus(DailyTaskStatus.IN_PROGRESS);
+        DailyPlanItem savedItem = dailyPlanItemRepository.save(item);
+
+        auditLogService.logAction(
+                userId,
+                username,
+                AuditEventAction.DAILY_PLAN_TASK_STARTED,
+                "DailyPlanItem",
+                savedItem.getId().toString());
         return enrichTaskResponse(savedItem, userId);
     }
 
@@ -994,6 +1046,9 @@ public class DailyPlanServiceImpl implements DailyPlanService {
             throw new BusinessException(
                     ErrorCode.CONFLICT,
                     "This progress entry has already been corrected.");
+        }
+        if (original.getStatus() != ProgressEntryStatus.COMPLETED) {
+            requireRequiredStepsCompleted(itemId, request.status());
         }
 
         RoadmapItem learningUnit = resolveCorrectionLearningUnit(
@@ -1467,6 +1522,25 @@ public class DailyPlanServiceImpl implements DailyPlanService {
         return status == DailyTaskStatus.COMPLETED
                 || status == DailyTaskStatus.PARTIALLY_COMPLETED
                 || status == DailyTaskStatus.SKIPPED;
+    }
+
+    private void requireRequiredStepsCompleted(
+            UUID itemId,
+            ProgressEntryStatus requestedStatus) {
+        if (requestedStatus != ProgressEntryStatus.COMPLETED) {
+            return;
+        }
+
+        DailyPlanTaskStepsResponse taskSteps = taskStepReadModelBuilder.buildForItem(itemId);
+        int requiredCount = taskSteps.progress().requiredCount();
+        int completedRequiredCount = taskSteps.progress().completedRequiredCount();
+        if (requiredCount > completedRequiredCount) {
+            int remainingCount = requiredCount - completedRequiredCount;
+            throw new BusinessException(
+                    ErrorCode.TASK_REQUIRED_STEPS_INCOMPLETE,
+                    "Complete all required Task Steps before completing this task. "
+                            + remainingCount + " required step(s) remain.");
+        }
     }
 
     private DailyPlan requirePlanForUser(UUID planId, UUID userId) {

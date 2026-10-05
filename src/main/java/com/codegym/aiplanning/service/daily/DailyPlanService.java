@@ -83,6 +83,9 @@ public interface DailyPlanService {
 
     DailyPlanResponse activateVersion(UUID planId, UUID versionId, Jwt actorJwt);
 
+    DailyPlanItemResponse startTask(
+            UUID planId, UUID itemId, Jwt actorJwt);
+
     DailyPlanItemResponse recordProgress(
             UUID planId,
             UUID itemId,

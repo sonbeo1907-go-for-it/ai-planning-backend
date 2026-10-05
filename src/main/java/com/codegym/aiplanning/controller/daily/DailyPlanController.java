@@ -251,6 +251,17 @@ public class DailyPlanController {
         return ApiResponse.of(dailyPlanService.activateVersion(planId, versionId, actorJwt));
     }
 
+    @PostMapping(ApiConstant.DAILY_PLAN_ITEM_START)
+    @Operation(
+            summary = "Start one task in the ACTIVE Daily Plan version",
+            description = "Moves a NOT_STARTED task to IN_PROGRESS without creating a ProgressEntry. Repeating the request for an IN_PROGRESS task is safe.")
+    public ApiResponse<DailyPlanItemResponse> startTask(
+            @PathVariable UUID planId,
+            @PathVariable UUID itemId,
+            @AuthenticationPrincipal Jwt actorJwt) {
+        return ApiResponse.of(dailyPlanService.startTask(planId, itemId, actorJwt));
+    }
+
     @PostMapping(ApiConstant.DAILY_PLAN_ITEM_PROGRESS)
     @Operation(
             summary = "Record detailed task progress (US-PLN-01-MANUAL)",

@@ -133,18 +133,22 @@ class DailyPlanControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk());
 
-        String pomodoroPayload = """
-                {
-                    "completedMinutes": 25
-                }
-                """;
-
-        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + itemId + "/pomodoro")
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + itemId + "/start")
                         .header("Authorization", "Bearer " + token)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(pomodoroPayload))
+                        .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"));
+
+        // Starting is idempotent and does not fabricate a learning outcome.
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + itemId + "/start")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"));
+        assertThat(progressEntryRepository
+                        .findByUserIdAndDailyPlanItemIdOrderByRecordedAtDesc(
+                                user.getId(), UUID.fromString(itemId)))
+                .isEmpty();
 
         String progressPayload = """
                 {
@@ -163,6 +167,11 @@ class DailyPlanControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("COMPLETED"))
                 .andExpect(jsonPath("$.data.completedAt").isNotEmpty());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + itemId + "/start")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CONFLICT"));
 
         mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId)
                         .header("Authorization", "Bearer " + token))
@@ -677,6 +686,11 @@ class DailyPlanControllerIntegrationTest {
 
         mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
                         + "/items/" + ownerTaskId + "/progress")
+                        .header("Authorization", "Bearer " + attackerToken))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
+                        + "/items/" + ownerTaskId + "/start")
                         .header("Authorization", "Bearer " + attackerToken))
                 .andExpect(status().isNotFound());
 
