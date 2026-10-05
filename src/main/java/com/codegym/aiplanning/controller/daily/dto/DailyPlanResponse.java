@@ -39,7 +39,9 @@ public record DailyPlanResponse(
         int completed = items != null ? (int) items.stream().filter(i -> i.status() == DailyTaskStatus.COMPLETED).count() : 0;
         int earnedPercentage = items != null
                 ? items.stream()
-                        .mapToInt(item -> item.status().completionPercentage())
+                        .mapToInt(item -> item.completionPercentage() != null
+                                ? item.completionPercentage()
+                                : item.status().completionPercentage())
                         .sum()
                 : 0;
         double percentage = total > 0

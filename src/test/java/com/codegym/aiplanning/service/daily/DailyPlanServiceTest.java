@@ -19,6 +19,8 @@ import com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest;
 import com.codegym.aiplanning.controller.daily.dto.UpdateDailyPlanBudgetRequest;
 import com.codegym.aiplanning.entity.daily.DailyPlan;
 import com.codegym.aiplanning.entity.daily.DailyPlanItem;
+import com.codegym.aiplanning.entity.daily.DailyPlanTaskStep;
+import com.codegym.aiplanning.entity.daily.DailyPlanTaskStepState;
 import com.codegym.aiplanning.entity.daily.DailyPlanVersion;
 import com.codegym.aiplanning.entity.daily.DailyPlanVersionOrigin;
 import com.codegym.aiplanning.entity.daily.DailyTaskCategory;
@@ -394,6 +396,9 @@ class DailyPlanServiceTest {
         when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
                 .thenReturn(Optional.of(version));
         when(dailyPlanItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(taskStepRepository.findByDailyPlanItemIdInOrderByItemAndOrder(
+                        List.of(itemId)))
+                .thenReturn(List.of());
         when(dailyPlanItemRepository.save(any(DailyPlanItem.class))).thenAnswer(inv -> inv.getArgument(0));
         when(progressEntryRepository.save(any(ProgressEntry.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -402,6 +407,115 @@ class DailyPlanServiceTest {
 
         assertThat(response.status()).isEqualTo(DailyTaskStatus.COMPLETED);
         assertThat(response.completedAt()).isNotNull();
+    }
+
+    @Test
+    void recordProgress_rejectsCompletionWhenRequiredStepsRemain() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID stepId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(
+                planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 30);
+        ReflectionTestUtils.setField(version, "id", versionId);
+        version.activate(Instant.now());
+        plan.activateVersion(versionId);
+
+        DailyPlanItem item = DailyPlanItem.create(
+                versionId, DailyTaskCategory.CUSTOM, "Task with steps", null, 30, 0);
+        ReflectionTestUtils.setField(item, "id", itemId);
+        DailyPlanTaskStep requiredStep = DailyPlanTaskStep.create(
+                itemId, "Required step", null, 0, 10, true);
+        ReflectionTestUtils.setField(requiredStep, "id", stepId);
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
+                .thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(taskStepRepository.findByDailyPlanItemIdInOrderByItemAndOrder(
+                        List.of(itemId)))
+                .thenReturn(List.of(requiredStep));
+        when(taskStepStateRepository.findByTaskStepIdIn(List.of(stepId)))
+                .thenReturn(List.of());
+
+        RecordProgressRequest request = new RecordProgressRequest(
+                ProgressEntryStatus.COMPLETED,
+                30,
+                "Done",
+                3,
+                4,
+                "Notes");
+
+        assertThatThrownBy(() -> dailyPlanService.recordProgress(
+                        planId, itemId, request, userJwt))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue(
+                        "errorCode",
+                        ErrorCode.TASK_REQUIRED_STEPS_INCOMPLETE);
+
+        verify(progressEntryRepository, never()).save(any(ProgressEntry.class));
+        verify(dailyPlanItemRepository, never()).save(any(DailyPlanItem.class));
+        verify(roadmapProgressService, never())
+                .recordOutcome(any(), any(), any(), any());
+    }
+
+    @Test
+    void recordProgress_allowsCompletionWhenAllRequiredStepsAreCompleted() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID stepId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(
+                planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 30);
+        ReflectionTestUtils.setField(version, "id", versionId);
+        version.activate(Instant.now());
+        plan.activateVersion(versionId);
+
+        DailyPlanItem item = DailyPlanItem.create(
+                versionId, DailyTaskCategory.CUSTOM, "Task with steps", null, 30, 0);
+        ReflectionTestUtils.setField(item, "id", itemId);
+        DailyPlanTaskStep requiredStep = DailyPlanTaskStep.create(
+                itemId, "Required step", null, 0, 10, true);
+        ReflectionTestUtils.setField(requiredStep, "id", stepId);
+        DailyPlanTaskStepState completedState = DailyPlanTaskStepState.create(stepId);
+        completedState.setCompleted(true, Instant.now());
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
+                .thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(taskStepRepository.findByDailyPlanItemIdInOrderByItemAndOrder(
+                        List.of(itemId)))
+                .thenReturn(List.of(requiredStep));
+        when(taskStepStateRepository.findByTaskStepIdIn(List.of(stepId)))
+                .thenReturn(List.of(completedState));
+        when(dailyPlanItemRepository.save(any(DailyPlanItem.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(progressEntryRepository.save(any(ProgressEntry.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        DailyPlanItemResponse response = dailyPlanService.recordProgress(
+                planId,
+                itemId,
+                new RecordProgressRequest(
+                        ProgressEntryStatus.COMPLETED,
+                        30,
+                        "Done",
+                        3,
+                        4,
+                        "Notes"),
+                userJwt);
+
+        assertThat(response.status()).isEqualTo(DailyTaskStatus.COMPLETED);
+        verify(progressEntryRepository).save(any(ProgressEntry.class));
     }
 
     @ParameterizedTest
@@ -425,7 +539,6 @@ class DailyPlanServiceTest {
         DailyPlanItem item = DailyPlanItem.create(
                 versionId, DailyTaskCategory.CUSTOM, "Task outcome", null, 30, 0);
         ReflectionTestUtils.setField(item, "id", itemId);
-        item.updateStatus(DailyTaskStatus.COMPLETED);
 
         when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId))
                 .thenReturn(Optional.of(plan));
@@ -438,7 +551,14 @@ class DailyPlanServiceTest {
         DailyPlanItemResponse response = dailyPlanService.recordProgress(
                 planId,
                 itemId,
-                new RecordProgressRequest(progressStatus, 10, null, null, null, null),
+                new RecordProgressRequest(
+                        progressStatus,
+                        progressStatus == ProgressEntryStatus.PARTIALLY_COMPLETED ? 45 : null,
+                        10,
+                        null,
+                        null,
+                        null,
+                        null),
                 userJwt);
 
         DailyTaskStatus expectedTaskStatus = DailyTaskStatus.valueOf(progressStatus.name());
@@ -450,7 +570,7 @@ class DailyPlanServiceTest {
         verify(progressEntryRepository).save(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getStatus()).isEqualTo(progressStatus);
         assertThat(entryCaptor.getValue().getCompletionPercentage())
-                .isEqualTo(expectedTaskStatus.completionPercentage());
+                .isEqualTo(progressStatus == ProgressEntryStatus.PARTIALLY_COMPLETED ? 45 : 0);
     }
 
     @Test
@@ -482,6 +602,14 @@ class DailyPlanServiceTest {
 
         assertThat(response).isNotNull();
         assertThat(response.status()).isEqualTo(DailyTaskStatus.IN_PROGRESS);
+
+        ArgumentCaptor<ProgressEntry> entryCaptor =
+                ArgumentCaptor.forClass(ProgressEntry.class);
+        verify(progressEntryRepository).save(entryCaptor.capture());
+        assertThat(entryCaptor.getValue().getActualMinutes()).isEqualTo(25);
+        assertThat(entryCaptor.getValue().getCompletionPercentage()).isZero();
+        verify(roadmapProgressService, never())
+                .recordOutcome(any(), any(), any(), any());
     }
 
     @Test
