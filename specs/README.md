@@ -29,6 +29,7 @@ weak-topic-mastery.md
 ai-task-guidance.md
 ai-review.md
 ai-provider.md
+user-payment-ai-credits.md
 ```
 
 Instructor, StudyClass, Enrollment, WeeklyPlan, and institution-owned
