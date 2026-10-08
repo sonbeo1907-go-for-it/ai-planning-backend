@@ -91,6 +91,8 @@ app:
       password: disabled-bootstrap-password
   ai:
     allow-insecure-http-base-urls: ${AI_ALLOW_INSECURE_HTTP_PROVIDER_BASE_URLS:false}
+  billing:
+    welcome-credits: ${BILLING_WELCOME_CREDITS:1000}
   storage:
     provider: ${STORAGE_PROVIDER:local}
     local:

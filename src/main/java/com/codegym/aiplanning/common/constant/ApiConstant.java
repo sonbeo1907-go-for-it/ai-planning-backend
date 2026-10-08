@@ -159,6 +159,8 @@ public final class ApiConstant {
     public static final String REPORTS_KNOWLEDGE_MAP = REPORTS + KNOWLEDGE_MAP;
     public static final String WEAK_TOPICS_TIMELINE = "/weak-topics-timeline";
     public static final String REPORTS_WEAK_TOPICS_TIMELINE = REPORTS + WEAK_TOPICS_TIMELINE;
+    public static final String BILLING = API_V1 + "/billing";
+    public static final String BILLING_WALLET = "/wallet";
 
     private ApiConstant() {}
 }

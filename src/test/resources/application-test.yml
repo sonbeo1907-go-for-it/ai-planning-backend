@@ -37,3 +37,5 @@ app:
       enabled: true
       email: admin@aiplanning.local
       password: Admin@123
+  billing:
+    welcome-credits: 1000
