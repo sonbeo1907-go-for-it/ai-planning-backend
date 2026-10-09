@@ -41,6 +41,7 @@ app:
       email: admin@aiplanning.local
       password: Admin@123
   billing:
+    welcome-credits: 1000
     top-up:
       min-vnd: 20000
       max-vnd: 2000000

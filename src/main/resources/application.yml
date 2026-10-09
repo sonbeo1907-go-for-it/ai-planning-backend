@@ -93,6 +93,7 @@ app:
   ai:
     allow-insecure-http-base-urls: ${AI_ALLOW_INSECURE_HTTP_PROVIDER_BASE_URLS:false}
   billing:
+    welcome-credits: ${BILLING_WELCOME_CREDITS:1000}
     top-up:
       min-vnd: ${BILLING_TOP_UP_MIN_VND:20000}
       max-vnd: ${BILLING_TOP_UP_MAX_VND:2000000}

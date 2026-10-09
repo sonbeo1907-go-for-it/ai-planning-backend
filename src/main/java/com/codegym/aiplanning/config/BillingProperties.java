@@ -1,14 +1,28 @@
 package com.codegym.aiplanning.config;
 
+import jakarta.validation.constraints.PositiveOrZero;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
+@Validated
 @ConfigurationProperties(prefix = "app.billing")
 public class BillingProperties {
 
+    @PositiveOrZero
     private long welcomeCredits = 1000L;
     private TopUpProperties topUp = new TopUpProperties();
 
+    public BillingProperties() {}
+
+    public BillingProperties(long welcomeCredits) {
+        this.welcomeCredits = welcomeCredits;
+    }
+
     public long getWelcomeCredits() {
+        return welcomeCredits;
+    }
+
+    public long welcomeCredits() {
         return welcomeCredits;
     }
 
