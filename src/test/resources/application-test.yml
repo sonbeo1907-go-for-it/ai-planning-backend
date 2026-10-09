@@ -46,3 +46,8 @@ app:
       min-vnd: 20000
       max-vnd: 2000000
       expiration-minutes: 15
+    vnpay:
+      payment-url: https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+      tmn-code: VNPAYTMN
+      hash-secret: TESTSECRETKEY123
+      return-url: http://localhost:3000/billing/checkout/result

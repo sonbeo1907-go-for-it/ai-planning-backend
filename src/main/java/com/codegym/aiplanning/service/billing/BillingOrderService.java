@@ -169,6 +169,24 @@ public class BillingOrderService {
         return TopUpOrderResponse.from(order, checkoutUrl);
     }
 
+    @Transactional(readOnly = true)
+    public TopUpOrderResponse getTopUpOrderByCode(UUID userId, String orderCode) {
+        TopUpOrder order = topUpOrderRepository.findByOrderCodeAndUserId(orderCode, userId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.TOP_UP_ORDER_NOT_FOUND, "Top-up order not found with code: " + orderCode));
+
+        String checkoutUrl = null;
+        if (order.getStatus() == TopUpOrderStatus.PENDING && order.getExpiresAt().isAfter(Instant.now())) {
+            try {
+                checkoutUrl = paymentGateway.createCheckout(order).checkoutUrl();
+            } catch (Exception ex) {
+                log.warn("Could not generate checkout url for pending order: {}", order.getOrderCode(), ex);
+            }
+        }
+
+        return TopUpOrderResponse.from(order, checkoutUrl);
+    }
+
     private TopUpOrderResponse handleExistingOrder(TopUpOrder existingOrder, UUID requestedPackageId) {
         // If package matches -> return existing order
         if (existingOrder.getPackageId() != null && existingOrder.getPackageId().equals(requestedPackageId)) {

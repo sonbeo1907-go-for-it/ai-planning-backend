@@ -68,6 +68,7 @@ public class SecurityConfig {
                                 ApiConstant.AUTH_LOGOUT,
                                 ApiConstant.AUTH_PASSWORD_RESET_REQUEST,
                                 ApiConstant.AUTH_PASSWORD_RESET,
+                                ApiConstant.BILLING + ApiConstant.BILLING_VNPAY_IPN,
                                 "/actuator/health",
                                 "/v3/api-docs/**",
                                 "/swagger-ui.html",

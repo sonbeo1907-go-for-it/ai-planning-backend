@@ -11,6 +11,7 @@ public class BillingProperties {
     @PositiveOrZero
     private long welcomeCredits = 1000L;
     private TopUpProperties topUp = new TopUpProperties();
+    private VnpayProperties vnpay = new VnpayProperties();
 
     public BillingProperties() {}
 
@@ -36,6 +37,14 @@ public class BillingProperties {
 
     public void setTopUp(TopUpProperties topUp) {
         this.topUp = topUp;
+    }
+
+    public VnpayProperties getVnpay() {
+        return vnpay;
+    }
+
+    public void setVnpay(VnpayProperties vnpay) {
+        this.vnpay = vnpay;
     }
 
     public static class TopUpProperties {
@@ -65,6 +74,45 @@ public class BillingProperties {
 
         public void setExpirationMinutes(long expirationMinutes) {
             this.expirationMinutes = expirationMinutes;
+        }
+    }
+
+    public static class VnpayProperties {
+        private String paymentUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
+        private String tmnCode = "VNPAYTMN";
+        private String hashSecret = "SECRETKEY123";
+        private String returnUrl = "http://localhost:3000/billing/checkout/result";
+
+        public String getPaymentUrl() {
+            return paymentUrl;
+        }
+
+        public void setPaymentUrl(String paymentUrl) {
+            this.paymentUrl = paymentUrl;
+        }
+
+        public String getTmnCode() {
+            return tmnCode;
+        }
+
+        public void setTmnCode(String tmnCode) {
+            this.tmnCode = tmnCode;
+        }
+
+        public String getHashSecret() {
+            return hashSecret;
+        }
+
+        public void setHashSecret(String hashSecret) {
+            this.hashSecret = hashSecret;
+        }
+
+        public String getReturnUrl() {
+            return returnUrl;
+        }
+
+        public void setReturnUrl(String returnUrl) {
+            this.returnUrl = returnUrl;
         }
     }
 }

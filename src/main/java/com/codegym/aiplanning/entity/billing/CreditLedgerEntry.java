@@ -61,6 +61,9 @@ public class CreditLedgerEntry {
     @Column(length = 255)
     private String description;
 
+    @Column(name = "top_up_order_id", unique = true)
+    private UUID topUpOrderId;
+
     @Column(name = "recorded_at", nullable = false, updatable = false)
     private Instant recordedAt;
 
@@ -88,6 +91,9 @@ public class CreditLedgerEntry {
         entry.reservedBalanceAfter = reservedBalanceAfter;
         entry.referenceType = referenceType;
         entry.referenceId = referenceId;
+        if (entryType == LedgerEntryType.TOP_UP && referenceType == LedgerReferenceType.ORDER) {
+            entry.topUpOrderId = referenceId;
+        }
         entry.idempotencyKey = idempotencyKey;
         entry.description = description;
         entry.recordedAt = Instant.now();
@@ -140,6 +146,10 @@ public class CreditLedgerEntry {
 
     public String getDescription() {
         return description;
+    }
+
+    public UUID getTopUpOrderId() {
+        return topUpOrderId;
     }
 
     public Instant getRecordedAt() {

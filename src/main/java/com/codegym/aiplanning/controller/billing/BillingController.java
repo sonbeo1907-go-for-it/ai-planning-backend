@@ -7,14 +7,17 @@ import com.codegym.aiplanning.controller.billing.dto.CreateTopUpOrderRequest;
 import com.codegym.aiplanning.controller.billing.dto.CreditPackageResponse;
 import com.codegym.aiplanning.controller.billing.dto.CreditWalletResponse;
 import com.codegym.aiplanning.controller.billing.dto.TopUpOrderResponse;
+import com.codegym.aiplanning.controller.billing.dto.VnpayIpnResponse;
 import com.codegym.aiplanning.service.billing.BillingOrderService;
 import com.codegym.aiplanning.service.billing.CreditWalletService;
+import com.codegym.aiplanning.service.billing.VnpayIpnService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -25,6 +28,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -34,12 +38,15 @@ public class BillingController {
 
     private final CreditWalletService creditWalletService;
     private final BillingOrderService billingOrderService;
+    private final VnpayIpnService vnpayIpnService;
 
     public BillingController(
             CreditWalletService creditWalletService,
-            BillingOrderService billingOrderService) {
+            BillingOrderService billingOrderService,
+            VnpayIpnService vnpayIpnService) {
         this.creditWalletService = creditWalletService;
         this.billingOrderService = billingOrderService;
+        this.vnpayIpnService = vnpayIpnService;
     }
 
     @GetMapping(ApiConstant.BILLING_WALLET)
@@ -85,6 +92,26 @@ public class BillingController {
             @PathVariable UUID orderId,
             @AuthenticationPrincipal Jwt jwt) {
         return ApiResponse.of(billingOrderService.getTopUpOrder(userId(jwt), orderId));
+    }
+
+    @GetMapping("/top-up-orders/by-code/{orderCode}")
+    @Operation(summary = "Get top-up order details by orderCode")
+    public ApiResponse<TopUpOrderResponse> getTopUpOrderByCode(
+            @PathVariable String orderCode,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ApiResponse.of(billingOrderService.getTopUpOrderByCode(userId(jwt), orderCode));
+    }
+
+    @GetMapping(ApiConstant.BILLING_VNPAY_IPN)
+    @Operation(summary = "VNPAY Instant Payment Notification webhook (GET)")
+    public VnpayIpnResponse handleVnpayIpnGet(@RequestParam Map<String, String> params) {
+        return vnpayIpnService.processIpn(params);
+    }
+
+    @PostMapping(ApiConstant.BILLING_VNPAY_IPN)
+    @Operation(summary = "VNPAY Instant Payment Notification webhook (POST)")
+    public VnpayIpnResponse handleVnpayIpnPost(@RequestParam Map<String, String> params) {
+        return vnpayIpnService.processIpn(params);
     }
 
     private UUID userId(Jwt jwt) {

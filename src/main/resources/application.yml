@@ -98,6 +98,11 @@ app:
       min-vnd: ${BILLING_TOP_UP_MIN_VND:20000}
       max-vnd: ${BILLING_TOP_UP_MAX_VND:2000000}
       expiration-minutes: ${BILLING_TOP_UP_EXPIRATION_MINUTES:15}
+    vnpay:
+      payment-url: ${VNPAY_PAYMENT_URL:https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
+      tmn-code: ${VNPAY_TMN_CODE:VNPAYTMN}
+      hash-secret: ${VNPAY_HASH_SECRET:SECRETKEY123}
+      return-url: ${VNPAY_RETURN_URL:http://localhost:3000/billing/checkout/result}
   storage:
     provider: ${STORAGE_PROVIDER:local}
     local:
