@@ -31,6 +31,16 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.codegym.aiplanning.controller.billing.dto.AiCreditRateResponse;
+import com.codegym.aiplanning.controller.billing.dto.CreditTransactionResponse;
+import com.codegym.aiplanning.entity.billing.LedgerEntryType;
+import com.codegym.aiplanning.service.billing.CreditReservationService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
+import java.time.Instant;
+
 @RestController
 @RequestMapping(ApiConstant.BILLING)
 @Tag(name = "Billing", description = "Billing and Credit Package management APIs")
@@ -39,14 +49,17 @@ public class BillingController {
     private final CreditWalletService creditWalletService;
     private final BillingOrderService billingOrderService;
     private final VnpayIpnService vnpayIpnService;
+    private final CreditReservationService creditReservationService;
 
     public BillingController(
             CreditWalletService creditWalletService,
             BillingOrderService billingOrderService,
-            VnpayIpnService vnpayIpnService) {
+            VnpayIpnService vnpayIpnService,
+            CreditReservationService creditReservationService) {
         this.creditWalletService = creditWalletService;
         this.billingOrderService = billingOrderService;
         this.vnpayIpnService = vnpayIpnService;
+        this.creditReservationService = creditReservationService;
     }
 
     @GetMapping(ApiConstant.BILLING_WALLET)
@@ -100,6 +113,24 @@ public class BillingController {
             @PathVariable String orderCode,
             @AuthenticationPrincipal Jwt jwt) {
         return ApiResponse.of(billingOrderService.getTopUpOrderByCode(userId(jwt), orderCode));
+    }
+
+    @GetMapping(ApiConstant.BILLING_AI_PRICES)
+    @Operation(summary = "Get list of active AI Credit prices per purpose/model")
+    public ApiResponse<List<AiCreditRateResponse>> getAiPrices() {
+        return ApiResponse.of(creditReservationService.getActiveRates());
+    }
+
+    @GetMapping(ApiConstant.BILLING_TRANSACTIONS)
+    @PreAuthorize("hasRole('USER')")
+    @Operation(summary = "Get paginated credit transaction history of the authenticated user")
+    public ApiResponse<Page<CreditTransactionResponse>> getTransactions(
+            @RequestParam(required = false) LedgerEntryType entryType,
+            @RequestParam(required = false) Instant fromDate,
+            @RequestParam(required = false) Instant toDate,
+            @PageableDefault(sort = "recordedAt", direction = Sort.Direction.DESC) Pageable pageable,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ApiResponse.of(creditWalletService.getTransactions(userId(jwt), entryType, fromDate, toDate, pageable));
     }
 
     @GetMapping(ApiConstant.BILLING_VNPAY_IPN)

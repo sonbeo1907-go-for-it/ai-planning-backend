@@ -83,6 +83,9 @@ class AiExecutionServiceImplTest {
     @Mock
     private TaskGuidanceRepository taskGuidanceRepository;
 
+    @Mock
+    private com.codegym.aiplanning.service.billing.CreditReservationService creditReservationService;
+
     private AiExecutionServiceImpl service;
     private UUID ownerId;
     private UUID roadmapId;
@@ -102,7 +105,8 @@ class AiExecutionServiceImplTest {
                 evaluationPersistenceService,
                 weakTopicRepository,
                 taskGuidanceContextBuilder,
-                taskGuidanceRepository);
+                taskGuidanceRepository,
+                creditReservationService);
         ownerId = UUID.randomUUID();
         roadmapId = UUID.randomUUID();
         owner = org.mockito.Mockito.mock(UserAccount.class);

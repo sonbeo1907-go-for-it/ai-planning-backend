@@ -12,8 +12,15 @@ import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.codegym.aiplanning.controller.billing.dto.CreditTransactionResponse;
+import com.codegym.aiplanning.entity.billing.LedgerEntryType;
+import com.codegym.aiplanning.repository.billing.CreditLedgerEntryRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.time.Instant;
 
 @Service
 public class CreditWalletService {
@@ -23,14 +30,29 @@ public class CreditWalletService {
     private final CreditWalletRepository creditWalletRepository;
     private final UserAccountRepository userAccountRepository;
     private final CreditWalletAtomicInitializer atomicInitializer;
+    private final CreditLedgerEntryRepository creditLedgerEntryRepository;
 
     public CreditWalletService(
             CreditWalletRepository creditWalletRepository,
             UserAccountRepository userAccountRepository,
-            CreditWalletAtomicInitializer atomicInitializer) {
+            CreditWalletAtomicInitializer atomicInitializer,
+            CreditLedgerEntryRepository creditLedgerEntryRepository) {
         this.creditWalletRepository = creditWalletRepository;
         this.userAccountRepository = userAccountRepository;
         this.atomicInitializer = atomicInitializer;
+        this.creditLedgerEntryRepository = creditLedgerEntryRepository;
+    }
+
+    @Transactional(readOnly = true)
+    public Page<CreditTransactionResponse> getTransactions(
+            UUID userId,
+            LedgerEntryType entryType,
+            Instant fromDate,
+            Instant toDate,
+            Pageable pageable) {
+        return creditLedgerEntryRepository
+                .findFiltered(userId, entryType, fromDate, toDate, pageable)
+                .map(CreditTransactionResponse::from);
     }
 
     public CreditWalletResponse getOrCreateWallet(UUID userId) {

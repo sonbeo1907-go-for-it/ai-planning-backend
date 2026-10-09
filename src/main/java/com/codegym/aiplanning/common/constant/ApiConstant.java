@@ -165,6 +165,8 @@ public final class ApiConstant {
     public static final String BILLING_TOP_UP_ORDERS = BILLING + "/top-up-orders";
     public static final String BILLING_TOP_UP_ORDER_BY_ID = BILLING_TOP_UP_ORDERS + "/{orderId}";
     public static final String BILLING_VNPAY_IPN = "/vnpay-ipn";
+    public static final String BILLING_TRANSACTIONS = "/transactions";
+    public static final String BILLING_AI_PRICES = "/ai-prices";
 
     private ApiConstant() {}
 }

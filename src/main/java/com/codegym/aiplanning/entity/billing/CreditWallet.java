@@ -57,4 +57,36 @@ public class CreditWallet extends BaseEntity {
         this.availableCredits = availableCredits;
         this.reservedCredits = reservedCredits;
     }
+
+    public void reserveCredits(long amount) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("Reservation amount must be positive");
+        }
+        if (this.availableCredits < amount) {
+            throw new IllegalStateException("Insufficient available credits for reservation");
+        }
+        this.availableCredits -= amount;
+        this.reservedCredits += amount;
+    }
+
+    public void settleCredits(long amount) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("Settlement amount must be positive");
+        }
+        if (this.reservedCredits < amount) {
+            throw new IllegalStateException("Cannot settle more than reserved credits");
+        }
+        this.reservedCredits -= amount;
+    }
+
+    public void releaseCredits(long amount) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("Release amount must be positive");
+        }
+        if (this.reservedCredits < amount) {
+            throw new IllegalStateException("Cannot release more than reserved credits");
+        }
+        this.reservedCredits -= amount;
+        this.availableCredits += amount;
+    }
 }

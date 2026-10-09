@@ -19,6 +19,7 @@ import com.codegym.aiplanning.service.evaluation.WeakTopicService;
 import com.codegym.aiplanning.service.guidance.TaskGuidanceGenerationService;
 import com.codegym.aiplanning.service.ai.provider.AiUsage;
 import com.codegym.aiplanning.service.ai.provider.AiUsageHolder;
+import com.codegym.aiplanning.service.billing.CreditReservationService;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -44,6 +45,7 @@ public class AiExecutionWorker {
     private final WeakTopicService weakTopicService;
     private final TaskGuidanceGenerationService taskGuidanceGenerationService;
     private final com.codegym.aiplanning.service.ai.prompt.SystemPromptResolver systemPromptResolver;
+    private final CreditReservationService creditReservationService;
 
     public AiExecutionWorker(
             AiExecutionRepository executionRepository,
@@ -55,7 +57,8 @@ public class AiExecutionWorker {
             DailyEvaluationService dailyEvaluationService,
             WeakTopicService weakTopicService,
             TaskGuidanceGenerationService taskGuidanceGenerationService,
-            com.codegym.aiplanning.service.ai.prompt.SystemPromptResolver systemPromptResolver) {
+            com.codegym.aiplanning.service.ai.prompt.SystemPromptResolver systemPromptResolver,
+            CreditReservationService creditReservationService) {
         this.executionRepository = executionRepository;
         this.inputRepository = inputRepository;
         this.roadmapGeneratorService = roadmapGeneratorService;
@@ -66,6 +69,7 @@ public class AiExecutionWorker {
         this.weakTopicService = weakTopicService;
         this.taskGuidanceGenerationService = taskGuidanceGenerationService;
         this.systemPromptResolver = systemPromptResolver;
+        this.creditReservationService = creditReservationService;
     }
 
     @Async("aiGenerationExecutor")
@@ -241,6 +245,7 @@ public class AiExecutionWorker {
                         "TaskGuidanceRevision",
                         resultId.toString());
             }
+            creditReservationService.settleReservation(context.executionId());
         });
     }
 
@@ -274,6 +279,7 @@ public class AiExecutionWorker {
                         "AiExecution",
                         context.executionId().toString());
             }
+            creditReservationService.releaseReservation(context.executionId());
         });
     }
 
@@ -307,6 +313,7 @@ public class AiExecutionWorker {
                         "AiExecution",
                         context.executionId().toString());
             }
+            creditReservationService.releaseReservation(context.executionId());
         });
     }
 

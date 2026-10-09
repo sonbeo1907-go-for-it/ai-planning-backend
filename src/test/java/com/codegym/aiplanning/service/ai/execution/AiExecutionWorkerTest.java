@@ -72,6 +72,9 @@ class AiExecutionWorkerTest {
     @Mock
     private com.codegym.aiplanning.service.ai.prompt.SystemPromptResolver systemPromptResolver;
 
+    @Mock
+    private com.codegym.aiplanning.service.billing.CreditReservationService creditReservationService;
+
     private AiExecutionWorker worker;
     private UUID executionId;
     private UUID ownerId;
@@ -91,7 +94,8 @@ class AiExecutionWorkerTest {
                 dailyEvaluationService,
                 weakTopicService,
                 taskGuidanceGenerationService,
-                systemPromptResolver);
+                systemPromptResolver,
+                creditReservationService);
         executionId = UUID.randomUUID();
         ownerId = UUID.randomUUID();
         roadmapId = UUID.randomUUID();
