@@ -17,6 +17,7 @@ spring:
           time_zone: UTC
   flyway:
     enabled: true
+    out-of-order: true
   data:
     web:
       pageable:
@@ -91,6 +92,11 @@ app:
       password: disabled-bootstrap-password
   ai:
     allow-insecure-http-base-urls: ${AI_ALLOW_INSECURE_HTTP_PROVIDER_BASE_URLS:false}
+  billing:
+    top-up:
+      min-vnd: ${BILLING_TOP_UP_MIN_VND:20000}
+      max-vnd: ${BILLING_TOP_UP_MAX_VND:2000000}
+      expiration-minutes: ${BILLING_TOP_UP_EXPIRATION_MINUTES:15}
   storage:
     provider: ${STORAGE_PROVIDER:local}
     local:

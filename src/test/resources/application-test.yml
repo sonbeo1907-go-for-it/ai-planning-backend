@@ -7,6 +7,9 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
+  flyway:
+    enabled: true
+    out-of-order: true
   data:
     web:
       pageable:
@@ -37,3 +40,8 @@ app:
       enabled: true
       email: admin@aiplanning.local
       password: Admin@123
+  billing:
+    top-up:
+      min-vnd: 20000
+      max-vnd: 2000000
+      expiration-minutes: 15
