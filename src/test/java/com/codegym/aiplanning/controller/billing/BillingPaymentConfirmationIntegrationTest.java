@@ -60,7 +60,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @ActiveProfiles("test")
 @AutoConfigureMockMvc
 @SpringBootTest
@@ -76,11 +76,11 @@ class BillingPaymentConfirmationIntegrationTest {
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
         registry.add("app.billing.vnpay.hash-secret", () -> "TESTSECRETKEY123");
-        registry.add("app.billing.vnpay.tmn-code", () -> "VNPAYTMN");
+        registry.add("app.billing.vnpay.tmn-code", () -> "TESTTMN1");
     }
 
     private static final String HASH_SECRET = "TESTSECRETKEY123";
-    private static final String TMN_CODE = "VNPAYTMN";
+    private static final String TMN_CODE = "TESTTMN1";
 
     @Autowired
     private MockMvc mockMvc;
@@ -116,8 +116,13 @@ class BillingPaymentConfirmationIntegrationTest {
     private UserAccount testUserB;
     private CreditPackage testPackage;
 
+    @org.springframework.boot.test.mock.mockito.SpyBean
+    private com.codegym.aiplanning.service.billing.gateway.PaymentGateway gateway;
+
     @BeforeEach
     void setUp() {
+        Mockito.doThrow(new IllegalStateException("Query unavailable in this fixture"))
+                .when(gateway).queryPayment(Mockito.any());
         testUserA = createAccount("confirm-user-a-" + UUID.randomUUID() + "@example.com");
         testUserB = createAccount("confirm-user-b-" + UUID.randomUUID() + "@example.com");
 
@@ -169,6 +174,7 @@ class BillingPaymentConfirmationIntegrationTest {
             String txnStatus) {
         Map<String, String> params = new HashMap<>();
         params.put("vnp_TmnCode", TMN_CODE);
+        params.put("vnp_BankCode", "NCB");
         params.put("vnp_Amount", String.valueOf(amountVnd * 100L));
         params.put("vnp_TxnRef", orderCode);
         params.put("vnp_TransactionNo", txnNo);
@@ -201,7 +207,7 @@ class BillingPaymentConfirmationIntegrationTest {
     @DisplayName("Basic 1A: Returns 97 when signature is invalid")
     void shouldReturn97WhenChecksumInvalid() throws Exception {
         TopUpOrder order = createOrder(testUserA, TopUpOrderStatus.PENDING, 50000L, 5000L);
-        Map<String, String> params = buildParams(order.getOrderCode(), 50000L, "TX100", "00", "00");
+        Map<String, String> params = buildParams(order.getOrderCode(), 50000L, "810000", "00", "00");
         params.put("vnp_SecureHash", "INVALID_HASH");
 
         VnpayIpnResponse response = callIpn(params);
@@ -212,7 +218,7 @@ class BillingPaymentConfirmationIntegrationTest {
     @DisplayName("Basic 1B: Returns 97 when TmnCode is invalid")
     void shouldReturn97WhenTmnCodeInvalid() throws Exception {
         TopUpOrder order = createOrder(testUserA, TopUpOrderStatus.PENDING, 50000L, 5000L);
-        Map<String, String> params = buildParams(order.getOrderCode(), 50000L, "TX100", "00", "00");
+        Map<String, String> params = buildParams(order.getOrderCode(), 50000L, "810000", "00", "00");
         params.put("vnp_TmnCode", "WRONG_TMN");
         params.put("vnp_SecureHash", VnpaySecurityUtil.hashAllFields(params, HASH_SECRET));
 
@@ -223,7 +229,7 @@ class BillingPaymentConfirmationIntegrationTest {
     @Test
     @DisplayName("Basic 1C: Returns 01 when order does not exist")
     void shouldReturn01WhenOrderNotFound() throws Exception {
-        Map<String, String> params = buildParams("NON_EXISTENT_ORDER", 50000L, "TX100", "00", "00");
+        Map<String, String> params = buildParams("NON_EXISTENT_ORDER", 50000L, "810000", "00", "00");
 
         VnpayIpnResponse response = callIpn(params);
         assertThat(response.rspCode()).isEqualTo("01");
@@ -234,7 +240,7 @@ class BillingPaymentConfirmationIntegrationTest {
     void shouldReturn04WhenAmountMismatch() throws Exception {
         TopUpOrder order = createOrder(testUserA, TopUpOrderStatus.PENDING, 50000L, 5000L);
         // Order expects 50,000 VND (5,000,000 in VNPAY), but callback sends 100,000 VND
-        Map<String, String> params = buildParams(order.getOrderCode(), 100000L, "TX100", "00", "00");
+        Map<String, String> params = buildParams(order.getOrderCode(), 100000L, "810000", "00", "00");
 
         VnpayIpnResponse response = callIpn(params);
         assertThat(response.rspCode()).isEqualTo("04");
@@ -248,14 +254,14 @@ class BillingPaymentConfirmationIntegrationTest {
     @DisplayName("Basic 2: Valid failure callback updates order to FAILED/CANCELLED and returns 00")
     void shouldHandleValidFailureCallback() throws Exception {
         TopUpOrder order = createOrder(testUserA, TopUpOrderStatus.PENDING, 50000L, 5000L);
-        Map<String, String> params = buildParams(order.getOrderCode(), 50000L, "TX_FAIL_1", "24", "02");
+        Map<String, String> params = buildParams(order.getOrderCode(), 50000L, "810001", "24", "02");
 
         VnpayIpnResponse response = callIpn(params);
         assertThat(response.rspCode()).isEqualTo("00");
 
         TopUpOrder updated = topUpOrderRepository.findById(order.getId()).orElseThrow();
         assertThat(updated.getStatus()).isEqualTo(TopUpOrderStatus.CANCELLED);
-        assertThat(updated.getExternalTransactionId()).isEqualTo("TX_FAIL_1");
+        assertThat(updated.getExternalTransactionId()).isNull();
 
         // Wallet unchanged
         assertThat(creditWalletRepository.findByUserId(testUserA.getId())).isEmpty();
@@ -265,21 +271,21 @@ class BillingPaymentConfirmationIntegrationTest {
     @DisplayName("Basic 3: Valid success callback marks order PAID, credits wallet, records ledger TOP_UP")
     void shouldHandleValidSuccessCallback() throws Exception {
         TopUpOrder order = createOrder(testUserA, TopUpOrderStatus.PENDING, 50000L, 5000L);
-        Map<String, String> params = buildParams(order.getOrderCode(), 50000L, "TX_SUCCESS_1", "00", "00");
+        Map<String, String> params = buildParams(order.getOrderCode(), 50000L, "810002", "00", "00");
 
         VnpayIpnResponse response = callIpn(params);
         assertThat(response.rspCode()).isEqualTo("00");
 
         TopUpOrder updated = topUpOrderRepository.findById(order.getId()).orElseThrow();
         assertThat(updated.getStatus()).isEqualTo(TopUpOrderStatus.PAID);
-        assertThat(updated.getExternalTransactionId()).isEqualTo("TX_SUCCESS_1");
+        assertThat(updated.getExternalTransactionId()).isEqualTo("810002");
         assertThat(updated.getPaidAt()).isNotNull();
 
         CreditWallet wallet = creditWalletRepository.findByUserId(testUserA.getId()).orElseThrow();
-        assertThat(wallet.getAvailableCredits()).isEqualTo(5000L);
+        assertThat(wallet.getAvailableCredits()).isEqualTo(6000L);
 
         List<CreditLedgerEntry> ledgers = creditLedgerEntryRepository.findByUserIdOrderByRecordedAtDesc(testUserA.getId());
-        assertThat(ledgers).hasSize(1);
+        assertThat(ledgers).hasSize(2);
         assertThat(ledgers.get(0).getEntryType()).isEqualTo(LedgerEntryType.TOP_UP);
         assertThat(ledgers.get(0).getAvailableDelta()).isEqualTo(5000L);
     }
@@ -292,7 +298,7 @@ class BillingPaymentConfirmationIntegrationTest {
     @DisplayName("Scenario 1: Two concurrent success callbacks for same order - only one credits wallet, second returns 02")
     void scenario1_concurrentSuccessCallbacks() throws Exception {
         TopUpOrder order = createOrder(testUserA, TopUpOrderStatus.PENDING, 50000L, 5000L);
-        Map<String, String> params = buildParams(order.getOrderCode(), 50000L, "TX_CONCURRENT_1", "00", "00");
+        Map<String, String> params = buildParams(order.getOrderCode(), 50000L, "810003", "00", "00");
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         List<Callable<VnpayIpnResponse>> tasks = List.of(
@@ -314,10 +320,10 @@ class BillingPaymentConfirmationIntegrationTest {
         assertThat(updated.getStatus()).isEqualTo(TopUpOrderStatus.PAID);
 
         CreditWallet wallet = creditWalletRepository.findByUserId(testUserA.getId()).orElseThrow();
-        assertThat(wallet.getAvailableCredits()).isEqualTo(5000L); // Exactly 5000, not 10000!
+        assertThat(wallet.getAvailableCredits()).isEqualTo(6000L); // One top-up plus one welcome bonus.
 
         List<CreditLedgerEntry> ledgers = creditLedgerEntryRepository.findByUserIdOrderByRecordedAtDesc(testUserA.getId());
-        assertThat(ledgers).hasSize(1); // Exactly 1 TOP_UP ledger entry!
+        assertThat(ledgers).filteredOn(entry -> entry.getEntryType() == LedgerEntryType.TOP_UP).hasSize(1);
     }
 
     @Test
@@ -326,7 +332,7 @@ class BillingPaymentConfirmationIntegrationTest {
         TopUpOrder orderA = createOrder(testUserA, TopUpOrderStatus.PENDING, 50000L, 5000L);
         TopUpOrder orderB = createOrder(testUserB, TopUpOrderStatus.PENDING, 50000L, 5000L);
 
-        String sharedTxn = "TX_SHARED_DUPLICATE_999";
+        String sharedTxn = "810004";
         Map<String, String> paramsA = buildParams(orderA.getOrderCode(), 50000L, sharedTxn, "00", "00");
         Map<String, String> paramsB = buildParams(orderB.getOrderCode(), 50000L, sharedTxn, "00", "00");
 
@@ -341,7 +347,7 @@ class BillingPaymentConfirmationIntegrationTest {
         // Order A is PAID, wallet A has 5000 credits
         TopUpOrder updatedA = topUpOrderRepository.findById(orderA.getId()).orElseThrow();
         assertThat(updatedA.getStatus()).isEqualTo(TopUpOrderStatus.PAID);
-        assertThat(creditWalletRepository.findByUserId(testUserA.getId()).orElseThrow().getAvailableCredits()).isEqualTo(5000L);
+        assertThat(creditWalletRepository.findByUserId(testUserA.getId()).orElseThrow().getAvailableCredits()).isEqualTo(6000L);
 
         // Order B rolled back to PENDING, wallet B not credited, no ledger entry
         TopUpOrder updatedB = topUpOrderRepository.findById(orderB.getId()).orElseThrow();
@@ -354,7 +360,7 @@ class BillingPaymentConfirmationIntegrationTest {
     @DisplayName("Scenario 3: Error after updating order but before/during ledger write - entire transaction rolls back")
     void scenario3_failureDuringLedgerWrite_fullRollback() throws Exception {
         TopUpOrder order = createOrder(testUserA, TopUpOrderStatus.PENDING, 50000L, 5000L);
-        Map<String, String> params = buildParams(order.getOrderCode(), 50000L, "TX_FAIL_LEDGER", "00", "00");
+        Map<String, String> params = buildParams(order.getOrderCode(), 50000L, "810005", "00", "00");
 
         // Simulate database crash or constraint failure when saving ledger entry
         Mockito.doThrow(new DataIntegrityViolationException("Simulated ledger write error"))
@@ -375,7 +381,7 @@ class BillingPaymentConfirmationIntegrationTest {
     void scenario4_latePaymentOnTerminalOrder() throws Exception {
         // Test with CANCELLED
         TopUpOrder cancelledOrder = createOrder(testUserA, TopUpOrderStatus.CANCELLED, 50000L, 5000L);
-        Map<String, String> paramsCancelled = buildParams(cancelledOrder.getOrderCode(), 50000L, "TX_LATE_1", "00", "00");
+        Map<String, String> paramsCancelled = buildParams(cancelledOrder.getOrderCode(), 50000L, "810006", "00", "00");
 
         VnpayIpnResponse respCancelled = callIpn(paramsCancelled);
         assertThat(respCancelled.rspCode()).isEqualTo("99");
@@ -390,7 +396,7 @@ class BillingPaymentConfirmationIntegrationTest {
 
         // Test with FAILED
         TopUpOrder failedOrder = createOrder(testUserB, TopUpOrderStatus.FAILED, 50000L, 5000L);
-        Map<String, String> paramsFailed = buildParams(failedOrder.getOrderCode(), 50000L, "TX_LATE_2", "00", "00");
+        Map<String, String> paramsFailed = buildParams(failedOrder.getOrderCode(), 50000L, "810007", "00", "00");
 
         VnpayIpnResponse respFailed = callIpn(paramsFailed);
         assertThat(respFailed.rspCode()).isEqualTo("99");
@@ -404,7 +410,7 @@ class BillingPaymentConfirmationIntegrationTest {
     @DisplayName("Scenario 5: Abnormal transaction fails to persist due to DB error - returns 99, never 00 or 02")
     void scenario5_abnormalTransactionDbError_returns99() throws Exception {
         TopUpOrder cancelledOrder = createOrder(testUserA, TopUpOrderStatus.CANCELLED, 50000L, 5000L);
-        Map<String, String> params = buildParams(cancelledOrder.getOrderCode(), 50000L, "TX_ERR_5", "00", "00");
+        Map<String, String> params = buildParams(cancelledOrder.getOrderCode(), 50000L, "810008", "00", "00");
 
         // Simulate database failure when trying to persist the abnormal event
         Mockito.doThrow(new RuntimeException("Simulated abnormal DB connection failure"))
@@ -422,7 +428,7 @@ class BillingPaymentConfirmationIntegrationTest {
     void scenario6_contradictoryStatus_recordsAbnormalAndReturns99() throws Exception {
         TopUpOrder order = createOrder(testUserA, TopUpOrderStatus.PENDING, 50000L, 5000L);
         // ResponseCode = 00 (Success) but TransactionStatus = 02 (Failed/Other)
-        Map<String, String> params = buildParams(order.getOrderCode(), 50000L, "TX_CONTRADICT_6", "00", "02");
+        Map<String, String> params = buildParams(order.getOrderCode(), 50000L, "810009", "00", "02");
 
         VnpayIpnResponse response = callIpn(params);
         assertThat(response.rspCode()).isEqualTo("99");
@@ -445,12 +451,12 @@ class BillingPaymentConfirmationIntegrationTest {
         TopUpOrder order = createOrder(testUserA, TopUpOrderStatus.PENDING, 50000L, 5000L);
 
         // First callback confirms it with TXN_ORIGINAL
-        Map<String, String> params1 = buildParams(order.getOrderCode(), 50000L, "TXN_ORIGINAL", "00", "00");
+        Map<String, String> params1 = buildParams(order.getOrderCode(), 50000L, "810010", "00", "00");
         VnpayIpnResponse resp1 = callIpn(params1);
         assertThat(resp1.rspCode()).isEqualTo("00");
 
         // Second callback for same order arrives with different txn ID TXN_ANOTHER
-        Map<String, String> params2 = buildParams(order.getOrderCode(), 50000L, "TXN_ANOTHER", "00", "00");
+        Map<String, String> params2 = buildParams(order.getOrderCode(), 50000L, "810011", "00", "00");
         VnpayIpnResponse resp2 = callIpn(params2);
         assertThat(resp2.rspCode()).isEqualTo("99"); // MUST NOT return 02
 

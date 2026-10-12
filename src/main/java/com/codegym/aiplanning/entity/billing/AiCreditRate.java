@@ -30,6 +30,9 @@ public class AiCreditRate extends BaseEntity {
     @Column(name = "effective_from", nullable = false)
     private Instant effectiveFrom;
 
+    @Column(name = "active_slot", length = 110, unique = true)
+    private String activeSlot;
+
     protected AiCreditRate() {}
 
     public static AiCreditRate create(
@@ -43,9 +46,9 @@ public class AiCreditRate extends BaseEntity {
         }
         AiCreditRate rate = new AiCreditRate();
         rate.purpose = purpose;
-        rate.modelCategory = modelCategory;
+        rate.modelCategory = com.codegym.aiplanning.service.billing.BillingValidation.category(modelCategory);
         rate.creditCost = creditCost;
-        rate.status = status;
+        rate.setStatus(status);
         rate.effectiveFrom = effectiveFrom != null ? effectiveFrom : Instant.now();
         return rate;
     }
@@ -72,6 +75,14 @@ public class AiCreditRate extends BaseEntity {
 
     public void setStatus(AiCreditRateStatus status) {
         this.status = status;
+        this.activeSlot = status == AiCreditRateStatus.ACTIVE
+                ? purpose.name() + ":" + (modelCategory == null ? "" : modelCategory)
+                : null;
+    }
+
+    public void activate(Instant effectiveFrom) {
+        this.effectiveFrom = effectiveFrom;
+        setStatus(AiCreditRateStatus.ACTIVE);
     }
 
     public void setCreditCost(long creditCost) {

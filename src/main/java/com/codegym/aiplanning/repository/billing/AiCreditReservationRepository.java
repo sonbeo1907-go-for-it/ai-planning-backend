@@ -20,4 +20,11 @@ public interface AiCreditReservationRepository extends JpaRepository<AiCreditRes
     Optional<AiCreditReservation> findWithLockByAiExecutionId(@Param("aiExecutionId") UUID aiExecutionId);
 
     List<AiCreditReservation> findByUserIdAndStatus(UUID userId, CreditReservationStatus status);
+
+    @Query("select r.aiExecutionId from AiCreditReservation r, AiExecution e "
+            + "where r.aiExecutionId = e.id and r.status = com.codegym.aiplanning.entity.billing.CreditReservationStatus.RESERVED "
+            + "and e.status in (com.codegym.aiplanning.entity.ai.AiExecutionStatus.SUCCEEDED, "
+            + "com.codegym.aiplanning.entity.ai.AiExecutionStatus.FAILED, com.codegym.aiplanning.entity.ai.AiExecutionStatus.TIMEOUT) "
+            + "order by r.createdAt, r.id")
+    List<UUID> findTerminalUnsettledExecutions(org.springframework.data.domain.Pageable pageable);
 }

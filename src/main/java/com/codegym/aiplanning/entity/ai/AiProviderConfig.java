@@ -27,6 +27,17 @@ public class AiProviderConfig extends BaseEntity {
     @Column(nullable = false, length = 150)
     private String model;
 
+    @Column(name = "pricing_category", length = 50)
+    private String pricingCategory;
+
+    public String getPricingCategory() {
+        return pricingCategory;
+    }
+
+    public void setPricingCategory(String pricingCategory) {
+        this.pricingCategory = com.codegym.aiplanning.service.billing.BillingValidation.category(pricingCategory);
+    }
+
     @Column(nullable = false)
     private boolean enabled;
 

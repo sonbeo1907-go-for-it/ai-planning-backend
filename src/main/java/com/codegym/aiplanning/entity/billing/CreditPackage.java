@@ -109,6 +109,6 @@ public class CreditPackage extends BaseEntity {
     }
 
     public long getTotalCredits() {
-        return baseCredits + bonusCredits;
+        return Math.addExact(baseCredits, bonusCredits);
     }
 }

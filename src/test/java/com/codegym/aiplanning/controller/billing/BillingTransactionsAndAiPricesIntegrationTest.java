@@ -100,6 +100,8 @@ class BillingTransactionsAndAiPricesIntegrationTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content").isArray())
+                .andExpect(jsonPath("$.data.page").value(0))
+                .andExpect(jsonPath("$.data.size").value(10))
                 .andExpect(jsonPath("$.data.content[0].entryType").value("RELEASE_RESERVE"))
                 .andExpect(jsonPath("$.data.content[0].amount").value(10))
                 .andExpect(jsonPath("$.data.content[0].availableDelta").value(10))

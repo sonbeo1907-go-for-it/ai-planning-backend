@@ -219,3 +219,62 @@ WeeklyPlan, and institution-owned curriculum modules are outside the V2 MVP.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and the files in [specs](specs) before
 opening a pull request.
+
+## Payments and AI credits
+
+Payments are disabled by default. Set `BILLING_PAYMENTS_ENABLED=true` only after supplying
+`VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`, the checkout/query URLs and the return URL.
+Blank or known placeholder credentials fail validation when payments are enabled.
+Use explicit sandbox credentials for tests; there is no production mock fallback.
+
+`GET /api/v1/billing/configuration` tells the USER frontend whether new purchases are enabled.
+Disabling purchases does not disable an existing wallet, manual learning, or verification
+of previously initiated payments when valid gateway credentials remain configured.
+Credit transaction history uses the standard `PageResponse` envelope with fixed
+`recordedAt DESC, id DESC` ordering. Its status describes the immutable ledger event,
+not the current state of an old AI reservation.
+
+Checkout uses the persisted order creation/expiry timestamps and the customer IP.
+By default, forwarded headers are ignored. If a reverse proxy is used, configure
+`app.billing.trusted-proxy-addresses` only for known proxies that sanitize forwarding headers.
+Set `VNPAY_SERVER_IP` to the merchant server's actual address for QueryDr.
+
+A successful signed late payment may settle an expired order exactly once.
+Conflicting FAILED/CANCELLED payments require a signed QueryDr confirmation of the same
+order, amount and transaction. Query calls run outside database locks, with a configured
+timeout, no automatic retry and no automatic redirects. Only normalized financial evidence
+is stored; signatures, bank account/card fields and raw payloads are never logged or stored.
+See the [official VNPAY payment contract](https://sandbox.vnpayment.vn/apis/docs/thanh-toan-pay/pay.html)
+and [QueryDr contract](https://sandbox.vnpayment.vn/apis/docs/truy-van-hoan-tien/querydr%26refund.html).
+
+Wallet access, AI reservations and top-up confirmation share locked initialization and one
+welcome-bonus ledger entry. Worker failures, including prompt-resolution failures, release
+reserved credits. Recovery reconciles terminal executions only; QUEUED/RUNNING work is
+never refunded merely because it is old.
+
+Run targeted regression tests with:
+
+```powershell
+mvn.cmd '-Dtest=*Billing*,CreditReservation*Test,VnpayPaymentGatewayAdapterTest,AiExecutionCreditIntegrationTest,AiExecutionWorkerTest' test
+```
+
+PostgreSQL Testcontainers tests require Docker and are explicitly skipped if it is unavailable.
+Before enabling real payments, run those tests and complete a sandbox checkout/IPN demonstration
+using your registered merchant credentials. Unit fixtures are not a substitute for that demonstration.
+
+### ADMIN package, pricing and balance management
+
+ADMIN billing APIs are under `/api/v1/admin/billing`; the frontend workspace is `/admin?tab=billing`.
+Packages/rates are created archived, activated explicitly and never hard-deleted. Rate edits produce
+replacement rows; existing orders and AI reservations retain their original snapshots.
+Provider configurations can select an optional `pricingCategory`; USER price quotes and charging resolve
+the exact category first and fall back only to the purpose's default price.
+
+Manual adjustments require a reason, an expected wallet version and an idempotency key. They change
+available credits only and atomically append the ledger entry and authoritative ADMIN AuditLog.
+Wallet lookup does not initialize accounts. An uninitialized wallet preview explicitly includes its
+configured one-time welcome balance. An uncertain adjustment must be retried with the same key/body.
+
+V31 rejects duplicate normalized ACTIVE rate slots rather than silently replacing historical prices.
+V32 retains package/rate references with restrictive foreign keys. See
+[the ADMIN billing contract](specs/admin-payment-management.md) for payload behavior and verification.

@@ -41,6 +41,7 @@ app:
       email: admin@aiplanning.local
       password: Admin@123
   billing:
+    payments-enabled: true
     welcome-credits: 1000
     top-up:
       min-vnd: 20000
@@ -48,6 +49,6 @@ app:
       expiration-minutes: 15
     vnpay:
       payment-url: https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
-      tmn-code: VNPAYTMN
+      tmn-code: TESTTMN1
       hash-secret: TESTSECRETKEY123
       return-url: http://localhost:3000/billing/checkout/result

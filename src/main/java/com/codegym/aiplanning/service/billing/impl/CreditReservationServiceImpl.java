@@ -19,6 +19,7 @@ import com.codegym.aiplanning.repository.billing.CreditLedgerEntryRepository;
 import com.codegym.aiplanning.repository.billing.CreditWalletRepository;
 import com.codegym.aiplanning.service.billing.CreditReservationService;
 import com.codegym.aiplanning.service.billing.CreditWalletAtomicInitializer;
+import com.codegym.aiplanning.service.billing.AiCreditPriceResolver;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -33,6 +34,7 @@ public class CreditReservationServiceImpl implements CreditReservationService {
     private final CreditWalletRepository creditWalletRepository;
     private final CreditLedgerEntryRepository creditLedgerEntryRepository;
     private final CreditWalletAtomicInitializer creditWalletAtomicInitializer;
+    private final AiCreditPriceResolver priceResolver;
 
     public CreditReservationServiceImpl(
             AiCreditRateRepository aiCreditRateRepository,
@@ -40,33 +42,48 @@ public class CreditReservationServiceImpl implements CreditReservationService {
             CreditWalletRepository creditWalletRepository,
             CreditLedgerEntryRepository creditLedgerEntryRepository,
             CreditWalletAtomicInitializer creditWalletAtomicInitializer) {
+        this(aiCreditRateRepository, aiCreditReservationRepository, creditWalletRepository,
+                creditLedgerEntryRepository, creditWalletAtomicInitializer, new AiCreditPriceResolver(aiCreditRateRepository));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public CreditReservationServiceImpl(
+            AiCreditRateRepository aiCreditRateRepository,
+            AiCreditReservationRepository aiCreditReservationRepository,
+            CreditWalletRepository creditWalletRepository,
+            CreditLedgerEntryRepository creditLedgerEntryRepository,
+            CreditWalletAtomicInitializer creditWalletAtomicInitializer,
+            AiCreditPriceResolver priceResolver) {
         this.aiCreditRateRepository = aiCreditRateRepository;
         this.aiCreditReservationRepository = aiCreditReservationRepository;
         this.creditWalletRepository = creditWalletRepository;
         this.creditLedgerEntryRepository = creditLedgerEntryRepository;
         this.creditWalletAtomicInitializer = creditWalletAtomicInitializer;
+        this.priceResolver = priceResolver;
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<AiCreditRateResponse> getActiveRates() {
-        return aiCreditRateRepository.findByStatusOrderByPurposeAsc(AiCreditRateStatus.ACTIVE)
-                .stream()
-                .map(AiCreditRateResponse::from)
-                .toList();
+        java.util.Map<String, AiCreditRateResponse> currentRates = new java.util.LinkedHashMap<>();
+        for (AiCreditRate rate : aiCreditRateRepository
+                .findByStatusAndEffectiveFromLessThanEqualOrderByPurposeAscEffectiveFromDescIdDesc(
+                        AiCreditRateStatus.ACTIVE, Instant.now())) {
+            String key = rate.getPurpose() + ":" + rate.getModelCategory();
+            currentRates.putIfAbsent(key, AiCreditRateResponse.from(rate));
+        }
+        return List.copyOf(currentRates.values());
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public void validateSufficientCredits(
             UUID userId,
             AiPurpose purpose,
             String modelCategory) {
         AiCreditRate rate = findRateOrThrow(purpose, modelCategory);
 
-        long available = creditWalletRepository.findByUserId(userId)
-                .map(CreditWallet::getAvailableCredits)
-                .orElse(0L);
+        long available = creditWalletAtomicInitializer.getOrCreate(userId).getAvailableCredits();
 
         if (available < rate.getCreditCost()) {
             throw new BusinessException(
@@ -84,20 +101,14 @@ public class CreditReservationServiceImpl implements CreditReservationService {
             UUID aiExecutionId,
             AiPurpose purpose,
             String modelCategory) {
+        // Serialize first-use initialization and reservations on the owner, then wallet.
+        CreditWallet wallet = creditWalletAtomicInitializer.getOrCreate(user.getId());
         var existing = aiCreditReservationRepository.findByAiExecutionId(aiExecutionId);
         if (existing.isPresent()) {
             return existing.get();
         }
 
         AiCreditRate rate = findRateOrThrow(purpose, modelCategory);
-
-        CreditWallet wallet = creditWalletRepository
-                .findByUserIdForUpdate(user.getId())
-                .orElseGet(() -> {
-                    creditWalletAtomicInitializer.createWalletWithWelcomeBonus(user);
-                    return creditWalletRepository.findByUserIdForUpdate(user.getId())
-                            .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Wallet not found"));
-                });
 
         if (wallet.getAvailableCredits() < rate.getCreditCost()) {
             throw new BusinessException(
@@ -215,22 +226,6 @@ public class CreditReservationServiceImpl implements CreditReservationService {
     }
 
     private AiCreditRate findRateOrThrow(AiPurpose purpose, String modelCategory) {
-        if (modelCategory != null && !modelCategory.isBlank()) {
-            var rate = aiCreditRateRepository
-                    .findFirstByPurposeAndModelCategoryAndStatusOrderByEffectiveFromDesc(
-                            purpose, modelCategory, AiCreditRateStatus.ACTIVE);
-            if (rate.isPresent()) {
-                return rate.get();
-            }
-        }
-        return aiCreditRateRepository
-                .findFirstByPurposeAndStatusOrderByEffectiveFromDesc(
-                        purpose, AiCreditRateStatus.ACTIVE)
-                .or(() -> aiCreditRateRepository
-                        .findFirstByPurposeAndModelCategoryAndStatusOrderByEffectiveFromDesc(
-                                purpose, null, AiCreditRateStatus.ACTIVE))
-                .orElseThrow(() -> new BusinessException(
-                        ErrorCode.RESOURCE_NOT_FOUND,
-                        "Chưa có giá AI Credit đang hoạt động cho mục đích: " + purpose));
+        return priceResolver.resolve(purpose, modelCategory);
     }
 }

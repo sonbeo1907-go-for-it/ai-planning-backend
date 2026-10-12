@@ -42,7 +42,14 @@ public final class VnpaySecurityUtil {
             return false;
         }
         String calculated = hashAllFields(fields, secretKey);
-        return secureHash.equalsIgnoreCase(calculated);
+        return matchesHash(secureHash, calculated);
+    }
+
+    public static boolean matchesHash(String received, String expected) {
+        return received != null && received.matches("[a-fA-F0-9]{128}")
+                && java.security.MessageDigest.isEqual(
+                        received.toLowerCase(java.util.Locale.ROOT).getBytes(StandardCharsets.US_ASCII),
+                        expected.getBytes(StandardCharsets.US_ASCII));
     }
 
     public static String hmacSHA512(String key, String data) {

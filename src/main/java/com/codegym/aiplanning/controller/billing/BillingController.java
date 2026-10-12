@@ -46,20 +46,37 @@ import java.time.Instant;
 @Tag(name = "Billing", description = "Billing and Credit Package management APIs")
 public class BillingController {
 
+    private final com.codegym.aiplanning.config.BillingProperties billingProperties;
+    private final com.codegym.aiplanning.service.billing.gateway.PaymentClientIpResolver clientIpResolver;
+
     private final CreditWalletService creditWalletService;
     private final BillingOrderService billingOrderService;
     private final VnpayIpnService vnpayIpnService;
     private final CreditReservationService creditReservationService;
+    private final com.codegym.aiplanning.service.billing.AiCreditQuoteService quoteService;
 
     public BillingController(
             CreditWalletService creditWalletService,
             BillingOrderService billingOrderService,
             VnpayIpnService vnpayIpnService,
-            CreditReservationService creditReservationService) {
+            CreditReservationService creditReservationService,
+            com.codegym.aiplanning.config.BillingProperties billingProperties,
+            com.codegym.aiplanning.service.billing.gateway.PaymentClientIpResolver clientIpResolver,
+            com.codegym.aiplanning.service.billing.AiCreditQuoteService quoteService) {
         this.creditWalletService = creditWalletService;
         this.billingOrderService = billingOrderService;
         this.vnpayIpnService = vnpayIpnService;
         this.creditReservationService = creditReservationService;
+        this.billingProperties = billingProperties;
+        this.clientIpResolver = clientIpResolver;
+        this.quoteService = quoteService;
+    }
+
+    @GetMapping("/configuration")
+    @PreAuthorize("hasRole('USER')")
+    public ApiResponse<Map<String, Object>> getConfiguration() {
+        return ApiResponse.of(Map.of("paymentsEnabled", billingProperties.isPaymentsEnabled(),
+                "paymentProvider", "VNPAY"));
     }
 
     @GetMapping(ApiConstant.BILLING_WALLET)
@@ -85,52 +102,70 @@ public class BillingController {
     }
 
     @GetMapping("/packages")
+    @PreAuthorize("hasRole('USER')")
     @Operation(summary = "Get list of active credit packages")
     public ApiResponse<List<CreditPackageResponse>> getActivePackages() {
         return ApiResponse.of(billingOrderService.getActivePackages());
     }
 
     @PostMapping("/top-up-orders")
+    @PreAuthorize("hasRole('USER')")
     @Operation(summary = "Create top-up order and open payment checkout")
     public ApiResponse<TopUpOrderResponse> createTopUpOrder(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CreateTopUpOrderRequest request,
-            @AuthenticationPrincipal Jwt jwt) {
-        return ApiResponse.of(billingOrderService.createTopUpOrder(userId(jwt), request.packageId(), idempotencyKey));
+            @AuthenticationPrincipal Jwt jwt,
+            jakarta.servlet.http.HttpServletRequest servletRequest) {
+        return ApiResponse.of(billingOrderService.createTopUpOrder(
+                userId(jwt), request.packageId(), idempotencyKey, clientIpResolver.resolve(servletRequest)));
     }
 
     @GetMapping("/top-up-orders/{orderId}")
+    @PreAuthorize("hasRole('USER')")
     @Operation(summary = "Get top-up order details by orderId")
     public ApiResponse<TopUpOrderResponse> getTopUpOrder(
             @PathVariable UUID orderId,
-            @AuthenticationPrincipal Jwt jwt) {
-        return ApiResponse.of(billingOrderService.getTopUpOrder(userId(jwt), orderId));
+            @AuthenticationPrincipal Jwt jwt,
+            jakarta.servlet.http.HttpServletRequest servletRequest) {
+        return ApiResponse.of(billingOrderService.getTopUpOrder(userId(jwt), orderId, clientIpResolver.resolve(servletRequest)));
     }
 
     @GetMapping("/top-up-orders/by-code/{orderCode}")
+    @PreAuthorize("hasRole('USER')")
     @Operation(summary = "Get top-up order details by orderCode")
     public ApiResponse<TopUpOrderResponse> getTopUpOrderByCode(
             @PathVariable String orderCode,
-            @AuthenticationPrincipal Jwt jwt) {
-        return ApiResponse.of(billingOrderService.getTopUpOrderByCode(userId(jwt), orderCode));
+            @AuthenticationPrincipal Jwt jwt,
+            jakarta.servlet.http.HttpServletRequest servletRequest) {
+        return ApiResponse.of(billingOrderService.getTopUpOrderByCode(userId(jwt), orderCode, clientIpResolver.resolve(servletRequest)));
     }
 
     @GetMapping(ApiConstant.BILLING_AI_PRICES)
+    @PreAuthorize("hasRole('USER')")
     @Operation(summary = "Get list of active AI Credit prices per purpose/model")
     public ApiResponse<List<AiCreditRateResponse>> getAiPrices() {
         return ApiResponse.of(creditReservationService.getActiveRates());
     }
 
+    @GetMapping("/ai-prices/quote")
+    @PreAuthorize("hasRole('USER')")
+    @Operation(summary = "Resolve the current fixed price using the selected provider's pricing category")
+    public ApiResponse<com.codegym.aiplanning.service.billing.AiCreditQuoteService.Quote> quote(
+            @RequestParam com.codegym.aiplanning.entity.ai.AiPurpose purpose) {
+        return ApiResponse.of(quoteService.quote(purpose));
+    }
+
     @GetMapping(ApiConstant.BILLING_TRANSACTIONS)
     @PreAuthorize("hasRole('USER')")
     @Operation(summary = "Get paginated credit transaction history of the authenticated user")
-    public ApiResponse<Page<CreditTransactionResponse>> getTransactions(
+    public ApiResponse<com.codegym.aiplanning.common.api.PageResponse<CreditTransactionResponse>> getTransactions(
             @RequestParam(required = false) LedgerEntryType entryType,
             @RequestParam(required = false) Instant fromDate,
             @RequestParam(required = false) Instant toDate,
             @PageableDefault(sort = "recordedAt", direction = Sort.Direction.DESC) Pageable pageable,
             @AuthenticationPrincipal Jwt jwt) {
-        return ApiResponse.of(creditWalletService.getTransactions(userId(jwt), entryType, fromDate, toDate, pageable));
+        return ApiResponse.of(com.codegym.aiplanning.common.api.PageResponse.from(
+                creditWalletService.getTransactions(userId(jwt), entryType, fromDate, toDate, pageable)));
     }
 
     @GetMapping(ApiConstant.BILLING_VNPAY_IPN)

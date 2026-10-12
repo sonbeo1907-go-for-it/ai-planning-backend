@@ -30,7 +30,9 @@ public record TopUpOrderResponse(
                 order.getBaseCreditsSnapshot(),
                 order.getBonusCreditsSnapshot(),
                 order.getTotalCreditsSnapshot(),
-                order.getStatus().name(),
+                order.getStatus() == com.codegym.aiplanning.entity.billing.TopUpOrderStatus.PENDING
+                                && !order.getExpiresAt().isAfter(Instant.now())
+                        ? "EXPIRED" : order.getStatus().name(),
                 order.getCurrency(),
                 order.getPaymentProvider(),
                 checkoutUrl,

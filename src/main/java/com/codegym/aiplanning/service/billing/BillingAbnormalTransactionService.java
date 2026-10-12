@@ -27,8 +27,7 @@ public class BillingAbnormalTransactionService {
             String reason,
             String details,
             String rawPayload) {
-        log.warn("Recording abnormal billing transaction: orderCode={}, extTx={}, reason={}, details={}",
-                orderCode, externalTransactionId, reason, details);
+        log.warn("Recording abnormal billing transaction: reason={}", reason);
         BillingAbnormalTransaction record = new BillingAbnormalTransaction(
                 orderCode,
                 externalTransactionId,

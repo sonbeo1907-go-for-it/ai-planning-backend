@@ -1,8 +1,10 @@
 package com.codegym.aiplanning.service.billing;
 
-import com.codegym.aiplanning.config.BillingProperties;
 import com.codegym.aiplanning.controller.billing.dto.VnpayIpnResponse;
-import com.codegym.aiplanning.service.billing.gateway.VnpaySecurityUtil;
+import com.codegym.aiplanning.entity.billing.TopUpOrderStatus;
+import com.codegym.aiplanning.repository.billing.TopUpOrderRepository;
+import com.codegym.aiplanning.service.billing.gateway.PaymentGateway;
+import com.codegym.aiplanning.service.billing.gateway.VerifiedPayment;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,76 +12,49 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class VnpayIpnService {
-
     private static final Logger log = LoggerFactory.getLogger(VnpayIpnService.class);
+    private final PaymentGateway gateway;
+    private final TopUpOrderRepository orderRepository;
+    private final TopUpOrderConfirmationTxService confirmationService;
 
-    private final BillingProperties billingProperties;
-    private final TopUpOrderConfirmationTxService confirmationTxService;
-
-    public VnpayIpnService(
-            BillingProperties billingProperties,
-            TopUpOrderConfirmationTxService confirmationTxService) {
-        this.billingProperties = billingProperties;
-        this.confirmationTxService = confirmationTxService;
+    public VnpayIpnService(PaymentGateway gateway, TopUpOrderRepository orderRepository,
+            TopUpOrderConfirmationTxService confirmationService) {
+        this.gateway = gateway;
+        this.orderRepository = orderRepository;
+        this.confirmationService = confirmationService;
     }
 
     public VnpayIpnResponse processIpn(Map<String, String> params) {
-        log.info("Processing VNPAY IPN webhook with {} params: {}", params != null ? params.size() : 0, params);
-
-        if (params == null || params.isEmpty()) {
-            log.warn("IPN rejected: empty parameters");
-            return VnpayIpnResponse.invalidChecksum();
-        }
-
-        String hashSecret = billingProperties.getVnpay().getHashSecret();
-        String expectedTmnCode = billingProperties.getVnpay().getTmnCode();
-
-        // 1. Verify signature
-        boolean isValidSignature = VnpaySecurityUtil.verifySignature(params, hashSecret);
-        if (!isValidSignature) {
-            log.warn("IPN rejected: invalid checksum signature");
-            return VnpayIpnResponse.invalidChecksum();
-        }
-
-        // 2. Verify TmnCode
-        String receivedTmnCode = params.get("vnp_TmnCode");
-        if (receivedTmnCode == null || !receivedTmnCode.equals(expectedTmnCode)) {
-            log.warn("IPN rejected: invalid TmnCode. Expected={}, Received={}", expectedTmnCode, receivedTmnCode);
-            return VnpayIpnResponse.invalidChecksum();
-        }
-
-        // 3. Extract order reference and amount
-        String orderCode = params.get("vnp_TxnRef");
-        if (orderCode == null || orderCode.isBlank()) {
-            log.warn("IPN rejected: missing vnp_TxnRef");
-            return VnpayIpnResponse.orderNotFound();
-        }
-
-        String amountStr = params.get("vnp_Amount");
-        long vnpAmount;
         try {
-            vnpAmount = Long.parseLong(amountStr);
-        } catch (Exception ex) {
-            log.warn("IPN rejected: invalid amount string: {}", amountStr);
-            return VnpayIpnResponse.invalidAmount();
-        }
-
-        String vnpTxnNo = params.get("vnp_TransactionNo");
-        String vnpResponseCode = params.get("vnp_ResponseCode");
-        String vnpTransactionStatus = params.get("vnp_TransactionStatus");
-
-        // 4. Delegate to transactional confirmation service
-        try {
-            return confirmationTxService.confirmPayment(
-                    orderCode.trim(),
-                    vnpTxnNo != null ? vnpTxnNo.trim() : null,
-                    vnpAmount,
-                    vnpResponseCode != null ? vnpResponseCode.trim() : "",
-                    vnpTransactionStatus != null ? vnpTransactionStatus.trim() : "",
-                    params);
-        } catch (Exception ex) {
-            log.error("Error occurred while processing IPN for orderCode={}", orderCode, ex);
-            return VnpayIpnResponse.error("Database or system error: " + ex.getMessage());
+            VerifiedPayment payment = gateway.verifyNotification(params);
+            var order = orderRepository.findByOrderCode(payment.orderCode());
+            if (order.isEmpty()) return VnpayIpnResponse.orderNotFound();
+            boolean conflict = payment.succeeded()
+                    && (order.get().getStatus() == TopUpOrderStatus.CANCELLED
+                            || order.get().getStatus() == TopUpOrderStatus.FAILED);
+            if (conflict) {
+                // Network access happens before confirmation acquires database locks.
+                try {
+                    VerifiedPayment queried = gateway.queryPayment(order.get());
+                    if (queried != null && queried.queryVerified() && queried.succeeded()
+                            && payment.provider().equals(queried.provider())
+                            && payment.orderCode().equals(queried.orderCode())
+                            && payment.transactionId().equals(queried.transactionId())
+                            && payment.amountMinor() == queried.amountMinor()) {
+                        payment = queried;
+                    }
+                } catch (RuntimeException exception) {
+                    log.warn("Payment query unavailable; signed conflict retained for reconciliation");
+                }
+            }
+            return confirmationService.confirmPayment(payment);
+        } catch (IllegalArgumentException exception) {
+            // Invalid signatures/fields never reach the financial transaction boundary.
+            return VnpayIpnResponse.invalidChecksum();
+        } catch (RuntimeException exception) {
+            // Do not expose database, signature, provider response, or customer details.
+            log.error("Payment notification processing failed: exceptionType={}", exception.getClass().getSimpleName());
+            return VnpayIpnResponse.error("Payment confirmation temporarily unavailable");
         }
     }
 }

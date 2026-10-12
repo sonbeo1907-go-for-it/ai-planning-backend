@@ -12,6 +12,7 @@ import com.codegym.aiplanning.entity.billing.TopUpOrderStatus;
 import com.codegym.aiplanning.repository.billing.CreditPackageRepository;
 import com.codegym.aiplanning.repository.billing.TopUpOrderRepository;
 import com.codegym.aiplanning.service.billing.gateway.CheckoutResult;
+import com.codegym.aiplanning.service.billing.gateway.CheckoutRequest;
 import com.codegym.aiplanning.service.billing.gateway.PaymentGateway;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -55,7 +56,10 @@ public class BillingOrderService {
                 .toList();
     }
 
-    public TopUpOrderResponse createTopUpOrder(UUID userId, UUID packageId, String idempotencyKey) {
+    public TopUpOrderResponse createTopUpOrder(UUID userId, UUID packageId, String idempotencyKey, String clientIp) {
+        if (!billingProperties.isPaymentsEnabled() || !billingProperties.isPaymentConfigurationValid()) {
+            throw new BusinessException(ErrorCode.PAYMENT_PROVIDER_UNAVAILABLE, "Payments are currently unavailable");
+        }
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED, "Idempotency-Key header is required");
         }
@@ -71,7 +75,7 @@ public class BillingOrderService {
         Optional<TopUpOrder> existingOrderOpt = topUpOrderRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey);
         if (existingOrderOpt.isPresent()) {
             TopUpOrder existingOrder = existingOrderOpt.get();
-            return handleExistingOrder(existingOrder, packageId);
+            return handleExistingOrder(existingOrder, packageId, clientIp);
         }
 
         // Backend is Source of Truth: load package from DB
@@ -97,7 +101,7 @@ public class BillingOrderService {
         // Backend determines totalCreditsSnapshot
         long baseCredits = pkg.getBaseCredits();
         long bonusCredits = pkg.getBonusCredits();
-        long totalCredits = baseCredits + bonusCredits;
+        long totalCredits = Math.addExact(baseCredits, bonusCredits);
 
         // Backend determines expiresAt (+15 minutes from configuration)
         Instant expiresAt = Instant.now().plus(billingProperties.getTopUp().getExpirationMinutes(), ChronoUnit.MINUTES);
@@ -118,7 +122,7 @@ public class BillingOrderService {
                 TopUpOrderStatus.PENDING,
                 "VND",
                 paymentGateway.getProviderName(),
-                null,
+                orderCode,
                 idempotencyKey,
                 expiresAt);
 
@@ -132,7 +136,7 @@ public class BillingOrderService {
                 // Read in new transaction context after rollback
                 TopUpOrder concurrentOrder = topUpOrderRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey)
                         .orElseThrow(() -> ex);
-                return handleExistingOrder(concurrentOrder, packageId);
+                return handleExistingOrder(concurrentOrder, packageId, clientIp);
             }
             throw ex;
         }
@@ -140,7 +144,7 @@ public class BillingOrderService {
         // Phase 2: Call PaymentGateway without holding DB transaction
         CheckoutResult checkoutResult;
         try {
-            checkoutResult = paymentGateway.createCheckout(savedOrder);
+            checkoutResult = paymentGateway.createCheckout(new CheckoutRequest(savedOrder, clientIp));
         } catch (Exception ex) {
             log.error("Payment provider unavailable for order: {}", savedOrder.getOrderCode(), ex);
             // Failure semantics: Order stays PENDING, throw 503
@@ -152,7 +156,7 @@ public class BillingOrderService {
     }
 
     @Transactional(readOnly = true)
-    public TopUpOrderResponse getTopUpOrder(UUID userId, UUID orderId) {
+    public TopUpOrderResponse getTopUpOrder(UUID userId, UUID orderId, String clientIp) {
         TopUpOrder order = topUpOrderRepository.findByIdAndUserId(orderId, userId)
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.TOP_UP_ORDER_NOT_FOUND, "Top-up order not found with id: " + orderId));
@@ -160,7 +164,7 @@ public class BillingOrderService {
         String checkoutUrl = null;
         if (order.getStatus() == TopUpOrderStatus.PENDING && order.getExpiresAt().isAfter(Instant.now())) {
             try {
-                checkoutUrl = paymentGateway.createCheckout(order).checkoutUrl();
+                checkoutUrl = paymentGateway.createCheckout(new CheckoutRequest(order, clientIp)).checkoutUrl();
             } catch (Exception ex) {
                 log.warn("Could not generate checkout url for pending order: {}", order.getOrderCode(), ex);
             }
@@ -170,7 +174,7 @@ public class BillingOrderService {
     }
 
     @Transactional(readOnly = true)
-    public TopUpOrderResponse getTopUpOrderByCode(UUID userId, String orderCode) {
+    public TopUpOrderResponse getTopUpOrderByCode(UUID userId, String orderCode, String clientIp) {
         TopUpOrder order = topUpOrderRepository.findByOrderCodeAndUserId(orderCode, userId)
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.TOP_UP_ORDER_NOT_FOUND, "Top-up order not found with code: " + orderCode));
@@ -178,7 +182,7 @@ public class BillingOrderService {
         String checkoutUrl = null;
         if (order.getStatus() == TopUpOrderStatus.PENDING && order.getExpiresAt().isAfter(Instant.now())) {
             try {
-                checkoutUrl = paymentGateway.createCheckout(order).checkoutUrl();
+                checkoutUrl = paymentGateway.createCheckout(new CheckoutRequest(order, clientIp)).checkoutUrl();
             } catch (Exception ex) {
                 log.warn("Could not generate checkout url for pending order: {}", order.getOrderCode(), ex);
             }
@@ -187,13 +191,13 @@ public class BillingOrderService {
         return TopUpOrderResponse.from(order, checkoutUrl);
     }
 
-    private TopUpOrderResponse handleExistingOrder(TopUpOrder existingOrder, UUID requestedPackageId) {
+    private TopUpOrderResponse handleExistingOrder(TopUpOrder existingOrder, UUID requestedPackageId, String clientIp) {
         // If package matches -> return existing order
         if (existingOrder.getPackageId() != null && existingOrder.getPackageId().equals(requestedPackageId)) {
             String checkoutUrl = null;
             if (existingOrder.getStatus() == TopUpOrderStatus.PENDING && existingOrder.getExpiresAt().isAfter(Instant.now())) {
                 try {
-                    checkoutUrl = paymentGateway.createCheckout(existingOrder).checkoutUrl();
+                    checkoutUrl = paymentGateway.createCheckout(new CheckoutRequest(existingOrder, clientIp)).checkoutUrl();
                 } catch (Exception ex) {
                     log.warn("Could not regenerate checkout url for order: {}", existingOrder.getOrderCode(), ex);
                 }

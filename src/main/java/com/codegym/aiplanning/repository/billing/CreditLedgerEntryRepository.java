@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface CreditLedgerEntryRepository extends JpaRepository<CreditLedgerEntry, UUID> {
 
+    java.util.Optional<CreditLedgerEntry> findByIdempotencyKey(String idempotencyKey);
+
     List<CreditLedgerEntry> findByWalletIdOrderByRecordedAtDesc(UUID walletId);
 
     List<CreditLedgerEntry> findByUserIdOrderByRecordedAtDesc(UUID userId);

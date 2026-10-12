@@ -78,12 +78,13 @@ class AiExecutionCreditIntegrationTest {
     @Test
     @DisplayName("Pre-queue validation fails with INSUFFICIENT_CREDITS when wallet balance is lower than cost")
     void preQueueValidation_insufficientCredits_blocksQueueing() {
-        when(aiCreditRateRepository.findFirstByPurposeAndModelCategoryAndStatusOrderByEffectiveFromDesc(
-                AiPurpose.ROADMAP_GENERATION, null, AiCreditRateStatus.ACTIVE))
+        when(aiCreditRateRepository.findFirstByPurposeAndModelCategoryAndStatusAndEffectiveFromLessThanEqualOrderByEffectiveFromDescIdDesc(
+                org.mockito.ArgumentMatchers.eq(AiPurpose.ROADMAP_GENERATION), org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq(AiCreditRateStatus.ACTIVE), any(Instant.class)))
                 .thenReturn(Optional.of(roadmapRate));
 
         CreditWallet poorWallet = CreditWallet.createWithBalances(testUser, 5L, 0L); // only 5 credits, need 10
-        when(creditWalletRepository.findByUserId(testUser.getId())).thenReturn(Optional.of(poorWallet));
+        when(creditWalletAtomicInitializer.getOrCreate(testUser.getId())).thenReturn(poorWallet);
 
         assertThatThrownBy(() -> creditReservationService.validateSufficientCredits(
                 testUser.getId(), AiPurpose.ROADMAP_GENERATION, null))
@@ -102,10 +103,11 @@ class AiExecutionCreditIntegrationTest {
         UUID aiExecutionId = UUID.randomUUID();
 
         when(aiCreditReservationRepository.findByAiExecutionId(aiExecutionId)).thenReturn(Optional.empty());
-        when(aiCreditRateRepository.findFirstByPurposeAndModelCategoryAndStatusOrderByEffectiveFromDesc(
-                AiPurpose.ROADMAP_GENERATION, null, AiCreditRateStatus.ACTIVE))
+        when(aiCreditRateRepository.findFirstByPurposeAndModelCategoryAndStatusAndEffectiveFromLessThanEqualOrderByEffectiveFromDescIdDesc(
+                org.mockito.ArgumentMatchers.eq(AiPurpose.ROADMAP_GENERATION), org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq(AiCreditRateStatus.ACTIVE), any(Instant.class)))
                 .thenReturn(Optional.of(roadmapRate));
-        when(creditWalletRepository.findByUserIdForUpdate(testUser.getId())).thenReturn(Optional.of(testWallet));
+        when(creditWalletAtomicInitializer.getOrCreate(testUser.getId())).thenReturn(testWallet);
         when(aiCreditReservationRepository.save(any(AiCreditReservation.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
 

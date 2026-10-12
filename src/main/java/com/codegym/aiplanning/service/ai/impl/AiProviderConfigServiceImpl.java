@@ -88,6 +88,7 @@ public class AiProviderConfigServiceImpl
                 request.maxOutputTokens(),
                 request.temperature());
 
+        config.setPricingCategory(request.pricingCategory());
         if (request.defaultProvider()) {
             currentDefault.ifPresent(this::clearAndFlushDefault);
             config.makeDefault();
@@ -128,6 +129,7 @@ public class AiProviderConfigServiceImpl
                 request.maxInputTokens(),
                 request.maxOutputTokens(),
                 request.temperature());
+        config.setPricingCategory(request.pricingCategory());
         AiProviderConfig saved = repository.saveAndFlush(config);
         audit(actorId, actorEmail, AuditEventAction.AI_PROVIDER_CONFIG_UPDATED, saved);
         return response(saved);
@@ -348,7 +350,8 @@ public class AiProviderConfigServiceImpl
                 config.getMaxOutputTokens(),
                 config.getTemperature(),
                 config.getCreatedAt(),
-                config.getUpdatedAt());
+                config.getUpdatedAt(),
+                config.getPricingCategory());
     }
 
     private void audit(

@@ -233,11 +233,16 @@ PENDING -> PAID
 PENDING -> FAILED
 PENDING -> CANCELLED
 PENDING -> EXPIRED
+EXPIRED -> PAID (verified successful late notification only)
+FAILED/CANCELLED -> PAID (verified successful gateway query only)
 ```
 
 - Terminal order states cannot return to `PENDING`.
 - `PAID` cannot be produced by a frontend callback.
-- Late valid gateway notifications follow the documented gateway policy. Any transition from an expired/failed state to paid must be explicit, tested and idempotent.
+- Expiry closes checkout, not settlement. A signed successful late notification with matching merchant, provider, order, amount and a unique non-zero transaction ID may settle an expired order exactly once.
+- A successful notification conflicting with FAILED/CANCELLED requires a signed gateway query confirming the same transaction and amount. If query verification is unavailable, preserve sanitized evidence and return a retryable acknowledgment; do not reopen checkout or silently discard the payment.
+- VNPAY callbacks do not require `vnp_CurrCode`: enforce VND in the persisted order and checkout. Verify documented callback fields and signature at the adapter boundary.
+- Payments default to disabled. Enabling requires explicitly supplied merchant and signing credentials. Wallets, learning and already-funded AI execution do not require top-up to be enabled.
 
 ### 6.5 AI credit reservation state machine
 

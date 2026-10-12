@@ -23,4 +23,5 @@ public record AiProviderConfigResponse(
         int maxOutputTokens,
         BigDecimal temperature,
         Instant createdAt,
-        Instant updatedAt) {}
+        Instant updatedAt,
+        String pricingCategory) {}

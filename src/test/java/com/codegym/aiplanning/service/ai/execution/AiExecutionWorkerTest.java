@@ -134,6 +134,21 @@ class AiExecutionWorkerTest {
     }
 
     @Test
+    void promptResolutionFailureReleasesReservedCredits() {
+        when(executionRepository.claimQueued(eq(executionId), any(Instant.class), any(Instant.class))).thenReturn(1);
+        when(executionRepository.findJobContextById(executionId)).thenReturn(Optional.of(execution));
+        when(executionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
+        when(execution.isRunning()).thenReturn(true);
+        when(systemPromptResolver.resolve(any())).thenThrow(new IllegalStateException("invalid prompt"));
+
+        worker.executeAsync(executionId);
+
+        verify(execution).markFailed(eq("AI_GENERATION_FAILED"), any(), any(), any());
+        verify(creditReservationService).releaseReservation(executionId);
+        verify(creditReservationService, never()).settleReservation(executionId);
+    }
+
+    @Test
     void claimedExecutionRunsOutsideTheRequestAndPublishesItsResult() {
         UUID versionId = UUID.randomUUID();
         RoadmapVersionResponse version = mock(RoadmapVersionResponse.class);

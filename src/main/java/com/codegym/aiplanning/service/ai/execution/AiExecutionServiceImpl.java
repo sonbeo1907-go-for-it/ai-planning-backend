@@ -208,10 +208,10 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.AUTHENTICATION_REQUIRED,
                         "The authenticated account is unavailable."));
-        creditReservationService.validateSufficientCredits(
-                ownerId, AiPurpose.QUIZ_GENERATION, null);
         AiProviderConfig providerConfig = providerSelector.requireDefault(
                 AiPurpose.QUIZ_GENERATION);
+        creditReservationService.validateSufficientCredits(
+                ownerId, AiPurpose.QUIZ_GENERATION, providerConfig.getPricingCategory());
         AiExecution execution = executionRepository.saveAndFlush(AiExecution.queue(
                 owner,
                 providerConfig,
@@ -221,7 +221,7 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                 versionId,
                 normalizedKey));
         creditReservationService.reserveCredits(
-                owner, execution.getId(), AiPurpose.QUIZ_GENERATION, null);
+                owner, execution.getId(), AiPurpose.QUIZ_GENERATION, providerConfig.getPricingCategory());
         auditLogService.logAction(
                 ownerId,
                 owner.getEmail(),
@@ -296,10 +296,10 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.AUTHENTICATION_REQUIRED,
                         "The authenticated account is unavailable."));
-        creditReservationService.validateSufficientCredits(
-                ownerId, AiPurpose.QUIZ_GENERATION, null);
         AiProviderConfig providerConfig = providerSelector.requireDefault(
                 AiPurpose.QUIZ_GENERATION);
+        creditReservationService.validateSufficientCredits(
+                ownerId, AiPurpose.QUIZ_GENERATION, providerConfig.getPricingCategory());
         AiExecution execution = executionRepository.saveAndFlush(AiExecution.queue(
                 owner,
                 providerConfig,
@@ -309,7 +309,7 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                 weakTopicId,
                 normalizedKey));
         creditReservationService.reserveCredits(
-                owner, execution.getId(), AiPurpose.QUIZ_GENERATION, null);
+                owner, execution.getId(), AiPurpose.QUIZ_GENERATION, providerConfig.getPricingCategory());
         auditLogService.logAction(
                 ownerId,
                 owner.getEmail(),
@@ -436,10 +436,10 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.AUTHENTICATION_REQUIRED,
                         "The authenticated account is unavailable."));
-        creditReservationService.validateSufficientCredits(
-                ownerId, AiPurpose.ROADMAP_GENERATION, null);
         AiProviderConfig providerConfig =
                 providerSelector.requireDefault(AiPurpose.ROADMAP_GENERATION);
+        creditReservationService.validateSufficientCredits(
+                ownerId, AiPurpose.ROADMAP_GENERATION, providerConfig.getPricingCategory());
         AiExecution execution = executionRepository.saveAndFlush(AiExecution.queue(
                 owner,
                 providerConfig,
@@ -449,7 +449,7 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                 roadmapId,
                 normalizedKey));
         creditReservationService.reserveCredits(
-                owner, execution.getId(), AiPurpose.ROADMAP_GENERATION, null);
+                owner, execution.getId(), AiPurpose.ROADMAP_GENERATION, providerConfig.getPricingCategory());
 
         if (adjustmentPrompt != null) {
             inputRepository.save(AiExecutionInput.create(
@@ -512,10 +512,10 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.AUTHENTICATION_REQUIRED,
                         "The authenticated account is unavailable."));
-        creditReservationService.validateSufficientCredits(
-                ownerId, AiPurpose.DAILY_PLAN_GENERATION, null);
         AiProviderConfig providerConfig =
                 providerSelector.requireDefault(AiPurpose.DAILY_PLAN_GENERATION);
+        creditReservationService.validateSufficientCredits(
+                ownerId, AiPurpose.DAILY_PLAN_GENERATION, providerConfig.getPricingCategory());
         AiExecution execution = executionRepository.saveAndFlush(AiExecution.queue(
                 owner,
                 providerConfig,
@@ -525,7 +525,7 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                 dailyPlanId,
                 normalizedKey));
         creditReservationService.reserveCredits(
-                owner, execution.getId(), AiPurpose.DAILY_PLAN_GENERATION, null);
+                owner, execution.getId(), AiPurpose.DAILY_PLAN_GENERATION, providerConfig.getPricingCategory());
 
         auditLogService.logAction(
                 ownerId,
@@ -593,10 +593,10 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.AUTHENTICATION_REQUIRED,
                         "The authenticated account is unavailable."));
-        creditReservationService.validateSufficientCredits(
-                ownerId, AiPurpose.TASK_GUIDANCE_GENERATION, null);
         AiProviderConfig providerConfig = providerSelector.requireDefault(
                 AiPurpose.TASK_GUIDANCE_GENERATION);
+        creditReservationService.validateSufficientCredits(
+                ownerId, AiPurpose.TASK_GUIDANCE_GENERATION, providerConfig.getPricingCategory());
         AiExecution execution = executionRepository.saveAndFlush(AiExecution.queue(
                 owner,
                 providerConfig,
@@ -606,7 +606,7 @@ public class AiExecutionServiceImpl implements AiExecutionService {
                 dailyPlanItemId,
                 normalizedKey));
         creditReservationService.reserveCredits(
-                owner, execution.getId(), AiPurpose.TASK_GUIDANCE_GENERATION, null);
+                owner, execution.getId(), AiPurpose.TASK_GUIDANCE_GENERATION, providerConfig.getPricingCategory());
         if (adjustmentInstruction != null) {
             inputRepository.save(AiExecutionInput.create(
                     execution.getId(),

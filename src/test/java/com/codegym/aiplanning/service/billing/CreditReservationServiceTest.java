@@ -72,7 +72,8 @@ class CreditReservationServiceTest {
     void getActiveRates_returnsActiveRates() {
         AiCreditRate rate = AiCreditRate.create(
                 AiPurpose.ROADMAP_GENERATION, null, 10L, AiCreditRateStatus.ACTIVE, Instant.now());
-        when(aiCreditRateRepository.findByStatusOrderByPurposeAsc(AiCreditRateStatus.ACTIVE))
+        when(aiCreditRateRepository.findByStatusAndEffectiveFromLessThanEqualOrderByPurposeAscEffectiveFromDescIdDesc(
+                org.mockito.ArgumentMatchers.eq(AiCreditRateStatus.ACTIVE), any(Instant.class)))
                 .thenReturn(List.of(rate));
 
         List<AiCreditRateResponse> rates = creditReservationService.getActiveRates();
@@ -91,10 +92,11 @@ class CreditReservationServiceTest {
 
         AiCreditRate rate = AiCreditRate.create(
                 AiPurpose.ROADMAP_GENERATION, null, 10L, AiCreditRateStatus.ACTIVE, Instant.now());
-        when(aiCreditRateRepository.findFirstByPurposeAndModelCategoryAndStatusOrderByEffectiveFromDesc(
-                AiPurpose.ROADMAP_GENERATION, null, AiCreditRateStatus.ACTIVE))
+        when(aiCreditRateRepository.findFirstByPurposeAndModelCategoryAndStatusAndEffectiveFromLessThanEqualOrderByEffectiveFromDescIdDesc(
+                org.mockito.ArgumentMatchers.eq(AiPurpose.ROADMAP_GENERATION), org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq(AiCreditRateStatus.ACTIVE), any(Instant.class)))
                 .thenReturn(Optional.of(rate));
-        when(creditWalletRepository.findByUserId(userId)).thenReturn(Optional.of(wallet));
+        when(creditWalletAtomicInitializer.getOrCreate(userId)).thenReturn(wallet);
 
         assertThatThrownBy(() -> creditReservationService.validateSufficientCredits(
                 userId, AiPurpose.ROADMAP_GENERATION, null))
@@ -115,10 +117,11 @@ class CreditReservationServiceTest {
                 AiPurpose.ROADMAP_GENERATION, null, 10L, AiCreditRateStatus.ACTIVE, Instant.now());
 
         when(aiCreditReservationRepository.findByAiExecutionId(executionId)).thenReturn(Optional.empty());
-        when(aiCreditRateRepository.findFirstByPurposeAndModelCategoryAndStatusOrderByEffectiveFromDesc(
-                AiPurpose.ROADMAP_GENERATION, null, AiCreditRateStatus.ACTIVE))
+        when(aiCreditRateRepository.findFirstByPurposeAndModelCategoryAndStatusAndEffectiveFromLessThanEqualOrderByEffectiveFromDescIdDesc(
+                org.mockito.ArgumentMatchers.eq(AiPurpose.ROADMAP_GENERATION), org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq(AiCreditRateStatus.ACTIVE), any(Instant.class)))
                 .thenReturn(Optional.of(rate));
-        when(creditWalletRepository.findByUserIdForUpdate(user.getId())).thenReturn(Optional.of(wallet));
+        when(creditWalletAtomicInitializer.getOrCreate(user.getId())).thenReturn(wallet);
         when(aiCreditReservationRepository.save(any(AiCreditReservation.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
 

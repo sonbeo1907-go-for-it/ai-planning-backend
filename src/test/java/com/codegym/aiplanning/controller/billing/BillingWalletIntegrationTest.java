@@ -168,12 +168,13 @@ class BillingWalletIntegrationTest {
 
     // Test 4 (Zero config): Nếu config welcomeCredits = 0 -> tạo wallet (balance = 0) -> KHÔNG tạo ledger bonus
     @Test
+    @org.springframework.transaction.annotation.Transactional
     void test4_zeroConfig_createsWalletWithZeroBalanceAndNoLedger() {
         UserAccount user = createUser("wallet-zero-user");
         CreditWalletAtomicInitializer zeroInitializer = new CreditWalletAtomicInitializer(
                 creditWalletRepository,
                 creditLedgerEntryRepository,
-                new BillingProperties(0L));
+                new BillingProperties(0L), userAccountRepository);
 
         CreditWallet wallet = zeroInitializer.createWalletWithWelcomeBonus(user);
         assertThat(wallet.getAvailableCredits()).isZero();

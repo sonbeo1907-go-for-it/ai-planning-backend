@@ -79,18 +79,12 @@ public class AiExecutionWorker {
             return;
         }
 
-        com.codegym.aiplanning.service.ai.prompt.ResolvedPrompt resolvedPrompt =
-                systemPromptResolver.resolve(context.purpose());
-        transactionTemplate.executeWithoutResult(status -> {
-            executionRepository.updatePromptReference(
-                    context.executionId(),
-                    resolvedPrompt.versionId(),
-                    resolvedPrompt.source().name(),
-                    Instant.now());
-        });
-
         long startNanos = System.nanoTime();
         try {
+            com.codegym.aiplanning.service.ai.prompt.ResolvedPrompt resolvedPrompt =
+                    systemPromptResolver.resolve(context.purpose());
+            transactionTemplate.executeWithoutResult(status -> executionRepository.updatePromptReference(
+                    context.executionId(), resolvedPrompt.versionId(), resolvedPrompt.source().name(), Instant.now()));
             GenerationResult result = execute(context, resolvedPrompt.content());
             long latencyMs = Math.max(0L, (System.nanoTime() - startNanos) / 1_000_000L);
             AiUsage usage = AiUsageHolder.getAndClear();

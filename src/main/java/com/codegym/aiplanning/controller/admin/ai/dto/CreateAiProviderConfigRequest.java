@@ -20,4 +20,12 @@ public record CreateAiProviderConfigRequest(
         @Min(1) @Max(120) int timeoutSeconds,
         @Min(1) int maxInputTokens,
         @Min(1) int maxOutputTokens,
-        @NotNull @DecimalMin("0.00") @DecimalMax("2.00") BigDecimal temperature) {}
+        @NotNull @DecimalMin("0.00") @DecimalMax("2.00") BigDecimal temperature,
+        @Size(max = 50) @jakarta.validation.constraints.Pattern(regexp = "\\s*([A-Za-z0-9_-]{1,50})?\\s*") String pricingCategory) {
+    public CreateAiProviderConfigRequest(UUID providerId, AiPurpose purpose, String model, boolean enabled,
+            boolean defaultProvider, int timeoutSeconds, int maxInputTokens, int maxOutputTokens,
+            BigDecimal temperature) {
+        this(providerId, purpose, model, enabled, defaultProvider, timeoutSeconds,
+                maxInputTokens, maxOutputTokens, temperature, null);
+    }
+}
