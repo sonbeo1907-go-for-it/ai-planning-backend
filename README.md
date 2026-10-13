@@ -222,6 +222,11 @@ opening a pull request.
 
 ## Payments and AI credits
 
+For the Sprint 5 sandbox demonstration, follow [the VNPay sandbox runbook](docs/vnpay-sandbox.md).
+It covers the existing `.env` loader, a separate `.env.sandbox` override, frontend startup,
+the exact public IPN endpoint, merchant registration and expected ledger/balance results.
+Start the backend with `local,sandbox`; this opt-in profile rejects live gateway URL overrides.
+
 Payments are disabled by default. Set `BILLING_PAYMENTS_ENABLED=true` only after supplying
 `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`, the checkout/query URLs and the return URL.
 Blank or known placeholder credentials fail validation when payments are enabled.
