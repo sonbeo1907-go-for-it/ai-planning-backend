@@ -1,0 +1,152 @@
+package com.codegym.aiplanning.service.evaluation.impl;
+
+import com.codegym.aiplanning.controller.evaluation.dto.QuizOptionDto;
+import com.codegym.aiplanning.service.evaluation.QuizGeneratorService.GeneratedQuestion;
+import com.codegym.aiplanning.service.evaluation.QuizGeneratorService.GeneratedQuizPlan;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import org.springframework.stereotype.Component;
+
+@Component
+public class QuizSchemaValidator {
+
+    private static final Set<String> VALID_OPTION_KEYS = Set.of("A", "B", "C", "D");
+    private final ObjectMapper objectMapper;
+
+    public QuizSchemaValidator(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
+
+    public GeneratedQuizPlan validate(String rawResponse, Set<UUID> validLearningUnitIds) {
+        JsonNode root = parseObject(rawResponse);
+        JsonNode questionsNode = requireArray(root, "questions", "quiz");
+        requireSize(questionsNode, 3, 5, "questions");
+
+        List<GeneratedQuestion> questions = new ArrayList<>();
+        for (int i = 0; i < questionsNode.size(); i++) {
+            JsonNode qNode = questionsNode.get(i);
+            if (!qNode.isObject()) {
+                throw invalid("Each question item must be a JSON object.");
+            }
+
+            UUID learningUnitId = extractAndValidateLearningUnitId(
+                    qNode,
+                    validLearningUnitIds);
+            String questionText = requireText(qNode, "questionText", 1000, "question[" + i + "]");
+            JsonNode optionsNode = requireArray(qNode, "options", "question[" + i + "]");
+            if (optionsNode.size() != 4) {
+                throw invalid("question[" + i + "].options must have exactly 4 choices.");
+            }
+
+            List<QuizOptionDto> options = new ArrayList<>();
+            Set<String> optionKeys = new HashSet<>();
+            for (int j = 0; j < 4; j++) {
+                JsonNode optNode = optionsNode.get(j);
+                if (!optNode.isObject()) {
+                    throw invalid("question[" + i + "].options[" + j + "] must be a JSON object.");
+                }
+                String key = requireText(optNode, "key", 10, "option.key").toUpperCase();
+                if (!VALID_OPTION_KEYS.contains(key)) {
+                    throw invalid("Option key must be A, B, C, or D.");
+                }
+                if (!optionKeys.add(key)) {
+                    throw invalid("Question option keys must contain A, B, C, and D exactly once.");
+                }
+                String text = requireText(optNode, "text", 500, "option.text");
+                options.add(new QuizOptionDto(key, text));
+            }
+
+            String correctOption = requireText(qNode, "correctOption", 10, "question[" + i + "]").toUpperCase();
+            if (!VALID_OPTION_KEYS.contains(correctOption)) {
+                throw invalid("question[" + i + "].correctOption must be A, B, C, or D.");
+            }
+
+            String explanation = requireText(qNode, "explanation", 2000, "question[" + i + "]");
+
+            questions.add(new GeneratedQuestion(
+                    learningUnitId,
+                    questionText,
+                    List.copyOf(options),
+                    correctOption,
+                    explanation,
+                    i));
+        }
+
+        return new GeneratedQuizPlan(List.copyOf(questions));
+    }
+
+    private UUID extractAndValidateLearningUnitId(
+            JsonNode questionNode,
+            Set<UUID> validLearningUnitIds) {
+        JsonNode topicIdNode = questionNode.get("topicId");
+        if (topicIdNode == null || !topicIdNode.isTextual() || topicIdNode.textValue().isBlank()) {
+            throw invalid("Question topicId must be a non-blank UUID string.");
+        }
+
+        try {
+            UUID learningUnitId = UUID.fromString(topicIdNode.textValue().trim());
+            if (validLearningUnitIds != null
+                    && !validLearningUnitIds.isEmpty()
+                    && !validLearningUnitIds.contains(learningUnitId)) {
+                throw invalid(
+                        "Question topicId "
+                                + learningUnitId
+                                + " is not in the list of completed Learning Units.");
+            }
+            return learningUnitId;
+        } catch (IllegalArgumentException e) {
+            throw invalid("Question topicId is not a valid UUID format.");
+        }
+    }
+
+    private JsonNode parseObject(String rawResponse) {
+        if (rawResponse == null || rawResponse.isBlank()) {
+            throw invalid("The AI response is empty.");
+        }
+        try {
+            JsonNode root = objectMapper.readTree(rawResponse);
+            if (root == null || !root.isObject()) {
+                throw invalid("The AI response root must be a JSON object.");
+            }
+            return root;
+        } catch (JsonProcessingException exception) {
+            throw invalid("The AI response is not valid JSON.");
+        }
+    }
+
+    private String requireText(JsonNode node, String field, int maxLength, String context) {
+        JsonNode value = node.get(field);
+        if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+            throw invalid(context + "." + field + " must be a non-blank string.");
+        }
+        String normalized = value.textValue().trim();
+        if (normalized.length() > maxLength) {
+            throw invalid(context + "." + field + " exceeds its maximum length of " + maxLength + ".");
+        }
+        return normalized;
+    }
+
+    private JsonNode requireArray(JsonNode node, String field, String context) {
+        JsonNode value = node.get(field);
+        if (value == null || !value.isArray()) {
+            throw invalid(context + "." + field + " must be an array.");
+        }
+        return value;
+    }
+
+    private void requireSize(JsonNode array, int minimum, int maximum, String field) {
+        if (array.size() < minimum || array.size() > maximum) {
+            throw invalid(field + " must contain between " + minimum + " and " + maximum + " items.");
+        }
+    }
+
+    private InvalidAiQuizResponseException invalid(String message) {
+        return new InvalidAiQuizResponseException(message);
+    }
+}

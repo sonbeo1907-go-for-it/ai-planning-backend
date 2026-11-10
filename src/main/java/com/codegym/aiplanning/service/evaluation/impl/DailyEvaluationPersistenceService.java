@@ -1,0 +1,749 @@
+package com.codegym.aiplanning.service.evaluation.impl;
+
+import com.codegym.aiplanning.common.exception.BusinessException;
+import com.codegym.aiplanning.common.exception.ErrorCode;
+import com.codegym.aiplanning.controller.evaluation.dto.AnswerSubmissionDto;
+import com.codegym.aiplanning.controller.evaluation.dto.DailyEvaluationResponse;
+import com.codegym.aiplanning.controller.evaluation.dto.MasteryCheckResultResponse;
+import com.codegym.aiplanning.controller.evaluation.dto.QuizDetailResponse;
+import com.codegym.aiplanning.controller.evaluation.dto.QuizOptionDto;
+import com.codegym.aiplanning.controller.evaluation.dto.QuizQuestionResponse;
+import com.codegym.aiplanning.controller.evaluation.dto.SubmitQuizRequest;
+import com.codegym.aiplanning.entity.auth.UserAccount;
+import com.codegym.aiplanning.entity.daily.DailyPlan;
+import com.codegym.aiplanning.entity.daily.DailyPlanItem;
+import com.codegym.aiplanning.entity.daily.DailyPlanVersion;
+import com.codegym.aiplanning.entity.daily.DailyTaskStatus;
+import com.codegym.aiplanning.entity.daily.ProgressEntry;
+import com.codegym.aiplanning.entity.daily.ProgressEntryStatus;
+import com.codegym.aiplanning.entity.evaluation.DailyEvaluation;
+import com.codegym.aiplanning.entity.evaluation.Quiz;
+import com.codegym.aiplanning.entity.evaluation.QuizAttempt;
+import com.codegym.aiplanning.entity.evaluation.QuizAttemptAnswer;
+import com.codegym.aiplanning.entity.evaluation.QuizQuestion;
+import com.codegym.aiplanning.entity.evaluation.QuizStatus;
+import com.codegym.aiplanning.entity.evaluation.QuizType;
+import com.codegym.aiplanning.entity.evaluation.WeakTopic;
+import com.codegym.aiplanning.entity.evaluation.WeakTopicStatus;
+import com.codegym.aiplanning.entity.audit.AuditEventAction;
+import com.codegym.aiplanning.entity.roadmap.Roadmap;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItemType;
+import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
+import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanItemRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanVersionRepository;
+import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
+import com.codegym.aiplanning.repository.evaluation.DailyEvaluationRepository;
+import com.codegym.aiplanning.repository.evaluation.QuizAttemptRepository;
+import com.codegym.aiplanning.repository.evaluation.QuizRepository;
+import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
+import com.codegym.aiplanning.repository.profile.UserProfileRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
+import com.codegym.aiplanning.service.evaluation.QuizGeneratorService.GeneratedQuestion;
+import com.codegym.aiplanning.service.evaluation.QuizGeneratorService.GeneratedQuizPlan;
+import com.codegym.aiplanning.service.evaluation.QuizTopicScoredEvent;
+import com.codegym.aiplanning.service.audit.AuditLogService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+public class DailyEvaluationPersistenceService {
+
+    private static final BigDecimal PASSING_SCORE = new BigDecimal("80.00");
+    private static final int MASTERY_PERCENT = 80;
+
+    private final DailyPlanRepository dailyPlanRepository;
+    private final DailyPlanVersionRepository dailyPlanVersionRepository;
+    private final DailyPlanItemRepository dailyPlanItemRepository;
+    private final ProgressEntryRepository progressEntryRepository;
+    private final RoadmapRepository roadmapRepository;
+    private final RoadmapItemRepository roadmapItemRepository;
+    private final UserAccountRepository userAccountRepository;
+    private final QuizRepository quizRepository;
+    private final QuizAttemptRepository quizAttemptRepository;
+    private final WeakTopicRepository weakTopicRepository;
+    private final UserProfileRepository userProfileRepository;
+    private final DailyEvaluationRepository dailyEvaluationRepository;
+    private final ApplicationEventPublisher eventPublisher;
+    private final AuditLogService auditLogService;
+    private final ObjectMapper objectMapper;
+
+    public DailyEvaluationPersistenceService(
+            DailyPlanRepository dailyPlanRepository,
+            DailyPlanVersionRepository dailyPlanVersionRepository,
+            DailyPlanItemRepository dailyPlanItemRepository,
+            ProgressEntryRepository progressEntryRepository,
+            RoadmapRepository roadmapRepository,
+            RoadmapItemRepository roadmapItemRepository,
+            UserAccountRepository userAccountRepository,
+            QuizRepository quizRepository,
+            QuizAttemptRepository quizAttemptRepository,
+            WeakTopicRepository weakTopicRepository,
+            UserProfileRepository userProfileRepository,
+            DailyEvaluationRepository dailyEvaluationRepository,
+            ApplicationEventPublisher eventPublisher,
+            AuditLogService auditLogService,
+            ObjectMapper objectMapper) {
+        this.dailyPlanRepository = dailyPlanRepository;
+        this.dailyPlanVersionRepository = dailyPlanVersionRepository;
+        this.dailyPlanItemRepository = dailyPlanItemRepository;
+        this.progressEntryRepository = progressEntryRepository;
+        this.roadmapRepository = roadmapRepository;
+        this.roadmapItemRepository = roadmapItemRepository;
+        this.userAccountRepository = userAccountRepository;
+        this.quizRepository = quizRepository;
+        this.quizAttemptRepository = quizAttemptRepository;
+        this.weakTopicRepository = weakTopicRepository;
+        this.userProfileRepository = userProfileRepository;
+        this.dailyEvaluationRepository = dailyEvaluationRepository;
+        this.eventPublisher = eventPublisher;
+        this.auditLogService = auditLogService;
+        this.objectMapper = objectMapper;
+    }
+
+    public record DailyQuizContext(
+            DailyPlan dailyPlan,
+            DailyPlanVersion dailyPlanVersion,
+            Roadmap roadmap,
+            RoadmapVersion roadmapVersion,
+            List<UUID> completedLearningUnitIds) {}
+
+    @Transactional(readOnly = true)
+    public DailyQuizContext prepareDailyQuizContext(
+            UUID userId,
+            UUID dailyPlanVersionId) {
+        DailyPlanVersion version = dailyPlanVersionRepository.findById(dailyPlanVersionId)
+                .orElseThrow(() -> notFound("Daily Plan version was not found."));
+        DailyPlan plan = dailyPlanRepository.findByIdAndUserId(version.getDailyPlanId(), userId)
+                .orElseThrow(() -> notFound("Daily Plan version was not found."));
+        if (!dailyPlanVersionId.equals(plan.getActiveVersionId())) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Only the active Daily Plan version can generate a daily quiz.");
+        }
+        Roadmap roadmap = roadmapRepository.findByIdAndOwnerId(plan.getRoadmapId(), userId)
+                .orElseThrow(() -> notFound("Roadmap was not found."));
+
+        List<UUID> completedLearningUnitIds = findCompletedLearningUnitIds(version.getId());
+        RoadmapVersion roadmapVersion = validateCompletedLearningUnits(
+                userId,
+                roadmap,
+                completedLearningUnitIds);
+        return new DailyQuizContext(
+                plan,
+                version,
+                roadmap,
+                roadmapVersion,
+                completedLearningUnitIds);
+    }
+
+    @Transactional(readOnly = true)
+    public UUID resolveActiveVersionId(UUID userId, UUID dailyPlanId) {
+        DailyPlan plan = dailyPlanRepository.findByIdAndUserId(dailyPlanId, userId)
+                .orElseThrow(() -> notFound("Daily Plan was not found."));
+        if (plan.getActiveVersionId() == null) {
+            throw new BusinessException(
+                    ErrorCode.INSUFFICIENT_COMPLETED_TASKS,
+                    "Activate a Daily Plan version before generating a quiz.");
+        }
+        return plan.getActiveVersionId();
+    }
+
+    private List<UUID> findCompletedLearningUnitIds(UUID versionId) {
+        List<DailyPlanItem> items = dailyPlanItemRepository
+                .findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId);
+        if (items.isEmpty()) {
+            throw insufficientCompletedTasks();
+        }
+
+        List<UUID> itemIds = items.stream()
+                .map(DailyPlanItem::getId)
+                .toList();
+        List<ProgressEntry> entries = progressEntryRepository
+                .findByDailyPlanItemIdInOrderByRecordedAtDesc(itemIds);
+        Map<UUID, ProgressEntryStatus> latestStatus = new HashMap<>();
+        for (ProgressEntry entry : entries) {
+            if (entry.getDailyPlanItemId() != null) {
+                latestStatus.putIfAbsent(
+                        entry.getDailyPlanItemId(),
+                        entry.getStatus());
+            }
+        }
+
+        Set<UUID> learningUnitIds = new HashSet<>();
+        for (DailyPlanItem item : items) {
+            ProgressEntryStatus status = latestStatus.get(item.getId());
+            boolean completed = status == ProgressEntryStatus.COMPLETED
+                    || (status == null
+                    && item.getStatus() == DailyTaskStatus.COMPLETED);
+            if (completed && item.getRoadmapItemId() != null) {
+                learningUnitIds.add(item.getRoadmapItemId());
+            }
+        }
+        if (learningUnitIds.isEmpty()) {
+            throw insufficientCompletedTasks();
+        }
+        return new ArrayList<>(learningUnitIds);
+    }
+
+    private RoadmapVersion validateCompletedLearningUnits(
+            UUID userId,
+            Roadmap roadmap,
+            List<UUID> learningUnitIds) {
+        RoadmapVersion expectedVersion = null;
+        for (UUID learningUnitId : learningUnitIds) {
+            RoadmapItem item = roadmapItemRepository.findOwnedById(learningUnitId, userId)
+                    .orElseThrow(() -> notFound("Completed Roadmap Learning Unit was not found."));
+            if (!hasValidLearningUnitHierarchy(item)
+                    || !item.getRoadmapVersion().getRoadmap().getId().equals(roadmap.getId())) {
+                throw new BusinessException(
+                        ErrorCode.ROADMAP_STRUCTURE_INCOMPLETE,
+                        "Completed tasks must reference Learning Units from the Daily Plan Roadmap.");
+            }
+            if (expectedVersion == null) {
+                expectedVersion = item.getRoadmapVersion();
+            } else if (!expectedVersion.getId().equals(item.getRoadmapVersion().getId())) {
+                throw new BusinessException(
+                        ErrorCode.ROADMAP_STRUCTURE_INCOMPLETE,
+                        "A Daily Plan quiz cannot mix Learning Units from different Roadmap versions.");
+            }
+        }
+        return expectedVersion;
+    }
+
+    private boolean hasValidLearningUnitHierarchy(RoadmapItem learningUnit) {
+        if (learningUnit.getItemType() != RoadmapItemType.LEARNING_UNIT
+                || learningUnit.getRoadmapVersion() == null) {
+            return false;
+        }
+        RoadmapItem topic = learningUnit.getParent();
+        RoadmapItem milestone = topic == null ? null : topic.getParent();
+        UUID versionId = learningUnit.getRoadmapVersion().getId();
+        return topic != null
+                && topic.getItemType() == RoadmapItemType.TOPIC
+                && topic.getRoadmapVersion() != null
+                && versionId.equals(topic.getRoadmapVersion().getId())
+                && milestone != null
+                && milestone.getItemType() == RoadmapItemType.MILESTONE
+                && milestone.getRoadmapVersion() != null
+                && versionId.equals(milestone.getRoadmapVersion().getId());
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<QuizDetailResponse> findExistingGeneratedQuiz(
+            UUID userId,
+            UUID dailyPlanVersionId) {
+        return quizRepository
+                .findWithQuestionsByUserIdAndDailyPlanVersionIdAndQuizType(
+                        userId,
+                        dailyPlanVersionId,
+                        QuizType.DAILY_MICRO_QUIZ)
+                .stream()
+                .filter(quiz -> quiz.getStatus() == QuizStatus.GENERATED)
+                .findFirst()
+                .map(this::mapToQuizDetailResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<QuizDetailResponse> findLatestDailyQuiz(
+            UUID userId,
+            UUID dailyPlanId) {
+        List<Quiz> quizzes = quizRepository
+                .findWithQuestionsByUserIdAndDailyPlanIdAndQuizType(
+                        userId,
+                        dailyPlanId,
+                        QuizType.DAILY_MICRO_QUIZ);
+        if (quizzes.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(mapToQuizDetailResponse(quizzes.get(0)));
+    }
+
+    @Transactional(readOnly = true)
+    public List<QuizDetailResponse> getAllDailyQuizzes(
+            UUID userId,
+            UUID dailyPlanId) {
+        return quizRepository
+                .findWithQuestionsByUserIdAndDailyPlanIdAndQuizType(
+                        userId,
+                        dailyPlanId,
+                        QuizType.DAILY_MICRO_QUIZ)
+                .stream()
+                .map(this::mapToQuizDetailResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public QuizDetailResponse getDailyQuizById(
+            UUID userId,
+            UUID dailyPlanId,
+            UUID quizId) {
+        Quiz quiz = getOwnedQuiz(quizId, userId);
+        if (quiz.getDailyPlan() == null
+                || !dailyPlanId.equals(quiz.getDailyPlan().getId())) {
+            throw notFound("Quiz was not found.");
+        }
+        return mapToQuizDetailResponse(quiz);
+    }
+
+    @Transactional
+    public QuizDetailResponse saveGeneratedDailyQuiz(
+            UUID userId,
+            DailyQuizContext context,
+            GeneratedQuizPlan generatedPlan) {
+        Optional<QuizDetailResponse> existing = findExistingGeneratedQuiz(
+                userId,
+                context.dailyPlanVersion().getId());
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+
+        UserAccount user = userAccountRepository.findById(userId)
+                .orElseThrow(() -> notFound("User was not found."));
+        Map<UUID, RoadmapItem> allowedLearningUnits = loadAllowedLearningUnits(
+                userId,
+                context,
+                generatedPlan);
+        Quiz quiz = Quiz.createDailyMicroQuiz(
+                user,
+                context.dailyPlan(),
+                context.dailyPlanVersion(),
+                context.roadmap(),
+                context.roadmapVersion());
+        addQuestions(quiz, generatedPlan, allowedLearningUnits);
+        return mapToQuizDetailResponse(quizRepository.saveAndFlush(quiz));
+    }
+
+    private Map<UUID, RoadmapItem> loadAllowedLearningUnits(
+            UUID userId,
+            DailyQuizContext context,
+            GeneratedQuizPlan generatedPlan) {
+        Set<UUID> allowedIds = new HashSet<>(context.completedLearningUnitIds());
+        Map<UUID, RoadmapItem> result = new HashMap<>();
+        for (GeneratedQuestion question : generatedPlan.questions()) {
+            UUID itemId = question.roadmapItemId();
+            if (itemId == null || !allowedIds.contains(itemId)) {
+                throw new BusinessException(
+                        ErrorCode.AI_OUTPUT_INVALID,
+                        "AI quiz referenced a Learning Unit outside the completed context.");
+            }
+            RoadmapItem item = roadmapItemRepository.findOwnedById(itemId, userId)
+                    .orElseThrow(() -> notFound("Roadmap Learning Unit was not found."));
+            if (item.getItemType() != RoadmapItemType.LEARNING_UNIT) {
+                throw new BusinessException(
+                        ErrorCode.AI_OUTPUT_INVALID,
+                        "AI quiz referenced a Roadmap Item that is not a Learning Unit.");
+            }
+            if (!context.roadmapVersion().getId()
+                    .equals(item.getRoadmapVersion().getId())) {
+                throw new BusinessException(
+                        ErrorCode.AI_OUTPUT_INVALID,
+                        "AI quiz referenced a Learning Unit from another Roadmap version.");
+            }
+            result.put(itemId, item);
+        }
+        return result;
+    }
+
+    private void addQuestions(
+            Quiz quiz,
+            GeneratedQuizPlan generatedPlan,
+            Map<UUID, RoadmapItem> learningUnits) {
+        for (GeneratedQuestion generated : generatedPlan.questions()) {
+            QuizQuestion question = QuizQuestion.create(
+                    learningUnits.get(generated.roadmapItemId()),
+                    generated.questionText(),
+                    serializeOptions(generated.options()),
+                    generated.correctOption(),
+                    generated.explanation(),
+                    generated.orderIndex());
+            quiz.addQuestion(question);
+        }
+    }
+
+    @Transactional
+    public QuizDetailResponse submitDailyQuiz(
+            UUID userId,
+            UUID dailyPlanId,
+            UUID quizId,
+            SubmitQuizRequest request) {
+        Quiz quiz = getOwnedQuizForUpdate(quizId, userId);
+        if (quiz.getDailyPlan() == null
+                || !dailyPlanId.equals(quiz.getDailyPlan().getId())) {
+            throw notFound("Quiz was not found.");
+        }
+        if (quiz.getStatus() == QuizStatus.SUBMITTED) {
+            throw new BusinessException(
+                    ErrorCode.QUIZ_ALREADY_SUBMITTED,
+                    "This quiz was already submitted.");
+        }
+
+        Map<UUID, String> answers = validateAnswers(quiz, request);
+        QuizAttempt attempt = gradeAttempt(quiz, answers);
+        quiz.markSubmitted();
+        quizRepository.save(quiz);
+        quizAttemptRepository.saveAndFlush(attempt);
+        updateDailyEvaluation(quiz, attempt);
+        updateWeakTopics(userId, quiz, attempt);
+        return mapToQuizDetailResponse(quiz, attempt);
+    }
+
+    @Transactional
+    public MasteryCheckResultResponse submitMasteryQuiz(
+            UUID userId,
+            UUID weakTopicId,
+            UUID quizId,
+            SubmitQuizRequest request) {
+        Quiz quiz = getOwnedQuizForUpdate(quizId, userId);
+        if (quiz.getTargetWeakTopic() == null
+                || !weakTopicId.equals(quiz.getTargetWeakTopic().getId())
+                || quiz.getQuizType() != QuizType.MASTERY_CHECK) {
+            throw notFound("Mastery quiz was not found.");
+        }
+        WeakTopic weakTopic = weakTopicRepository
+                .findByIdAndUserIdForUpdate(weakTopicId, userId)
+                .orElseThrow(() -> notFound("Weak Topic was not found."));
+        if (!quiz.getRoadmap().getId().equals(weakTopic.getRoadmap().getId())
+                || !quiz.getRoadmapVersion().getId().equals(weakTopic.getRoadmapVersion().getId())
+                || quiz.getQuestions().stream().anyMatch(question ->
+                        !question.getRoadmapItem().getId().equals(weakTopic.getRoadmapItem().getId()))) {
+            throw notFound("Mastery quiz was not found.");
+        }
+        if (quiz.getStatus() == QuizStatus.SUBMITTED) {
+            QuizAttempt existingAttempt = quizAttemptRepository
+                    .findFirstByQuizIdAndUserIdOrderByAttemptNumberDesc(quizId, userId)
+                    .orElseThrow(() -> notFound("Mastery attempt was not found."));
+            return mapMasteryResult(weakTopic, quiz, existingAttempt);
+        }
+        if (weakTopic.getStatus() == WeakTopicStatus.MASTERED) {
+            throw new BusinessException(
+                    ErrorCode.WEAK_TOPIC_ALREADY_MASTERED,
+                    "Weak Topic is already mastered.");
+        }
+        if (!weakTopic.isEligibleForMastery(Instant.now())) {
+            throw new BusinessException(
+                    ErrorCode.WEAK_TOPIC_NOT_ELIGIBLE,
+                    "A mastery check is available from the next local calendar day.");
+        }
+        Map<UUID, String> answers = validateAnswers(quiz, request);
+        QuizAttempt attempt = gradeAttempt(quiz, answers);
+        quiz.markSubmitted();
+        quizRepository.save(quiz);
+        quizAttemptRepository.saveAndFlush(attempt);
+        if (attempt.isPassed()) {
+            weakTopic.markMastered(Instant.now(), attempt.getScore());
+        } else {
+            weakTopic.markMasteryFailed(attempt.getScore());
+        }
+        weakTopicRepository.save(weakTopic);
+        auditLogService.logAction(
+                userId,
+                quiz.getUser().getEmail(),
+                AuditEventAction.MASTERY_ATTEMPT_SUBMITTED,
+                "QuizAttempt",
+                attempt.getId().toString());
+        if (attempt.isPassed()) {
+            auditLogService.logAction(
+                    userId,
+                    quiz.getUser().getEmail(),
+                    AuditEventAction.WEAK_TOPIC_MASTERED,
+                    "WeakTopic",
+                    weakTopicId.toString());
+        }
+        return mapMasteryResult(weakTopic, quiz, attempt);
+    }
+
+    private MasteryCheckResultResponse mapMasteryResult(
+            WeakTopic weakTopic,
+            Quiz quiz,
+            QuizAttempt attempt) {
+        int correctCount = (int) attempt.getAnswers().stream()
+                .filter(QuizAttemptAnswer::isCorrect)
+                .count();
+        boolean mastered = attempt.isPassed();
+        return new MasteryCheckResultResponse(
+                weakTopic.getId(),
+                quiz.getId(),
+                attempt.getId(),
+                attempt.getScore(),
+                correctCount,
+                quiz.getQuestions().size(),
+                mastered,
+                weakTopic.getStatus(),
+                weakTopic.getStatus() != WeakTopicStatus.MASTERED
+                        && weakTopic.isEligibleForMastery(Instant.now()),
+                masteryMessage(quiz.getUser().getId(), mastered));
+    }
+
+    private String masteryMessage(UUID userId, boolean mastered) {
+        boolean vietnamese = userProfileRepository.findByUserId(userId)
+                .map(profile -> profile.getLocale().startsWith("vi"))
+                .orElse(false);
+        if (vietnamese) {
+            return mastered
+                    ? "Bạn đã nắm vững đơn vị học này."
+                    : "Đơn vị học vẫn cần được củng cố.";
+        }
+        return mastered
+                ? "You have mastered this learning unit."
+                : "This learning unit still needs reinforcement.";
+    }
+
+    private Map<UUID, String> validateAnswers(
+            Quiz quiz,
+            SubmitQuizRequest request) {
+        List<AnswerSubmissionDto> submitted = request.answers();
+        if (submitted.size() != quiz.getQuestions().size()) {
+            throw new BusinessException(
+                    ErrorCode.QUIZ_ANSWERS_INCOMPLETE,
+                    "Every quiz question must be answered exactly once.");
+        }
+
+        Set<UUID> questionIds = quiz.getQuestions().stream()
+                .map(QuizQuestion::getId)
+                .collect(java.util.stream.Collectors.toSet());
+        Map<UUID, String> answers = new HashMap<>();
+        for (AnswerSubmissionDto answer : submitted) {
+            if (!questionIds.contains(answer.questionId())) {
+                throw new BusinessException(
+                        ErrorCode.QUIZ_QUESTION_NOT_FOUND,
+                        "An answer referenced a question outside this quiz.");
+            }
+            String option = answer.selectedOption().trim().toUpperCase();
+            if (!Set.of("A", "B", "C", "D").contains(option)) {
+                throw new BusinessException(
+                        ErrorCode.QUIZ_OPTION_INVALID,
+                        "Selected options must be A, B, C, or D.");
+            }
+            if (answers.put(answer.questionId(), option) != null) {
+                throw new BusinessException(
+                        ErrorCode.QUIZ_ANSWER_DUPLICATE,
+                        "A quiz question cannot be answered more than once.");
+            }
+        }
+        return answers;
+    }
+
+    QuizAttempt gradeAttempt(
+            Quiz quiz,
+            Map<UUID, String> submittedAnswers) {
+        int correctCount = 0;
+        List<QuizAttemptAnswer> gradedAnswers = new ArrayList<>();
+        for (QuizQuestion question : quiz.getQuestions()) {
+            QuizAttemptAnswer answer = QuizAttemptAnswer.create(
+                    question,
+                    submittedAnswers.get(question.getId()));
+            gradedAnswers.add(answer);
+            if (answer.isCorrect()) {
+                correctCount++;
+            }
+        }
+
+        BigDecimal score = BigDecimal
+                .valueOf((double) correctCount * 100.0 / quiz.getQuestions().size())
+                .setScale(2, RoundingMode.HALF_UP);
+        QuizAttempt attempt = QuizAttempt.create(
+                quiz,
+                quiz.getUser(),
+                1,
+                score,
+                quiz.getQuizType() == QuizType.MASTERY_CHECK
+                        ? correctCount * 100 >= MASTERY_PERCENT * quiz.getQuestions().size()
+                        : score.compareTo(PASSING_SCORE) >= 0,
+                Instant.now());
+        gradedAnswers.forEach(attempt::addAnswer);
+        return attempt;
+    }
+
+    private void updateDailyEvaluation(
+            Quiz quiz,
+            QuizAttempt attempt) {
+        DailyEvaluation evaluation = dailyEvaluationRepository
+                .findByUserIdAndDailyPlanVersionId(
+                        quiz.getUser().getId(),
+                        quiz.getDailyPlanVersion().getId())
+                .orElseGet(() -> DailyEvaluation.create(
+                        quiz.getUser(),
+                        quiz.getDailyPlan(),
+                        quiz.getDailyPlanVersion(),
+                        quiz.getDailyPlan().getPlanDate(),
+                        null,
+                        null,
+                        null,
+                        null));
+        evaluation.updateQuizResult(
+                attempt.getScore(),
+                attempt.isPassed());
+        dailyEvaluationRepository.save(evaluation);
+    }
+
+    private void updateWeakTopics(
+            UUID userId,
+            Quiz quiz,
+            QuizAttempt attempt) {
+        Map<UUID, int[]> perLearningUnit = new HashMap<>();
+        for (QuizAttemptAnswer answer : attempt.getAnswers()) {
+            UUID learningUnitId = answer.getQuestion().getRoadmapItem().getId();
+            int[] counts = perLearningUnit.computeIfAbsent(
+                    learningUnitId,
+                    ignored -> new int[2]);
+            counts[1]++;
+            if (answer.isCorrect()) {
+                counts[0]++;
+            }
+        }
+        for (Map.Entry<UUID, int[]> entry : perLearningUnit.entrySet()) {
+            int[] counts = entry.getValue();
+            BigDecimal score = BigDecimal
+                    .valueOf((double) counts[0] * 100.0 / counts[1])
+                    .setScale(2, RoundingMode.HALF_UP);
+            eventPublisher.publishEvent(new QuizTopicScoredEvent(
+                    userId,
+                    quiz.getRoadmap().getId(),
+                    entry.getKey(),
+                    score));
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public DailyEvaluationResponse getDailyEvaluation(
+            UUID userId,
+            UUID dailyPlanId) {
+        UUID versionId = resolveActiveVersionId(userId, dailyPlanId);
+        return dailyEvaluationRepository
+                .findByUserIdAndDailyPlanVersionId(userId, versionId)
+                .map(this::mapEvaluation)
+                .orElse(null);
+    }
+
+    public QuizDetailResponse mapToQuizDetailResponse(Quiz quiz) {
+        QuizAttempt attempt = quizAttemptRepository
+                .findFirstByQuizIdAndUserIdOrderByAttemptNumberDesc(
+                        quiz.getId(),
+                        quiz.getUser().getId())
+                .orElse(null);
+        return mapToQuizDetailResponse(quiz, attempt);
+    }
+
+    private QuizDetailResponse mapToQuizDetailResponse(
+            Quiz quiz,
+            QuizAttempt attempt) {
+        Map<UUID, QuizAttemptAnswer> answers = new HashMap<>();
+        if (attempt != null) {
+            for (QuizAttemptAnswer answer : attempt.getAnswers()) {
+                answers.put(answer.getQuestion().getId(), answer);
+            }
+        }
+        boolean submitted = attempt != null;
+        List<QuizQuestionResponse> questions = quiz.getQuestions().stream()
+                .map(question -> mapQuestion(question, answers.get(question.getId()), submitted))
+                .toList();
+        return new QuizDetailResponse(
+                quiz.getId(),
+                quiz.getDailyPlan() == null ? null : quiz.getDailyPlan().getId(),
+                quiz.getDailyPlanVersion() == null
+                        ? null
+                        : quiz.getDailyPlanVersion().getId(),
+                quiz.getRoadmap().getId(),
+                quiz.getQuizType(),
+                quiz.getStatus(),
+                submitted ? attempt.getScore() : null,
+                submitted ? attempt.isPassed() : null,
+                submitted ? attempt.getSubmittedAt() : null,
+                questions);
+    }
+
+    private QuizQuestionResponse mapQuestion(
+            QuizQuestion question,
+            QuizAttemptAnswer answer,
+            boolean submitted) {
+        return new QuizQuestionResponse(
+                question.getId(),
+                question.getRoadmapItem().getId(),
+                question.getQuestionText(),
+                deserializeOptions(question.getOptionsJson()),
+                submitted ? question.getCorrectOption() : null,
+                answer == null ? null : answer.getSelectedOption(),
+                answer == null ? null : answer.isCorrect(),
+                submitted ? question.getExplanation() : null);
+    }
+
+    private DailyEvaluationResponse mapEvaluation(DailyEvaluation evaluation) {
+        return new DailyEvaluationResponse(
+                evaluation.getId(),
+                evaluation.getDailyPlan().getId(),
+                evaluation.getDailyPlanVersion().getId(),
+                evaluation.getEvaluationDate(),
+                evaluation.getQuizScore(),
+                evaluation.getQuizPassed(),
+                evaluation.getOverallRating(),
+                evaluation.getFeedbackNote(),
+                evaluation.getCreatedAt());
+    }
+
+    private Quiz getOwnedQuiz(UUID quizId, UUID userId) {
+        return quizRepository.findWithQuestionsByIdAndUserId(quizId, userId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.QUIZ_NOT_FOUND,
+                        "Quiz was not found."));
+    }
+
+    private Quiz getOwnedQuizForUpdate(UUID quizId, UUID userId) {
+        return quizRepository.findWithQuestionsByIdAndUserIdForUpdate(quizId, userId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.QUIZ_NOT_FOUND,
+                        "Quiz was not found."));
+    }
+
+    private String serializeOptions(List<QuizOptionDto> options) {
+        try {
+            return objectMapper.writeValueAsString(options);
+        } catch (JsonProcessingException exception) {
+            throw new BusinessException(
+                    ErrorCode.INTERNAL_ERROR,
+                    "Quiz options could not be serialized.");
+        }
+    }
+
+    private List<QuizOptionDto> deserializeOptions(String json) {
+        if (json == null || json.isBlank()) {
+            return Collections.emptyList();
+        }
+        try {
+            return objectMapper.readValue(
+                    json,
+                    new TypeReference<List<QuizOptionDto>>() {});
+        } catch (JsonProcessingException exception) {
+            return Collections.emptyList();
+        }
+    }
+
+    private BusinessException insufficientCompletedTasks() {
+        return new BusinessException(
+                ErrorCode.INSUFFICIENT_COMPLETED_TASKS,
+                "Complete at least one Roadmap-linked task before generating a quiz.");
+    }
+
+    private BusinessException notFound(String message) {
+        return new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, message);
+    }
+}

@@ -1,0 +1,17 @@
+# Activate alongside local: -Dspring-boot.run.profiles=local,sandbox
+# Local keeps the existing DB/auth settings and .env loader; this adds payment overrides.
+spring:
+  config:
+    import: "optional:file:./.env.sandbox[.properties]"
+
+app:
+  billing:
+    payments-enabled: ${BILLING_PAYMENTS_ENABLED:false}
+    vnpay:
+      payment-url: https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+      query-url: https://sandbox.vnpayment.vn/merchant_webapi/api/transaction
+      tmn-code: ${VNPAY_TMN_CODE:}
+      hash-secret: ${VNPAY_HASH_SECRET:}
+      return-url: ${VNPAY_RETURN_URL:http://localhost:3000/billing/checkout/result}
+      server-ip: ${VNPAY_SERVER_IP:127.0.0.1}
+      timeout-seconds: ${VNPAY_TIMEOUT_SECONDS:10}

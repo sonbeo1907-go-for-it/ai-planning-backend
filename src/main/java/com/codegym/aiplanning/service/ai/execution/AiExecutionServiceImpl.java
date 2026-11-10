@@ -1,0 +1,680 @@
+package com.codegym.aiplanning.service.ai.execution;
+
+import com.codegym.aiplanning.common.exception.BusinessException;
+import com.codegym.aiplanning.common.exception.ErrorCode;
+import com.codegym.aiplanning.controller.ai.dto.AiExecutionResponse;
+import com.codegym.aiplanning.entity.ai.AiExecution;
+import com.codegym.aiplanning.entity.ai.AiExecutionInput;
+import com.codegym.aiplanning.entity.ai.AiExecutionOperation;
+import com.codegym.aiplanning.entity.ai.AiExecutionStatus;
+import com.codegym.aiplanning.entity.ai.AiExecutionTargetType;
+import com.codegym.aiplanning.entity.ai.AiProviderConfig;
+import com.codegym.aiplanning.entity.ai.AiPurpose;
+import com.codegym.aiplanning.entity.audit.AuditEventAction;
+import com.codegym.aiplanning.entity.auth.UserAccount;
+import com.codegym.aiplanning.entity.daily.DailyPlan;
+import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
+import com.codegym.aiplanning.entity.evaluation.WeakTopic;
+import com.codegym.aiplanning.entity.evaluation.WeakTopicStatus;
+import com.codegym.aiplanning.repository.ai.AiExecutionInputRepository;
+import com.codegym.aiplanning.repository.ai.AiExecutionRepository;
+import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
+import com.codegym.aiplanning.service.ai.AiProviderSelector;
+import com.codegym.aiplanning.service.audit.AuditLogService;
+import com.codegym.aiplanning.service.roadmap.impl.AiRoadmapPersistenceService;
+import com.codegym.aiplanning.service.evaluation.impl.DailyEvaluationPersistenceService;
+import com.codegym.aiplanning.repository.evaluation.WeakTopicRepository;
+import com.codegym.aiplanning.repository.guidance.TaskGuidanceRepository;
+import com.codegym.aiplanning.service.guidance.TaskGuidanceContextBuilder;
+import com.codegym.aiplanning.service.billing.CreditReservationService;
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+public class AiExecutionServiceImpl implements AiExecutionService {
+
+    private static final List<AiExecutionStatus> ACTIVE_STATUSES =
+            List.of(AiExecutionStatus.QUEUED, AiExecutionStatus.RUNNING);
+
+    private final AiExecutionRepository executionRepository;
+    private final AiExecutionInputRepository inputRepository;
+    private final UserAccountRepository userAccountRepository;
+    private final AiProviderSelector providerSelector;
+    private final AiRoadmapPersistenceService roadmapPersistenceService;
+    private final DailyPlanRepository dailyPlanRepository;
+    private final AuditLogService auditLogService;
+    private final DailyEvaluationPersistenceService evaluationPersistenceService;
+    private final WeakTopicRepository weakTopicRepository;
+    private final TaskGuidanceContextBuilder taskGuidanceContextBuilder;
+    private final TaskGuidanceRepository taskGuidanceRepository;
+    private final CreditReservationService creditReservationService;
+
+    public AiExecutionServiceImpl(
+            AiExecutionRepository executionRepository,
+            AiExecutionInputRepository inputRepository,
+            UserAccountRepository userAccountRepository,
+            AiProviderSelector providerSelector,
+            AiRoadmapPersistenceService roadmapPersistenceService,
+            DailyPlanRepository dailyPlanRepository,
+            AuditLogService auditLogService,
+            DailyEvaluationPersistenceService evaluationPersistenceService,
+            WeakTopicRepository weakTopicRepository,
+            TaskGuidanceContextBuilder taskGuidanceContextBuilder,
+            TaskGuidanceRepository taskGuidanceRepository,
+            CreditReservationService creditReservationService) {
+        this.executionRepository = executionRepository;
+        this.inputRepository = inputRepository;
+        this.userAccountRepository = userAccountRepository;
+        this.providerSelector = providerSelector;
+        this.roadmapPersistenceService = roadmapPersistenceService;
+        this.dailyPlanRepository = dailyPlanRepository;
+        this.auditLogService = auditLogService;
+        this.evaluationPersistenceService = evaluationPersistenceService;
+        this.weakTopicRepository = weakTopicRepository;
+        this.taskGuidanceContextBuilder = taskGuidanceContextBuilder;
+        this.taskGuidanceRepository = taskGuidanceRepository;
+        this.creditReservationService = creditReservationService;
+    }
+
+    @Override
+    @Transactional
+    public AiExecutionResponse submitRoadmapGeneration(
+            UUID ownerId,
+            UUID roadmapId,
+            List<UUID> materialIds,
+            String idempotencyKey) {
+        return submit(
+                ownerId,
+                roadmapId,
+                materialIds == null ? List.of() : materialIds,
+                null,
+                AiExecutionOperation.GENERATE,
+                idempotencyKey);
+    }
+
+    @Override
+    @Transactional
+    public AiExecutionResponse submitRoadmapRegeneration(
+            UUID ownerId,
+            UUID roadmapId,
+            String adjustmentPrompt,
+            String idempotencyKey) {
+        return submit(
+                ownerId,
+                roadmapId,
+                List.of(),
+                normalizePrompt(adjustmentPrompt),
+                AiExecutionOperation.REGENERATE,
+                idempotencyKey);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AiExecutionResponse getOwnedExecution(UUID ownerId, UUID executionId) {
+        return AiExecutionResponse.from(executionRepository
+                .findByIdAndOwnerId(executionId, ownerId)
+                .orElseThrow(this::notFound));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AiExecutionResponse getLatestRoadmapExecution(
+            UUID ownerId, UUID roadmapId) {
+        return AiExecutionResponse.from(executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.ROADMAP,
+                        roadmapId,
+                        AiPurpose.ROADMAP_GENERATION)
+                .orElseThrow(this::notFound));
+    }
+
+    @Override
+    @Transactional
+    public AiExecutionResponse submitDailyPlanGeneration(
+            UUID ownerId, UUID dailyPlanId, String idempotencyKey) {
+        return submitDailyPlan(
+                ownerId,
+                dailyPlanId,
+                AiExecutionOperation.GENERATE,
+                idempotencyKey);
+    }
+
+    @Override
+    @Transactional
+    public AiExecutionResponse submitDailyPlanRegeneration(
+            UUID ownerId, UUID dailyPlanId, String idempotencyKey) {
+        return submitDailyPlan(
+                ownerId,
+                dailyPlanId,
+                AiExecutionOperation.REGENERATE,
+                idempotencyKey);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AiExecutionResponse getLatestDailyPlanExecution(
+            UUID ownerId, UUID dailyPlanId) {
+        return AiExecutionResponse.from(executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.DAILY_PLAN,
+                        dailyPlanId,
+                        AiPurpose.DAILY_PLAN_GENERATION)
+                .orElseThrow(this::notFound));
+    }
+
+    @Override
+    @Transactional
+    public AiExecutionResponse submitDailyQuizGeneration(
+            UUID ownerId,
+            UUID dailyPlanId,
+            String idempotencyKey) {
+        UUID versionId = evaluationPersistenceService.resolveActiveVersionId(
+                ownerId,
+                dailyPlanId);
+        evaluationPersistenceService.prepareDailyQuizContext(ownerId, versionId);
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        if (normalizedKey != null) {
+            AiExecution existing = findMatchingIdempotentExecution(
+                    ownerId,
+                    normalizedKey,
+                    AiExecutionTargetType.DAILY_PLAN_VERSION,
+                    versionId,
+                    AiPurpose.QUIZ_GENERATION,
+                    AiExecutionOperation.GENERATE);
+            if (existing != null) {
+                return AiExecutionResponse.from(existing);
+            }
+        }
+
+        AiExecution active = executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.DAILY_PLAN_VERSION,
+                        versionId,
+                        AiPurpose.QUIZ_GENERATION,
+                        ACTIVE_STATUSES)
+                .orElse(null);
+        if (active != null) {
+            return AiExecutionResponse.from(active);
+        }
+
+        UserAccount owner = userAccountRepository.findById(ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.AUTHENTICATION_REQUIRED,
+                        "The authenticated account is unavailable."));
+        AiProviderConfig providerConfig = providerSelector.requireDefault(
+                AiPurpose.QUIZ_GENERATION);
+        creditReservationService.validateSufficientCredits(
+                ownerId, AiPurpose.QUIZ_GENERATION, providerConfig.getPricingCategory());
+        AiExecution execution = executionRepository.saveAndFlush(AiExecution.queue(
+                owner,
+                providerConfig,
+                AiPurpose.QUIZ_GENERATION,
+                AiExecutionOperation.GENERATE,
+                AiExecutionTargetType.DAILY_PLAN_VERSION,
+                versionId,
+                normalizedKey));
+        creditReservationService.reserveCredits(
+                owner, execution.getId(), AiPurpose.QUIZ_GENERATION, providerConfig.getPricingCategory());
+        auditLogService.logAction(
+                ownerId,
+                owner.getEmail(),
+                AuditEventAction.AI_EXECUTION_QUEUED,
+                "AiExecution",
+                execution.getId().toString());
+        return AiExecutionResponse.from(execution);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AiExecutionResponse getLatestDailyQuizExecution(
+            UUID ownerId,
+            UUID dailyPlanId) {
+        UUID versionId = evaluationPersistenceService.resolveActiveVersionId(
+                ownerId,
+                dailyPlanId);
+        return AiExecutionResponse.from(executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.DAILY_PLAN_VERSION,
+                        versionId,
+                        AiPurpose.QUIZ_GENERATION)
+                .orElseThrow(this::notFound));
+    }
+
+    @Override
+    @Transactional
+    public AiExecutionResponse submitMasteryCheckGeneration(
+            UUID ownerId,
+            UUID weakTopicId,
+            String idempotencyKey) {
+        WeakTopic weakTopic = weakTopicRepository.findByIdAndUserId(weakTopicId, ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.WEAK_TOPIC_NOT_FOUND,
+                        "Weak Topic was not found."));
+        if (weakTopic.getStatus() == WeakTopicStatus.MASTERED) {
+            throw new BusinessException(
+                    ErrorCode.WEAK_TOPIC_ALREADY_MASTERED,
+                    "A mastered topic does not require another mastery check.");
+        }
+        if (!weakTopic.isEligibleForMastery(Instant.now())) {
+            throw new BusinessException(
+                    ErrorCode.WEAK_TOPIC_NOT_ELIGIBLE,
+                    "A mastery check is available from the next local calendar day.");
+        }
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        if (normalizedKey != null) {
+            AiExecution existing = findMatchingIdempotentExecution(
+                    ownerId,
+                    normalizedKey,
+                    AiExecutionTargetType.WEAK_TOPIC,
+                    weakTopicId,
+                    AiPurpose.QUIZ_GENERATION,
+                    AiExecutionOperation.GENERATE);
+            if (existing != null) {
+                return AiExecutionResponse.from(existing);
+            }
+        }
+        AiExecution active = executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.WEAK_TOPIC,
+                        weakTopicId,
+                        AiPurpose.QUIZ_GENERATION,
+                        ACTIVE_STATUSES)
+                .orElse(null);
+        if (active != null) {
+            return AiExecutionResponse.from(active);
+        }
+        UserAccount owner = userAccountRepository.findById(ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.AUTHENTICATION_REQUIRED,
+                        "The authenticated account is unavailable."));
+        AiProviderConfig providerConfig = providerSelector.requireDefault(
+                AiPurpose.QUIZ_GENERATION);
+        creditReservationService.validateSufficientCredits(
+                ownerId, AiPurpose.QUIZ_GENERATION, providerConfig.getPricingCategory());
+        AiExecution execution = executionRepository.saveAndFlush(AiExecution.queue(
+                owner,
+                providerConfig,
+                AiPurpose.QUIZ_GENERATION,
+                AiExecutionOperation.GENERATE,
+                AiExecutionTargetType.WEAK_TOPIC,
+                weakTopicId,
+                normalizedKey));
+        creditReservationService.reserveCredits(
+                owner, execution.getId(), AiPurpose.QUIZ_GENERATION, providerConfig.getPricingCategory());
+        auditLogService.logAction(
+                ownerId,
+                owner.getEmail(),
+                AuditEventAction.AI_EXECUTION_QUEUED,
+                "AiExecution",
+                execution.getId().toString());
+        return AiExecutionResponse.from(execution);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AiExecutionResponse getLatestMasteryCheckExecution(
+            UUID ownerId,
+            UUID weakTopicId) {
+        weakTopicRepository.findByIdAndUserId(weakTopicId, ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.WEAK_TOPIC_NOT_FOUND,
+                        "Weak Topic was not found."));
+        return AiExecutionResponse.from(executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.WEAK_TOPIC,
+                        weakTopicId,
+                        AiPurpose.QUIZ_GENERATION)
+                .orElseThrow(this::notFound));
+    }
+
+    @Override
+    @Transactional
+    public AiExecutionResponse submitTaskGuidanceGeneration(
+            UUID ownerId,
+            UUID dailyPlanId,
+            UUID dailyPlanVersionId,
+            UUID dailyPlanItemId,
+            String idempotencyKey) {
+        return submitTaskGuidance(
+                ownerId,
+                dailyPlanId,
+                dailyPlanVersionId,
+                dailyPlanItemId,
+                null,
+                AiExecutionOperation.GENERATE,
+                idempotencyKey);
+    }
+
+    @Override
+    @Transactional
+    public AiExecutionResponse submitTaskGuidanceRegeneration(
+            UUID ownerId,
+            UUID dailyPlanId,
+            UUID dailyPlanVersionId,
+            UUID dailyPlanItemId,
+            String adjustmentInstruction,
+            String idempotencyKey) {
+        return submitTaskGuidance(
+                ownerId,
+                dailyPlanId,
+                dailyPlanVersionId,
+                dailyPlanItemId,
+                normalizePrompt(adjustmentInstruction),
+                AiExecutionOperation.REGENERATE,
+                idempotencyKey);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AiExecutionResponse getLatestTaskGuidanceExecution(
+            UUID ownerId,
+            UUID dailyPlanId,
+            UUID dailyPlanVersionId,
+            UUID dailyPlanItemId) {
+        taskGuidanceContextBuilder.requireOwnedItem(
+                ownerId,
+                dailyPlanId,
+                dailyPlanVersionId,
+                dailyPlanItemId);
+        return AiExecutionResponse.from(executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.DAILY_PLAN_ITEM,
+                        dailyPlanItemId,
+                        AiPurpose.TASK_GUIDANCE_GENERATION)
+                .orElseThrow(this::notFound));
+    }
+
+    private AiExecutionResponse submit(
+            UUID ownerId,
+            UUID roadmapId,
+            List<UUID> materialIds,
+            String adjustmentPrompt,
+            AiExecutionOperation operation,
+            String idempotencyKey) {
+        // Validate the current Roadmap state before returning an idempotent execution.
+        // Otherwise, an old key could bypass the immutable-ACTIVE rule.
+        roadmapPersistenceService.prepare(ownerId, roadmapId, materialIds);
+
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        if (normalizedKey != null) {
+            AiExecution existing = findMatchingIdempotentExecution(
+                    ownerId,
+                    normalizedKey,
+                    AiExecutionTargetType.ROADMAP,
+                    roadmapId,
+                    AiPurpose.ROADMAP_GENERATION,
+                    operation);
+            if (existing != null) {
+                return AiExecutionResponse.from(existing);
+            }
+        }
+
+        AiExecution active = executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.ROADMAP,
+                        roadmapId,
+                        AiPurpose.ROADMAP_GENERATION,
+                        ACTIVE_STATUSES)
+                .orElse(null);
+        if (active != null) {
+            return AiExecutionResponse.from(active);
+        }
+
+        UserAccount owner = userAccountRepository.findById(ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.AUTHENTICATION_REQUIRED,
+                        "The authenticated account is unavailable."));
+        AiProviderConfig providerConfig =
+                providerSelector.requireDefault(AiPurpose.ROADMAP_GENERATION);
+        creditReservationService.validateSufficientCredits(
+                ownerId, AiPurpose.ROADMAP_GENERATION, providerConfig.getPricingCategory());
+        AiExecution execution = executionRepository.saveAndFlush(AiExecution.queue(
+                owner,
+                providerConfig,
+                AiPurpose.ROADMAP_GENERATION,
+                operation,
+                AiExecutionTargetType.ROADMAP,
+                roadmapId,
+                normalizedKey));
+        creditReservationService.reserveCredits(
+                owner, execution.getId(), AiPurpose.ROADMAP_GENERATION, providerConfig.getPricingCategory());
+
+        if (adjustmentPrompt != null) {
+            inputRepository.save(AiExecutionInput.create(
+                    execution.getId(), adjustmentPrompt, Instant.now()));
+        }
+
+        auditLogService.logAction(
+                ownerId,
+                owner.getEmail(),
+                AuditEventAction.AI_EXECUTION_QUEUED,
+                "AiExecution",
+                execution.getId().toString());
+        return AiExecutionResponse.from(execution);
+    }
+
+    private AiExecutionResponse submitDailyPlan(
+            UUID ownerId,
+            UUID dailyPlanId,
+            AiExecutionOperation operation,
+            String idempotencyKey) {
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        if (normalizedKey != null) {
+            AiExecution existing = findMatchingIdempotentExecution(
+                    ownerId,
+                    normalizedKey,
+                    AiExecutionTargetType.DAILY_PLAN,
+                    dailyPlanId,
+                    AiPurpose.DAILY_PLAN_GENERATION,
+                    operation);
+            if (existing != null) {
+                return AiExecutionResponse.from(existing);
+            }
+        }
+
+        DailyPlan plan = dailyPlanRepository
+                .findByIdAndUserId(dailyPlanId, ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.DAILY_PLAN_NOT_FOUND,
+                        "Daily plan not found."));
+        if (plan.getStatus() != DailyPlanStatus.DRAFT
+                && plan.getStatus() != DailyPlanStatus.READY) {
+            throw new BusinessException(
+                    ErrorCode.DAILY_PLAN_LOCKED,
+                    "Cannot generate AI content after Daily Plan execution starts.");
+        }
+
+        AiExecution active = executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.DAILY_PLAN,
+                        dailyPlanId,
+                        AiPurpose.DAILY_PLAN_GENERATION,
+                        ACTIVE_STATUSES)
+                .orElse(null);
+        if (active != null) {
+            return AiExecutionResponse.from(active);
+        }
+
+        UserAccount owner = userAccountRepository.findById(ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.AUTHENTICATION_REQUIRED,
+                        "The authenticated account is unavailable."));
+        AiProviderConfig providerConfig =
+                providerSelector.requireDefault(AiPurpose.DAILY_PLAN_GENERATION);
+        creditReservationService.validateSufficientCredits(
+                ownerId, AiPurpose.DAILY_PLAN_GENERATION, providerConfig.getPricingCategory());
+        AiExecution execution = executionRepository.saveAndFlush(AiExecution.queue(
+                owner,
+                providerConfig,
+                AiPurpose.DAILY_PLAN_GENERATION,
+                operation,
+                AiExecutionTargetType.DAILY_PLAN,
+                dailyPlanId,
+                normalizedKey));
+        creditReservationService.reserveCredits(
+                owner, execution.getId(), AiPurpose.DAILY_PLAN_GENERATION, providerConfig.getPricingCategory());
+
+        auditLogService.logAction(
+                ownerId,
+                owner.getEmail(),
+                AuditEventAction.AI_EXECUTION_QUEUED,
+                "AiExecution",
+                execution.getId().toString());
+        return AiExecutionResponse.from(execution);
+    }
+
+    private AiExecutionResponse submitTaskGuidance(
+            UUID ownerId,
+            UUID dailyPlanId,
+            UUID dailyPlanVersionId,
+            UUID dailyPlanItemId,
+            String adjustmentInstruction,
+            AiExecutionOperation operation,
+            String idempotencyKey) {
+        taskGuidanceContextBuilder.requireOwnedItem(
+                ownerId,
+                dailyPlanId,
+                dailyPlanVersionId,
+                dailyPlanItemId);
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        if (normalizedKey != null) {
+            AiExecution existing = findMatchingIdempotentExecution(
+                    ownerId,
+                    normalizedKey,
+                    AiExecutionTargetType.DAILY_PLAN_ITEM,
+                    dailyPlanItemId,
+                    AiPurpose.TASK_GUIDANCE_GENERATION,
+                    operation);
+            if (existing != null) {
+                return AiExecutionResponse.from(existing);
+            }
+        }
+
+        boolean guidanceExists = taskGuidanceRepository
+                .findByDailyPlanItemIdAndOwnerId(dailyPlanItemId, ownerId)
+                .isPresent();
+        if (operation == AiExecutionOperation.GENERATE && guidanceExists) {
+            throw new BusinessException(
+                    ErrorCode.CONFLICT,
+                    "Task Guidance already exists; use regeneration.");
+        }
+        if (operation == AiExecutionOperation.REGENERATE && !guidanceExists) {
+            throw new BusinessException(
+                    ErrorCode.TASK_GUIDANCE_NOT_FOUND,
+                    "Task Guidance was not found.");
+        }
+
+        AiExecution active = executionRepository
+                .findFirstByOwnerIdAndTargetTypeAndTargetIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+                        ownerId,
+                        AiExecutionTargetType.DAILY_PLAN_ITEM,
+                        dailyPlanItemId,
+                        AiPurpose.TASK_GUIDANCE_GENERATION,
+                        ACTIVE_STATUSES)
+                .orElse(null);
+        if (active != null) {
+            return AiExecutionResponse.from(active);
+        }
+
+        UserAccount owner = userAccountRepository.findById(ownerId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.AUTHENTICATION_REQUIRED,
+                        "The authenticated account is unavailable."));
+        AiProviderConfig providerConfig = providerSelector.requireDefault(
+                AiPurpose.TASK_GUIDANCE_GENERATION);
+        creditReservationService.validateSufficientCredits(
+                ownerId, AiPurpose.TASK_GUIDANCE_GENERATION, providerConfig.getPricingCategory());
+        AiExecution execution = executionRepository.saveAndFlush(AiExecution.queue(
+                owner,
+                providerConfig,
+                AiPurpose.TASK_GUIDANCE_GENERATION,
+                operation,
+                AiExecutionTargetType.DAILY_PLAN_ITEM,
+                dailyPlanItemId,
+                normalizedKey));
+        creditReservationService.reserveCredits(
+                owner, execution.getId(), AiPurpose.TASK_GUIDANCE_GENERATION, providerConfig.getPricingCategory());
+        if (adjustmentInstruction != null) {
+            inputRepository.save(AiExecutionInput.create(
+                    execution.getId(),
+                    adjustmentInstruction,
+                    Instant.now()));
+        }
+        auditLogService.logAction(
+                ownerId,
+                owner.getEmail(),
+                AuditEventAction.TASK_GUIDANCE_GENERATION_QUEUED,
+                "AiExecution",
+                execution.getId().toString());
+        return AiExecutionResponse.from(execution);
+    }
+
+    private AiExecution findMatchingIdempotentExecution(
+            UUID ownerId,
+            String idempotencyKey,
+            AiExecutionTargetType targetType,
+            UUID targetId,
+            AiPurpose purpose,
+            AiExecutionOperation operation) {
+        AiExecution existing = executionRepository
+                .findByOwnerIdAndIdempotencyKey(ownerId, idempotencyKey)
+                .orElse(null);
+        if (existing == null) {
+            return null;
+        }
+        if (existing.getTargetType() != targetType
+                || !existing.getTargetId().equals(targetId)
+                || existing.getPurpose() != purpose
+                || existing.getOperation() != operation) {
+            throw new BusinessException(
+                    ErrorCode.CONFLICT,
+                    "Idempotency-Key was already used for another AI operation.");
+        }
+        return existing;
+    }
+
+    private String normalizeIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return null;
+        }
+        String normalized = idempotencyKey.trim();
+        if (normalized.length() > 100) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Idempotency-Key must not exceed 100 characters.");
+        }
+        return normalized;
+    }
+
+    private String normalizePrompt(String adjustmentPrompt) {
+        if (adjustmentPrompt == null || adjustmentPrompt.isBlank()) {
+            return null;
+        }
+        String normalized = adjustmentPrompt.trim();
+        if (normalized.length() > 1000) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Adjustment instruction must not exceed 1000 characters.");
+        }
+        return normalized;
+    }
+
+    private BusinessException notFound() {
+        return new BusinessException(
+                ErrorCode.AI_EXECUTION_NOT_FOUND,
+                "AI execution was not found.");
+    }
+}

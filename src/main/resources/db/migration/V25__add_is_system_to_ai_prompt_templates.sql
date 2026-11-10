@@ -1,0 +1,2 @@
+ALTER TABLE ai_prompt_templates
+ADD COLUMN is_system BOOLEAN NOT NULL DEFAULT FALSE;

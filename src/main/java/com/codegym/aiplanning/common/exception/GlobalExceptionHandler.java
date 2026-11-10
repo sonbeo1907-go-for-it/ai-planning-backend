@@ -2,6 +2,7 @@ package com.codegym.aiplanning.common.exception;
 
 import com.codegym.aiplanning.common.api.ApiError;
 import com.codegym.aiplanning.common.api.FieldViolation;
+import com.codegym.aiplanning.common.validation.password.PasswordPolicy;
 import com.codegym.aiplanning.config.RequestIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -11,14 +12,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -54,8 +59,20 @@ public class GlobalExceptionHandler {
     ResponseEntity<ApiError> handleConstraintViolation(
             ConstraintViolationException exception, HttpServletRequest request) {
         List<FieldViolation> violations = exception.getConstraintViolations().stream()
-                .map(violation -> new FieldViolation(
-                        violation.getPropertyPath().toString(), violation.getMessage()))
+                .map(violation -> {
+                    String template = violation.getMessageTemplate();
+                    String message = violation.getMessage();
+                    String code = null;
+                    if (template != null && PasswordPolicy.isPasswordPolicyCode(template)) {
+                        code = template;
+                        message = PasswordPolicy.resolveMessage(code);
+                    } else if (message != null && PasswordPolicy.isPasswordPolicyCode(message)) {
+                        code = message;
+                        message = PasswordPolicy.resolveMessage(code);
+                    }
+                    return new FieldViolation(
+                            violation.getPropertyPath().toString(), code, message);
+                })
                 .toList();
         return build(
                 HttpStatus.BAD_REQUEST,
@@ -65,13 +82,40 @@ public class GlobalExceptionHandler {
                 violations);
     }
 
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    ResponseEntity<ApiError> handleMethodNotSupported(
+            org.springframework.web.HttpRequestMethodNotSupportedException exception, HttpServletRequest request) {
+        return build(
+                HttpStatus.METHOD_NOT_ALLOWED,
+                "METHOD_NOT_ALLOWED",
+                "HTTP method '" + exception.getMethod() + "' is not supported for this endpoint.",
+                request,
+                List.of());
+    }
+
+    @ExceptionHandler({
+        MethodArgumentTypeMismatchException.class,
+        HttpMessageNotReadableException.class,
+        org.springframework.web.bind.MissingServletRequestParameterException.class,
+        org.springframework.web.multipart.support.MissingServletRequestPartException.class
+    })
+    ResponseEntity<ApiError> handleMalformedRequest(
+            Exception exception, HttpServletRequest request) {
+        return build(
+                HttpStatus.BAD_REQUEST,
+                ErrorCode.VALIDATION_FAILED.name(),
+                "Request validation failed.",
+                request,
+                List.of());
+    }
+
     @ExceptionHandler(AuthenticationException.class)
     ResponseEntity<ApiError> handleAuthentication(
             AuthenticationException exception, HttpServletRequest request) {
         return build(
                 HttpStatus.UNAUTHORIZED,
                 ErrorCode.INVALID_CREDENTIALS.name(),
-                "Invalid username or password.",
+                "Invalid email or password.",
                 request,
                 List.of());
     }
@@ -99,6 +143,49 @@ public class GlobalExceptionHandler {
                 List.of());
     }
 
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    ResponseEntity<ApiError> handleOptimisticLocking(
+            OptimisticLockingFailureException exception, HttpServletRequest request) {
+        return build(
+                HttpStatus.CONFLICT,
+                ErrorCode.CONCURRENT_MODIFICATION.name(),
+                "The resource was modified by another request. Reload it and try again.",
+                request,
+                List.of());
+    }
+
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    ResponseEntity<ApiError> handleMaxUploadSizeExceeded(
+            org.springframework.web.multipart.MaxUploadSizeExceededException exception, HttpServletRequest request) {
+        return build(
+                HttpStatus.PAYLOAD_TOO_LARGE,
+                ErrorCode.FILE_TOO_LARGE.name(),
+                "The uploaded file or request exceeds the maximum configured size limit.",
+                request,
+                List.of());
+    }
+
+    @ExceptionHandler({
+        org.springframework.web.servlet.resource.NoResourceFoundException.class,
+        org.springframework.web.servlet.NoHandlerFoundException.class
+    })
+    ResponseEntity<ApiError> handleNotFound(Exception exception, HttpServletRequest request) {
+        return build(
+                HttpStatus.NOT_FOUND,
+                ErrorCode.RESOURCE_NOT_FOUND.name(),
+                "The requested resource was not found.",
+                request,
+                List.of());
+    }
+
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    void handleDisconnectedClient(
+            AsyncRequestNotUsableException exception, HttpServletRequest request) {
+        log.debug(
+                "Client disconnected before the response could be written for {}.",
+                request.getRequestURI());
+    }
+
     @ExceptionHandler(Exception.class)
     ResponseEntity<ApiError> handleUnexpected(
             Exception exception, HttpServletRequest request) {
@@ -112,7 +199,16 @@ public class GlobalExceptionHandler {
     }
 
     private FieldViolation toViolation(FieldError error) {
-        return new FieldViolation(error.getField(), error.getDefaultMessage());
+        String templateOrMessage = error.getDefaultMessage();
+        String code = error.getCode();
+        String message = templateOrMessage;
+
+        if (templateOrMessage != null && PasswordPolicy.isPasswordPolicyCode(templateOrMessage)) {
+            code = templateOrMessage;
+            message = PasswordPolicy.resolveMessage(code);
+        }
+
+        return new FieldViolation(error.getField(), code, message);
     }
 
     private ResponseEntity<ApiError> build(

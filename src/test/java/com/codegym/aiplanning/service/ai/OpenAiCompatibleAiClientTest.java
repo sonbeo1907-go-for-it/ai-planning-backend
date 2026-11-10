@@ -1,0 +1,252 @@
+package com.codegym.aiplanning.service.ai;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.codegym.aiplanning.common.exception.BusinessException;
+import com.codegym.aiplanning.common.exception.ErrorCode;
+import com.codegym.aiplanning.entity.ai.AiProvider;
+import com.codegym.aiplanning.entity.ai.AiProviderConfig;
+import com.codegym.aiplanning.entity.ai.AiProviderProtocol;
+import com.codegym.aiplanning.entity.ai.AiPurpose;
+import com.codegym.aiplanning.service.ai.provider.OpenAiCompatibleAiClient;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+@ExtendWith(MockitoExtension.class)
+class OpenAiCompatibleAiClientTest {
+
+    @Mock
+    private AiProviderSelector providerSelector;
+
+    @Mock
+    private AiCredentialSelector credentialSelector;
+
+    @Mock
+    private AiProviderConfig config;
+
+    @Mock
+    private AiProvider provider;
+
+    private OpenAiCompatibleAiClient client;
+    private HttpServer server;
+    private final AtomicReference<String> requestBody = new AtomicReference<>();
+    private final AtomicReference<String> providerResponse = new AtomicReference<>(
+            "{\"choices\":[{\"message\":{\"content\":\"{}\"}}]}");
+    private long serverSleepMs = 0L;
+
+    @BeforeEach
+    void setUp() {
+        client = new OpenAiCompatibleAiClient(providerSelector, credentialSelector);
+    }
+
+    @Test
+    void selectsTheDefaultConfigurationForRoadmapGeneration() {
+        UUID providerId = UUID.randomUUID();
+        when(config.isEnabled()).thenReturn(true);
+        when(provider.isEnabled()).thenReturn(true);
+        when(providerSelector.requireDefault(AiPurpose.ROADMAP_GENERATION))
+                .thenReturn(config);
+        when(config.getProvider()).thenReturn(provider);
+        when(config.getMaxInputTokens()).thenReturn(1000);
+        when(provider.getProtocol()).thenReturn(AiProviderProtocol.OPENAI_COMPATIBLE);
+        when(provider.getId()).thenReturn(providerId);
+        when(credentialSelector.findFirstAvailable(providerId)).thenReturn(Optional.empty());
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> client.generateContent(
+                        AiPurpose.ROADMAP_GENERATION,
+                        "System prompt",
+                        "User prompt"));
+
+        assertEquals(ErrorCode.AI_PROVIDER_UNAVAILABLE, exception.errorCode());
+        verify(providerSelector).requireDefault(AiPurpose.ROADMAP_GENERATION);
+        verify(credentialSelector).findFirstAvailable(providerId);
+    }
+
+    @Test
+    void rejectsPromptsThatExceedTheConfiguredInputBudget() {
+        when(config.isEnabled()).thenReturn(true);
+        when(provider.isEnabled()).thenReturn(true);
+        when(providerSelector.requireDefault(AiPurpose.ROADMAP_GENERATION))
+                .thenReturn(config);
+        when(config.getProvider()).thenReturn(provider);
+        when(config.getMaxInputTokens()).thenReturn(1);
+        when(provider.getProtocol()).thenReturn(AiProviderProtocol.OPENAI_COMPATIBLE);
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> client.generateContent(
+                        AiPurpose.ROADMAP_GENERATION,
+                        "Long system prompt",
+                        "Long user prompt"));
+
+        assertEquals(ErrorCode.AI_GENERATION_FAILED, exception.errorCode());
+        verify(credentialSelector, never()).findFirstAvailable(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void sendsNonThinkingModeForDeepSeekGeneration() throws Exception {
+        String baseUrl = startProviderServer();
+        AiProvider deepSeek = provider("DEEPSEEK", baseUrl);
+        AiProviderConfig deepSeekConfig = config(deepSeek);
+        UUID providerId = UUID.randomUUID();
+
+        when(deepSeek.getId()).thenReturn(providerId);
+        when(credentialSelector.findFirstAvailable(providerId))
+                .thenReturn(Optional.of(new ResolvedAiCredential(null, "test-secret")));
+
+        client.generateContent(deepSeekConfig, "System prompt", "User prompt");
+
+        JsonNode request = new ObjectMapper().readTree(requestBody.get());
+        assertThat(request.path("thinking").path("type").asText()).isEqualTo("disabled");
+    }
+
+    @Test
+    void doesNotAddDeepSeekThinkingOptionForOtherProviders() throws Exception {
+        String baseUrl = startProviderServer();
+        AiProvider openAi = provider("OPENAI", baseUrl);
+        AiProviderConfig openAiConfig = config(openAi);
+        UUID providerId = UUID.randomUUID();
+
+        when(openAi.getId()).thenReturn(providerId);
+        when(credentialSelector.findFirstAvailable(providerId))
+                .thenReturn(Optional.of(new ResolvedAiCredential(null, "test-secret")));
+
+        client.generateContent(openAiConfig, "System prompt", "User prompt");
+
+        JsonNode request = new ObjectMapper().readTree(requestBody.get());
+        assertThat(request.has("thinking")).isFalse();
+    }
+
+    @Test
+    void distinguishesOutputTokenTruncationFromInvalidDailyPlanJson() throws Exception {
+        String baseUrl = startProviderServer();
+        AiProvider deepSeek = provider("DEEPSEEK", baseUrl);
+        AiProviderConfig deepSeekConfig = config(deepSeek);
+        UUID providerId = UUID.randomUUID();
+        when(deepSeek.getId()).thenReturn(providerId);
+        when(credentialSelector.findFirstAvailable(providerId))
+                .thenReturn(Optional.of(new ResolvedAiCredential(null, "test-secret")));
+        providerResponse.set("{\"choices\":[{\"finish_reason\":\"length\",\"message\":{\"content\":\"{partial\"}}]}");
+
+        BusinessException failure = assertThrows(BusinessException.class,
+                () -> client.generateContent(deepSeekConfig, "System prompt", "User prompt"));
+        assertThat(failure.errorCode()).isEqualTo(ErrorCode.AI_GENERATION_FAILED);
+        assertThat(failure.getMessage()).contains("output-token limit").doesNotContain("partial");
+    }
+
+    @AfterEach
+    void stopServer() {
+        if (server != null) {
+            server.stop(0);
+        }
+    }
+
+    private String startProviderServer() throws IOException {
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", this::respond);
+        server.start();
+        return "http://127.0.0.1:" + server.getAddress().getPort() + "/v1";
+    }
+
+    private AiProvider provider(String code, String baseUrl) {
+        AiProvider provider = org.mockito.Mockito.mock(AiProvider.class);
+        when(provider.getCode()).thenReturn(code);
+        when(provider.getBaseUrl()).thenReturn(baseUrl);
+        when(provider.getProtocol()).thenReturn(AiProviderProtocol.OPENAI_COMPATIBLE);
+        when(provider.isEnabled()).thenReturn(true);
+        return provider;
+    }
+
+    private AiProviderConfig config(AiProvider aiProvider) {
+        AiProviderConfig providerConfig = org.mockito.Mockito.mock(AiProviderConfig.class);
+        when(providerConfig.getProvider()).thenReturn(aiProvider);
+        when(providerConfig.isEnabled()).thenReturn(true);
+        when(providerConfig.getModel()).thenReturn("deepseek-v4-flash");
+        when(providerConfig.getTimeoutSeconds()).thenReturn(2);
+        when(providerConfig.getMaxInputTokens()).thenReturn(1000);
+        when(providerConfig.getMaxOutputTokens()).thenReturn(200);
+        when(providerConfig.getTemperature()).thenReturn(new BigDecimal("0.20"));
+        return providerConfig;
+    }
+
+    @Test
+    void extractsUsageWhenReturnedByProvider() throws IOException {
+        providerResponse.set("{\"choices\":[{\"message\":{\"content\":\"{}\"}}],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":45,\"total_tokens\":165}}");
+        String baseUrl = startProviderServer();
+        AiProvider aiProvider = provider("OPENAI", baseUrl);
+        AiProviderConfig openAiConfig = config(aiProvider);
+        UUID providerId = UUID.randomUUID();
+        when(aiProvider.getId()).thenReturn(providerId);
+        when(credentialSelector.findFirstAvailable(providerId))
+                .thenReturn(Optional.of(new ResolvedAiCredential(null, "test-secret")));
+
+        try {
+            client.generateContent(openAiConfig, "System prompt", "User prompt");
+            com.codegym.aiplanning.service.ai.provider.AiUsage usage =
+                    com.codegym.aiplanning.service.ai.provider.AiUsageHolder.getAndClear();
+            assertThat(usage).isNotNull();
+            assertThat(usage.inputTokens()).isEqualTo(120);
+            assertThat(usage.outputTokens()).isEqualTo(45);
+        } finally {
+            com.codegym.aiplanning.service.ai.provider.AiUsageHolder.clear();
+        }
+    }
+
+    @Test
+    void throwsAiTimeoutWhenProviderExceedsTimeout() throws IOException {
+        serverSleepMs = 2000L;
+        String baseUrl = startProviderServer();
+        AiProvider aiProvider = provider("OPENAI", baseUrl);
+        AiProviderConfig openAiConfig = config(aiProvider);
+        when(openAiConfig.getTimeoutSeconds()).thenReturn(1);
+        UUID providerId = UUID.randomUUID();
+        when(aiProvider.getId()).thenReturn(providerId);
+        when(credentialSelector.findFirstAvailable(providerId))
+                .thenReturn(Optional.of(new ResolvedAiCredential(null, "test-secret")));
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> client.generateContent(openAiConfig, "System prompt", "User prompt"));
+
+        assertThat(exception.errorCode()).isEqualTo(ErrorCode.AI_TIMEOUT);
+    }
+
+    private void respond(HttpExchange exchange) throws IOException {
+        if (serverSleepMs > 0) {
+            try {
+                Thread.sleep(serverSleepMs);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        requestBody.set(new String(
+                exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        byte[] response = providerResponse.get().getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, response.length);
+        exchange.getResponseBody().write(response);
+        exchange.close();
+    }
+}

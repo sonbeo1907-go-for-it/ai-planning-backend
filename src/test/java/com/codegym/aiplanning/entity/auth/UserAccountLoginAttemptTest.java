@@ -11,10 +11,9 @@ class UserAccountLoginAttemptTest {
     @Test
     void expiredTemporaryBlockStartsANewFailureWindow() {
         UserAccount account = UserAccount.create(
-                "student",
+                "user@example.com",
                 "password-hash",
-                "Student",
-                UserRole.STUDENT,
+                UserRole.USER,
                 AccountStatus.ACTIVE);
         Instant initialAttempt = Instant.parse("2026-01-01T00:00:00Z");
         Duration blockDuration = Duration.ofMinutes(15);

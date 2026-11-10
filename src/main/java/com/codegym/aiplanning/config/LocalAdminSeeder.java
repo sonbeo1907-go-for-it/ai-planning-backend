@@ -36,17 +36,16 @@ public class LocalAdminSeeder implements ApplicationRunner {
     @Transactional
     public void run(ApplicationArguments args) {
         if (!properties.enabled()
-                || repository.findByUsernameIgnoreCase(properties.username()).isPresent()) {
+                || repository.findByEmailIgnoreCase(properties.email()).isPresent()) {
             return;
         }
 
         UserAccount admin = UserAccount.create(
-                properties.username(),
+                properties.email(),
                 passwordEncoder.encode(properties.password()),
-                properties.fullName(),
                 UserRole.ADMIN,
                 AccountStatus.ACTIVE);
         repository.save(admin);
-        log.info("Created local bootstrap admin account '{}'", properties.username());
+        log.info("Created local bootstrap admin account for configured email");
     }
 }

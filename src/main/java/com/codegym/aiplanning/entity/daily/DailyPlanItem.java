@@ -1,0 +1,188 @@
+package com.codegym.aiplanning.entity.daily;
+
+import com.codegym.aiplanning.common.entity.BaseEntity;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Table;
+import java.time.Instant;
+import java.util.UUID;
+
+@Entity
+@Table(name = "daily_plan_items")
+public class DailyPlanItem extends BaseEntity {
+
+    @Column(name = "daily_plan_version_id", nullable = false)
+    private UUID dailyPlanVersionId;
+
+    @Column(name = "roadmap_item_id")
+    private UUID roadmapItemId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 30)
+    private DailyTaskCategory category;
+
+    @Column(nullable = false, length = 255)
+    private String title;
+
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
+    @Column(name = "planned_minutes", nullable = false)
+    private Integer plannedMinutes;
+
+    @Column(name = "order_index", nullable = false)
+    private Integer orderIndex;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 30)
+    private DailyTaskStatus status;
+
+    @Column(name = "completed_at")
+    private Instant completedAt;
+
+    @Column(name = "removed_at")
+    private Instant removedAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ai_adjustment_action", length = 30)
+    private AiAdjustmentAction aiAdjustmentAction;
+
+    @Column(name = "ai_adjustment_reason", columnDefinition = "TEXT")
+    private String aiAdjustmentReason;
+
+    protected DailyPlanItem() {}
+
+    public static DailyPlanItem create(
+            UUID dailyPlanVersionId,
+            DailyTaskCategory category,
+            String title,
+            String description,
+            Integer plannedMinutes,
+            Integer orderIndex) {
+        return create(dailyPlanVersionId, category, title, description, plannedMinutes, orderIndex, null);
+    }
+
+    public static DailyPlanItem create(
+            UUID dailyPlanVersionId,
+            DailyTaskCategory category,
+            String title,
+            String description,
+            Integer plannedMinutes,
+            Integer orderIndex,
+            UUID roadmapItemId) {
+        DailyPlanItem item = new DailyPlanItem();
+        item.dailyPlanVersionId = dailyPlanVersionId;
+        item.category = category != null ? category : DailyTaskCategory.CUSTOM;
+        item.title = title;
+        item.description = description;
+        item.plannedMinutes = plannedMinutes != null ? plannedMinutes : 30;
+        item.orderIndex = orderIndex != null ? orderIndex : 0;
+        item.status = DailyTaskStatus.NOT_STARTED;
+        item.roadmapItemId = roadmapItemId;
+        return item;
+    }
+
+    public void updateStatus(DailyTaskStatus newStatus) {
+        if (newStatus == DailyTaskStatus.COMPLETED) {
+            if (status != DailyTaskStatus.COMPLETED) {
+                this.completedAt = Instant.now();
+            }
+        } else {
+            this.completedAt = null;
+        }
+        this.status = newStatus;
+    }
+
+    public void setAiAdjustment(AiAdjustmentAction action, String reason) {
+        this.aiAdjustmentAction = action;
+        this.aiAdjustmentReason = reason;
+    }
+
+    public void updateDraftDetails(
+            DailyTaskCategory category,
+            String title,
+            String description,
+            Integer plannedMinutes,
+            Integer orderIndex) {
+        updateDraftDetails(category, title, description, plannedMinutes, orderIndex, this.roadmapItemId);
+    }
+
+    public void updateDraftDetails(
+            DailyTaskCategory category,
+            String title,
+            String description,
+            Integer plannedMinutes,
+            Integer orderIndex,
+            UUID roadmapItemId) {
+        this.category = category;
+        this.title = title;
+        this.description = description;
+        this.plannedMinutes = plannedMinutes;
+        this.orderIndex = orderIndex;
+        this.roadmapItemId = roadmapItemId;
+    }
+
+    public void setRoadmapItemId(UUID roadmapItemId) {
+        this.roadmapItemId = roadmapItemId;
+    }
+
+    public void remove(Instant removalTime) {
+        if (removedAt == null) {
+            removedAt = removalTime;
+        }
+    }
+
+    public boolean isRemoved() {
+        return removedAt != null;
+    }
+
+    public UUID getDailyPlanVersionId() {
+        return dailyPlanVersionId;
+    }
+
+    public DailyTaskCategory getCategory() {
+        return category;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public Integer getPlannedMinutes() {
+        return plannedMinutes;
+    }
+
+    public Integer getOrderIndex() {
+        return orderIndex;
+    }
+
+    public DailyTaskStatus getStatus() {
+        return status;
+    }
+
+    public Instant getCompletedAt() {
+        return completedAt;
+    }
+
+    public Instant getRemovedAt() {
+        return removedAt;
+    }
+
+    public UUID getRoadmapItemId() {
+        return roadmapItemId;
+    }
+
+    public AiAdjustmentAction getAiAdjustmentAction() {
+        return aiAdjustmentAction;
+    }
+
+    public String getAiAdjustmentReason() {
+        return aiAdjustmentReason;
+    }
+}

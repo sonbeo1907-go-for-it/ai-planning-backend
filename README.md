@@ -1,19 +1,26 @@
 # AI Planning Backend
 
-Spring Boot backend for the manual Planning Core MVP. The codebase currently
-provides the shared foundation for authentication, authorization, persistence,
-API errors, migrations, documentation, testing, and the planning status model.
+Spring Boot foundation for the V2 personal AI learning backend. The current
+codebase provides authentication, authorization, persistence, API errors,
+audit logging, email, migrations, documentation, and testing infrastructure.
 
-AI generation, LMS content synchronization, notifications, reporting, and
-advanced dashboards are not part of this baseline.
+The first personal-learning slice now provides profile setup and resumable,
+Roadmap-scoped onboarding backed by a GOAL LearningSource and Roadmap draft.
+The current Sprint 1 code also provides versioned manual Roadmaps, versioned
+Daily Plans, progress recording, personal learning materials, and ADMIN-only
+AI provider registry, credential references, and purpose configuration. AI-generated Roadmaps,
+Daily Plans, and AI Review remain later V2 phases.
+The retired coding-center APIs and tables are absent from the active V2
+baseline. Their code and migrations remain available through Git history.
 
 ## Technology
 
 - Java 17
 - Spring Boot 3.5.16
-- Spring Security with stateless JWT
+- Spring Security with short-lived access JWTs and rotated refresh tokens
 - Spring Data JPA
 - PostgreSQL 17
+- Redis 8 for revocation acceleration and refresh concurrency locks
 - Flyway
 - OpenAPI and Swagger UI
 - JUnit 5, MockMvc, H2 for baseline integration tests
@@ -22,16 +29,16 @@ advanced dashboards are not part of this baseline.
 ## Prerequisites
 
 - JDK 17+
-- Docker Desktop or a local PostgreSQL instance
+- Docker Desktop or local PostgreSQL and Redis instances
 
 Maven does not need to be installed. Use `mvnw` or `mvnw.cmd`.
 
 ## Run locally
 
-1. Start PostgreSQL:
+1. Start PostgreSQL and Redis:
 
    ```bash
-   docker compose up -d postgres
+   docker compose up -d postgres redis
    ```
 
 2. Start the API:
@@ -58,12 +65,12 @@ The `local` profile creates one development-only administrator when the
 database is empty:
 
 ```text
-username: admin
+email: admin@aiplanning.local
 password: Admin@123
 ```
 
-Change these values with `BOOTSTRAP_ADMIN_USERNAME` and
-`BOOTSTRAP_ADMIN_PASSWORD`. Local bootstrap is disabled by default outside the
+Change these values with `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`.
+Local bootstrap is disabled by default outside the
 `local` and `test` profiles.
 
 ## Login example
@@ -71,7 +78,7 @@ Change these values with `BOOTSTRAP_ADMIN_USERNAME` and
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"Admin@123"}'
+  -d '{"email":"admin@aiplanning.local","password":"Admin@123"}'
 ```
 
 Use the returned token:
@@ -81,10 +88,19 @@ curl http://localhost:8080/api/v1/profile \
   -H "Authorization: Bearer <access-token>"
 ```
 
+The login response also sets an HttpOnly `refresh_token` cookie. Logout revokes
+the current login session immediately:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/logout \
+  -H "Authorization: Bearer <access-token>" \
+  -b "refresh_token=<refresh-token>"
+```
+
 ## Environment variables
 
-Copy `.env.example` when Docker Compose environment customization is needed.
-Do not commit `.env`.
+Copy `.env.example` to `.env` for local Spring/Docker Compose configuration.
+The `local` profile loads this optional file. Do not commit `.env`.
 
 | Variable | Purpose |
 |---|---|
@@ -92,14 +108,36 @@ Do not commit `.env`.
 | `DB_USERNAME` | Database user |
 | `DB_PASSWORD` | Database password |
 | `JWT_SECRET` | HMAC secret, minimum 32 characters |
-| `JWT_EXPIRATION` | ISO-8601 duration, for example `PT8H` |
+| `JWT_EXPIRATION` | Access-token lifetime; default `PT15M` |
+| `AUTH_SESSION_EXPIRATION` | Absolute refresh-session lifetime; default `P14D` |
+| `REFRESH_LOCK_DURATION` | Redis refresh-rotation lock lifetime |
+| `REFRESH_COOKIE_NAME` | HttpOnly refresh-cookie name |
+| `REFRESH_COOKIE_SECURE` | Require HTTPS for the refresh cookie; use `true` outside local development |
+| `REFRESH_COOKIE_SAME_SITE` | Refresh-cookie SameSite policy; default `Strict` |
+| `AUTH_REDIS_ENABLED` | Enable Redis revocation keys and refresh locks |
+| `REDIS_HOST` | Redis host |
+| `REDIS_PORT` | Redis port |
+| `REDIS_TIMEOUT` | Redis connection timeout |
 | `LOGIN_MAX_ATTEMPTS` | Consecutive failed logins before temporary blocking |
 | `LOGIN_BLOCK_DURATION` | Temporary login block as an ISO-8601 duration |
+| `GOOGLE_AUTH_ENABLED` | Enable `POST /api/v1/auth/google`; default `false` |
+| `GOOGLE_CLIENT_ID` | Google OAuth Web Client ID used as the ID-token audience |
+| `BOOTSTRAP_ADMIN_EMAIL` | Local bootstrap Admin login email |
 | `CORS_ALLOWED_ORIGINS` | Frontend origin list |
+| `AI_ALLOW_INSECURE_HTTP_PROVIDER_BASE_URLS` | Permit HTTP provider URLs only for controlled mocks/tests; keep `false` elsewhere |
+| `OPENAI_API_KEY` | OpenAI secret resolved by `env:OPENAI_API_KEY`; blank until configured |
+| `DEEPSEEK_API_KEY` | DeepSeek secret resolved by `env:DEEPSEEK_API_KEY`; blank until configured |
 | `SERVER_PORT` | HTTP port, default `8080` |
 
 Production must provide database credentials and a strong random JWT secret.
 Do not rely on values in `application-local.yml`.
+
+Google login configuration and frontend request details are documented in
+[`specs/google-auth-setup.md`](specs/google-auth-setup.md). Google login does not
+require an API key or client secret when using the ID-token endpoint.
+
+AI provider administration and external secret references are documented in
+[`specs/ai-provider-configuration.md`](specs/ai-provider-configuration.md).
 
 ## Verify changes
 
@@ -117,25 +155,38 @@ target/site/jacoco/index.html
 
 ```text
 com.codegym.aiplanning
-├── controller
-│   ├── auth
-│   │   └── dto
-│   └── profile
-│       └── dto
-├── service
-│   └── auth
-│       └── impl
-├── repository
-│   └── auth
-├── entity
-│   ├── auth
-│   └── plan
-├── common
-│   ├── api
-│   ├── constant
-│   ├── entity
-│   ├── exception
-└── config
+|-- controller
+|   |-- admin/ai/dto
+|   |-- auth/dto
+|   |-- profile/dto
+|   `-- onboarding/dto
+|-- service
+|   |-- ai
+|   |-- auth
+|   |-- profile
+|   |-- onboarding
+|   |-- audit
+|   `-- email
+|-- repository
+|   |-- ai
+|   |-- auth
+|   |-- audit
+|   |-- profile
+|   |-- source
+|   `-- roadmap
+|-- entity
+|   |-- ai
+|   |-- auth
+|   |-- audit
+|   |-- profile
+|   |-- source
+|   `-- roadmap
+|-- common
+|   |-- api
+|   |-- constant
+|   |-- entity
+|   `-- exception
+`-- config
 ```
 
 New business modules should use the same layer-by-feature structure:
@@ -147,8 +198,9 @@ repository/<feature>/
 entity/<feature>/
 ```
 
-For example, DailyPlan uses `controller/daily`, `service/daily`,
-`repository/daily` and `entity/daily`.
+For example, future DailyPlan work uses `controller/daily`, `service/daily`,
+`repository/daily` and `entity/daily`. Instructor, class, enrollment,
+WeeklyPlan, and institution-owned curriculum modules are outside the V2 MVP.
 
 ## API conventions
 
@@ -158,6 +210,8 @@ For example, DailyPlan uses `controller/daily`, `service/daily`,
 - Errors contain `code`, `message`, `path`, `requestId`, and optional field
   violations.
 - Database schema changes require a new Flyway migration.
+- The clean V2 Flyway baseline requires an empty database; run
+  `docker compose down -v` before switching from the pre-V2 migration history.
 - Timestamps are stored in UTC.
 - Entities use UUID identifiers and optimistic-locking versions.
 - Authorization is enforced in backend code, not only by hiding frontend
@@ -165,3 +219,67 @@ For example, DailyPlan uses `controller/daily`, `service/daily`,
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and the files in [specs](specs) before
 opening a pull request.
+
+## Payments and AI credits
+
+For the Sprint 5 sandbox demonstration, follow [the VNPay sandbox runbook](docs/vnpay-sandbox.md).
+It covers the existing `.env` loader, a separate `.env.sandbox` override, frontend startup,
+the exact public IPN endpoint, merchant registration and expected ledger/balance results.
+Start the backend with `local,sandbox`; this opt-in profile rejects live gateway URL overrides.
+
+Payments are disabled by default. Set `BILLING_PAYMENTS_ENABLED=true` only after supplying
+`VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`, the checkout/query URLs and the return URL.
+Blank or known placeholder credentials fail validation when payments are enabled.
+Use explicit sandbox credentials for tests; there is no production mock fallback.
+
+`GET /api/v1/billing/configuration` tells the USER frontend whether new purchases are enabled.
+Disabling purchases does not disable an existing wallet, manual learning, or verification
+of previously initiated payments when valid gateway credentials remain configured.
+Credit transaction history uses the standard `PageResponse` envelope with fixed
+`recordedAt DESC, id DESC` ordering. Its status describes the immutable ledger event,
+not the current state of an old AI reservation.
+
+Checkout uses the persisted order creation/expiry timestamps and the customer IP.
+By default, forwarded headers are ignored. If a reverse proxy is used, configure
+`app.billing.trusted-proxy-addresses` only for known proxies that sanitize forwarding headers.
+Set `VNPAY_SERVER_IP` to the merchant server's actual address for QueryDr.
+
+A successful signed late payment may settle an expired order exactly once.
+Conflicting FAILED/CANCELLED payments require a signed QueryDr confirmation of the same
+order, amount and transaction. Query calls run outside database locks, with a configured
+timeout, no automatic retry and no automatic redirects. Only normalized financial evidence
+is stored; signatures, bank account/card fields and raw payloads are never logged or stored.
+See the [official VNPAY payment contract](https://sandbox.vnpayment.vn/apis/docs/thanh-toan-pay/pay.html)
+and [QueryDr contract](https://sandbox.vnpayment.vn/apis/docs/truy-van-hoan-tien/querydr%26refund.html).
+
+Wallet access, AI reservations and top-up confirmation share locked initialization and one
+welcome-bonus ledger entry. Worker failures, including prompt-resolution failures, release
+reserved credits. Recovery reconciles terminal executions only; QUEUED/RUNNING work is
+never refunded merely because it is old.
+
+Run targeted regression tests with:
+
+```powershell
+mvn.cmd '-Dtest=*Billing*,CreditReservation*Test,VnpayPaymentGatewayAdapterTest,AiExecutionCreditIntegrationTest,AiExecutionWorkerTest' test
+```
+
+PostgreSQL Testcontainers tests require Docker and are explicitly skipped if it is unavailable.
+Before enabling real payments, run those tests and complete a sandbox checkout/IPN demonstration
+using your registered merchant credentials. Unit fixtures are not a substitute for that demonstration.
+
+### ADMIN package, pricing and balance management
+
+ADMIN billing APIs are under `/api/v1/admin/billing`; the frontend workspace is `/admin?tab=billing`.
+Packages/rates are created archived, activated explicitly and never hard-deleted. Rate edits produce
+replacement rows; existing orders and AI reservations retain their original snapshots.
+Provider configurations can select an optional `pricingCategory`; USER price quotes and charging resolve
+the exact category first and fall back only to the purpose's default price.
+
+Manual adjustments require a reason, an expected wallet version and an idempotency key. They change
+available credits only and atomically append the ledger entry and authoritative ADMIN AuditLog.
+Wallet lookup does not initialize accounts. An uninitialized wallet preview explicitly includes its
+configured one-time welcome balance. An uncertain adjustment must be retried with the same key/body.
+
+V31 rejects duplicate normalized ACTIVE rate slots rather than silently replacing historical prices.
+V32 retains package/rate references with restrictive foreign keys. See
+[the ADMIN billing contract](specs/admin-payment-management.md) for payload behavior and verification.

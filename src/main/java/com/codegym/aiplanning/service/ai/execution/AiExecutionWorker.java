@@ -1,0 +1,367 @@
+package com.codegym.aiplanning.service.ai.execution;
+
+import com.codegym.aiplanning.common.exception.BusinessException;
+import com.codegym.aiplanning.common.exception.ErrorCode;
+import com.codegym.aiplanning.controller.roadmap.dto.RoadmapVersionResponse;
+import com.codegym.aiplanning.entity.ai.AiExecution;
+import com.codegym.aiplanning.entity.ai.AiExecutionOperation;
+import com.codegym.aiplanning.entity.ai.AiExecutionResultType;
+import com.codegym.aiplanning.entity.ai.AiExecutionTargetType;
+import com.codegym.aiplanning.entity.ai.AiProviderConfig;
+import com.codegym.aiplanning.entity.audit.AuditEventAction;
+import com.codegym.aiplanning.repository.ai.AiExecutionInputRepository;
+import com.codegym.aiplanning.repository.ai.AiExecutionRepository;
+import com.codegym.aiplanning.service.audit.AuditLogService;
+import com.codegym.aiplanning.service.roadmap.AiRoadmapGeneratorService;
+import com.codegym.aiplanning.service.daily.DailyPlanService;
+import com.codegym.aiplanning.service.evaluation.DailyEvaluationService;
+import com.codegym.aiplanning.service.evaluation.WeakTopicService;
+import com.codegym.aiplanning.service.guidance.TaskGuidanceGenerationService;
+import com.codegym.aiplanning.service.ai.provider.AiUsage;
+import com.codegym.aiplanning.service.ai.provider.AiUsageHolder;
+import com.codegym.aiplanning.service.billing.CreditReservationService;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionTemplate;
+
+@Component
+public class AiExecutionWorker {
+
+    private static final Logger log = LoggerFactory.getLogger(AiExecutionWorker.class);
+    private static final Duration EXECUTION_LEASE = Duration.ofMinutes(10);
+
+    private final AiExecutionRepository executionRepository;
+    private final AiExecutionInputRepository inputRepository;
+    private final AiRoadmapGeneratorService roadmapGeneratorService;
+    private final DailyPlanService dailyPlanService;
+    private final AuditLogService auditLogService;
+    private final TransactionTemplate transactionTemplate;
+    private final DailyEvaluationService dailyEvaluationService;
+    private final WeakTopicService weakTopicService;
+    private final TaskGuidanceGenerationService taskGuidanceGenerationService;
+    private final com.codegym.aiplanning.service.ai.prompt.SystemPromptResolver systemPromptResolver;
+    private final CreditReservationService creditReservationService;
+
+    public AiExecutionWorker(
+            AiExecutionRepository executionRepository,
+            AiExecutionInputRepository inputRepository,
+            AiRoadmapGeneratorService roadmapGeneratorService,
+            DailyPlanService dailyPlanService,
+            AuditLogService auditLogService,
+            TransactionTemplate transactionTemplate,
+            DailyEvaluationService dailyEvaluationService,
+            WeakTopicService weakTopicService,
+            TaskGuidanceGenerationService taskGuidanceGenerationService,
+            com.codegym.aiplanning.service.ai.prompt.SystemPromptResolver systemPromptResolver,
+            CreditReservationService creditReservationService) {
+        this.executionRepository = executionRepository;
+        this.inputRepository = inputRepository;
+        this.roadmapGeneratorService = roadmapGeneratorService;
+        this.dailyPlanService = dailyPlanService;
+        this.auditLogService = auditLogService;
+        this.transactionTemplate = transactionTemplate;
+        this.dailyEvaluationService = dailyEvaluationService;
+        this.weakTopicService = weakTopicService;
+        this.taskGuidanceGenerationService = taskGuidanceGenerationService;
+        this.systemPromptResolver = systemPromptResolver;
+        this.creditReservationService = creditReservationService;
+    }
+
+    @Async("aiGenerationExecutor")
+    public void executeAsync(UUID executionId) {
+        JobContext context = claim(executionId);
+        if (context == null) {
+            return;
+        }
+
+        long startNanos = System.nanoTime();
+        try {
+            com.codegym.aiplanning.service.ai.prompt.ResolvedPrompt resolvedPrompt =
+                    systemPromptResolver.resolve(context.purpose());
+            transactionTemplate.executeWithoutResult(status -> executionRepository.updatePromptReference(
+                    context.executionId(), resolvedPrompt.versionId(), resolvedPrompt.source().name(), Instant.now()));
+            GenerationResult result = execute(context, resolvedPrompt.content());
+            long latencyMs = Math.max(0L, (System.nanoTime() - startNanos) / 1_000_000L);
+            AiUsage usage = AiUsageHolder.getAndClear();
+            completeSuccessfully(context, result.resultType(), result.resultId(), latencyMs, usage);
+        } catch (BusinessException exception) {
+            long latencyMs = Math.max(0L, (System.nanoTime() - startNanos) / 1_000_000L);
+            if (exception.errorCode() == ErrorCode.AI_TIMEOUT) {
+                completeWithTimeout(
+                        context,
+                        exception.errorCode().name(),
+                        safeFailureMessage(context, exception),
+                        latencyMs);
+            } else {
+                completeWithFailure(
+                        context,
+                        exception.errorCode().name(),
+                        safeFailureMessage(context, exception),
+                        latencyMs);
+            }
+        } catch (RuntimeException exception) {
+            long latencyMs = Math.max(0L, (System.nanoTime() - startNanos) / 1_000_000L);
+            logUnexpectedFailure(context.executionId(), exception);
+            completeWithFailure(
+                    context,
+                    ErrorCode.AI_GENERATION_FAILED.name(),
+                    "AI execution failed unexpectedly.",
+                    latencyMs);
+        } finally {
+            AiUsageHolder.clear();
+        }
+    }
+
+    private GenerationResult execute(JobContext context, String systemPrompt) {
+        if (context.targetType() == AiExecutionTargetType.DAILY_PLAN_ITEM) {
+            UUID revisionId = taskGuidanceGenerationService.generate(
+                    context.executionId(),
+                    context.ownerId(),
+                    context.targetId(),
+                    context.operation(),
+                    context.adjustmentPrompt(),
+                    context.providerConfig(),
+                    systemPrompt);
+            return new GenerationResult(
+                    AiExecutionResultType.TASK_GUIDANCE_REVISION,
+                    revisionId);
+        }
+        if (context.targetType() == AiExecutionTargetType.WEAK_TOPIC) {
+            UUID quizId = weakTopicService.generateMasteryCheckQuizWithProviderConfig(
+                    context.ownerId(),
+                    context.targetId(),
+                    context.providerConfig(),
+                    systemPrompt).id();
+            return new GenerationResult(AiExecutionResultType.QUIZ, quizId);
+        }
+        if (context.targetType() == AiExecutionTargetType.DAILY_PLAN_VERSION) {
+            UUID quizId = dailyEvaluationService.generateDailyQuizWithProviderConfig(
+                    context.ownerId(),
+                    context.targetId(),
+                    context.providerConfig(),
+                    systemPrompt).id();
+            return new GenerationResult(AiExecutionResultType.QUIZ, quizId);
+        }
+        if (context.targetType() == AiExecutionTargetType.DAILY_PLAN) {
+            UUID versionId = dailyPlanService.generateAiDraftVersionWithProviderConfig(
+                    context.targetId(),
+                    context.ownerId(),
+                    context.ownerEmail(),
+                    context.executionId().toString(),
+                    context.providerConfig(),
+                    systemPrompt).id();
+            return new GenerationResult(
+                    AiExecutionResultType.DAILY_PLAN_VERSION, versionId);
+        }
+
+        RoadmapVersionResponse version = context.operation() == AiExecutionOperation.GENERATE
+                ? roadmapGeneratorService.generateWithProviderConfig(
+                        context.ownerId(), context.targetId(), context.providerConfig(), systemPrompt)
+                : roadmapGeneratorService.regenerateWithProviderConfig(
+                        context.ownerId(),
+                        context.targetId(),
+                        context.adjustmentPrompt(),
+                        context.providerConfig(),
+                        systemPrompt);
+        return new GenerationResult(
+                AiExecutionResultType.ROADMAP_VERSION, version.id());
+    }
+
+    private JobContext claim(UUID executionId) {
+        return transactionTemplate.execute(status -> {
+            Instant now = Instant.now();
+            int claimed = executionRepository.claimQueued(
+                    executionId, now, now.plus(EXECUTION_LEASE));
+            if (claimed != 1) {
+                return null;
+            }
+
+            AiExecution execution = executionRepository.findJobContextById(executionId)
+                    .orElse(null);
+            if (execution == null) {
+                return null;
+            }
+            String prompt = inputRepository.findById(executionId)
+                    .map(input -> input.getAdjustmentPrompt())
+                    .orElse(null);
+            return new JobContext(
+                    execution.getId(),
+                    execution.getOwner().getId(),
+                    execution.getOwner().getEmail(),
+                    execution.getTargetId(),
+                    execution.getTargetType(),
+                    execution.getOperation(),
+                    execution.getPurpose(),
+                    execution.getProviderConfig(),
+                    prompt);
+        });
+    }
+
+    private void completeSuccessfully(
+            JobContext context,
+            AiExecutionResultType resultType,
+            UUID resultId,
+            Long latencyMs,
+            AiUsage usage) {
+        transactionTemplate.executeWithoutResult(status -> {
+            AiExecution execution = executionRepository
+                    .findByIdForUpdate(context.executionId())
+                    .orElse(null);
+            if (execution == null || !execution.isRunning()) {
+                return;
+            }
+            Integer inputTokens = usage != null ? usage.inputTokens() : null;
+            Integer outputTokens = usage != null ? usage.outputTokens() : null;
+            execution.markSucceeded(
+                    resultType, resultId, Instant.now(), latencyMs, inputTokens, outputTokens);
+            executionRepository.save(execution);
+            inputRepository.deleteByExecutionId(context.executionId());
+            auditLogService.logAction(
+                    context.ownerId(),
+                    context.ownerEmail(),
+                    AuditEventAction.AI_EXECUTION_SUCCEEDED,
+                    "AiExecution",
+                    context.executionId().toString());
+            if (context.targetType() == AiExecutionTargetType.DAILY_PLAN_ITEM) {
+                AuditEventAction action = context.operation()
+                                == AiExecutionOperation.REGENERATE
+                        ? AuditEventAction.TASK_GUIDANCE_REGENERATED
+                        : AuditEventAction.TASK_GUIDANCE_GENERATED;
+                auditLogService.logAction(
+                        context.ownerId(),
+                        context.ownerEmail(),
+                        action,
+                        "TaskGuidanceRevision",
+                        resultId.toString());
+            }
+            creditReservationService.settleReservation(context.executionId());
+        });
+    }
+
+    private void completeWithFailure(
+            JobContext context, String failureCode, String failureMessage, Long latencyMs) {
+        log.warn(
+                "AI execution {} failed with code {}.",
+                context.executionId(),
+                failureCode);
+        transactionTemplate.executeWithoutResult(status -> {
+            AiExecution execution = executionRepository
+                    .findByIdForUpdate(context.executionId())
+                    .orElse(null);
+            if (execution == null || !execution.isRunning()) {
+                return;
+            }
+            execution.markFailed(failureCode, failureMessage, Instant.now(), latencyMs);
+            executionRepository.save(execution);
+            inputRepository.deleteByExecutionId(context.executionId());
+            auditLogService.logAction(
+                    context.ownerId(),
+                    context.ownerEmail(),
+                    AuditEventAction.AI_EXECUTION_FAILED,
+                    "AiExecution",
+                    context.executionId().toString());
+            if (context.targetType() == AiExecutionTargetType.DAILY_PLAN_ITEM) {
+                auditLogService.logAction(
+                        context.ownerId(),
+                        context.ownerEmail(),
+                        AuditEventAction.TASK_GUIDANCE_GENERATION_FAILED,
+                        "AiExecution",
+                        context.executionId().toString());
+            }
+            creditReservationService.releaseReservation(context.executionId());
+        });
+    }
+
+    private void completeWithTimeout(
+            JobContext context, String failureCode, String failureMessage, Long latencyMs) {
+        log.warn(
+                "AI execution {} timed out with code {}.",
+                context.executionId(),
+                failureCode);
+        transactionTemplate.executeWithoutResult(status -> {
+            AiExecution execution = executionRepository
+                    .findByIdForUpdate(context.executionId())
+                    .orElse(null);
+            if (execution == null || !execution.isRunning()) {
+                return;
+            }
+            execution.markTimeout(failureCode, failureMessage, Instant.now(), latencyMs);
+            executionRepository.save(execution);
+            inputRepository.deleteByExecutionId(context.executionId());
+            auditLogService.logAction(
+                    context.ownerId(),
+                    context.ownerEmail(),
+                    AuditEventAction.AI_EXECUTION_TIMEOUT,
+                    "AiExecution",
+                    context.executionId().toString());
+            if (context.targetType() == AiExecutionTargetType.DAILY_PLAN_ITEM) {
+                auditLogService.logAction(
+                        context.ownerId(),
+                        context.ownerEmail(),
+                        AuditEventAction.TASK_GUIDANCE_GENERATION_FAILED,
+                        "AiExecution",
+                        context.executionId().toString());
+            }
+            creditReservationService.releaseReservation(context.executionId());
+        });
+    }
+
+    private String sanitizedMessage(BusinessException exception) {
+        String message = exception.getMessage();
+        if (message == null || message.isBlank()) {
+            return "AI execution failed.";
+        }
+        return message.length() <= 500 ? message : message.substring(0, 500);
+    }
+
+    private String safeFailureMessage(
+            JobContext context,
+            BusinessException exception) {
+        if (context.targetType() != AiExecutionTargetType.DAILY_PLAN_ITEM) {
+            return sanitizedMessage(exception);
+        }
+        return switch (exception.errorCode()) {
+            case AI_TIMEOUT ->
+                    "The AI provider request timed out.";
+            case AI_PROVIDER_UNAVAILABLE ->
+                    "The AI provider is currently unavailable.";
+            case AI_OUTPUT_INVALID ->
+                    "The AI provider returned invalid Task Guidance.";
+            default -> "Task Guidance generation failed.";
+        };
+    }
+
+    private void logUnexpectedFailure(UUID executionId, RuntimeException exception) {
+        StackTraceElement origin = java.util.Arrays.stream(exception.getStackTrace())
+                .filter(frame -> frame.getClassName().startsWith("com.codegym.aiplanning"))
+                .findFirst()
+                .orElseGet(() -> exception.getStackTrace().length == 0
+                        ? null
+                        : exception.getStackTrace()[0]);
+
+        log.error(
+                "AI execution {} failed unexpectedly: exceptionType={}, origin={}.",
+                executionId,
+                exception.getClass().getName(),
+                origin == null ? "unavailable" : origin);
+    }
+
+    private record JobContext(
+            UUID executionId,
+            UUID ownerId,
+            String ownerEmail,
+            UUID targetId,
+            AiExecutionTargetType targetType,
+            AiExecutionOperation operation,
+            com.codegym.aiplanning.entity.ai.AiPurpose purpose,
+            AiProviderConfig providerConfig,
+            String adjustmentPrompt) {}
+
+    private record GenerationResult(
+            AiExecutionResultType resultType, UUID resultId) {}
+}

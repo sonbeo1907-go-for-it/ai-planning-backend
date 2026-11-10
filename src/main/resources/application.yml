@@ -17,8 +17,23 @@ spring:
           time_zone: UTC
   flyway:
     enabled: true
+    out-of-order: true
+  data:
+    web:
+      pageable:
+        max-page-size: 100
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: ${REDIS_TIMEOUT:2s}
+      repositories:
+        enabled: false
   jackson:
     default-property-inclusion: non_null
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
 
 server:
   port: ${SERVER_PORT:8080}
@@ -45,23 +60,72 @@ springdoc:
     path: /v3/api-docs
 
 app:
+  frontend:
+    url: ${FRONTEND_URL:http://localhost:3000}
   security:
     jwt:
       issuer: ai-planning-backend
       secret: ${JWT_SECRET}
-      expiration: ${JWT_EXPIRATION:PT8H}
+      expiration: ${JWT_EXPIRATION:PT15M}
+    session:
+      absolute-expiration: ${AUTH_SESSION_EXPIRATION:P14D}
+      refresh-lock-duration: ${REFRESH_LOCK_DURATION:PT10S}
+      refresh-cookie-name: ${REFRESH_COOKIE_NAME:refresh_token}
+      refresh-cookie-path: /api/v1/auth
+      refresh-cookie-secure: ${REFRESH_COOKIE_SECURE:true}
+      refresh-cookie-same-site: ${REFRESH_COOKIE_SAME_SITE:Strict}
+      redis-enabled: ${AUTH_REDIS_ENABLED:true}
     login-attempts:
       max-attempts: ${LOGIN_MAX_ATTEMPTS:5}
       block-duration: ${LOGIN_BLOCK_DURATION:PT15M}
+    google:
+      enabled: ${GOOGLE_AUTH_ENABLED:false}
+      client-id: ${GOOGLE_CLIENT_ID:}
+      issuer: https://accounts.google.com
+      jwk-set-uri: https://www.googleapis.com/oauth2/v3/certs
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
   bootstrap:
     admin:
       enabled: false
-      username: admin
+      email: admin@aiplanning.local
       password: disabled-bootstrap-password
-      full-name: System Administrator
+  ai:
+    allow-insecure-http-base-urls: ${AI_ALLOW_INSECURE_HTTP_PROVIDER_BASE_URLS:false}
+  billing:
+    payments-enabled: ${BILLING_PAYMENTS_ENABLED:false}
+    welcome-credits: ${BILLING_WELCOME_CREDITS:1000}
+    top-up:
+      min-vnd: ${BILLING_TOP_UP_MIN_VND:20000}
+      max-vnd: ${BILLING_TOP_UP_MAX_VND:2000000}
+      expiration-minutes: ${BILLING_TOP_UP_EXPIRATION_MINUTES:15}
+    vnpay:
+      payment-url: ${VNPAY_PAYMENT_URL:https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
+      tmn-code: ${VNPAY_TMN_CODE:}
+      hash-secret: ${VNPAY_HASH_SECRET:}
+      return-url: ${VNPAY_RETURN_URL:http://localhost:3000/billing/checkout/result}
+      query-url: ${VNPAY_QUERY_URL:https://sandbox.vnpayment.vn/merchant_webapi/api/transaction}
+      server-ip: ${VNPAY_SERVER_IP:127.0.0.1}
+      timeout-seconds: ${VNPAY_TIMEOUT_SECONDS:10}
+  storage:
+    provider: ${STORAGE_PROVIDER:local}
+    local:
+      upload-dir: ${STORAGE_LOCAL_DIR:./data/materials}
+    s3:
+      endpoint: ${B2_ENDPOINT:https://s3.us-west-004.backblazeb2.com}
+      bucket-name: ${B2_BUCKET_NAME:ai-planning-materials}
+      access-key: ${B2_ACCESS_KEY:}
+      secret-key: ${B2_SECRET_KEY:}
+      region: ${B2_REGION:us-west-004}
+      api-call-timeout-ms: ${B2_API_TIMEOUT_MS:30000}
+      api-call-attempt-timeout-ms: ${B2_API_ATTEMPT_TIMEOUT_MS:10000}
+      max-retries: ${B2_MAX_RETRIES:3}
 
 logging:
   pattern:
     level: "%5p [requestId:%X{requestId:-}]"
+  level:
+    # Spring's DEBUG rendering of MethodArgumentNotValidException includes rejected
+    # field values. Keep that resolver at INFO so passwords and other submitted
+    # secrets cannot be echoed when application-wide DEBUG logging is enabled.
+    org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver: INFO

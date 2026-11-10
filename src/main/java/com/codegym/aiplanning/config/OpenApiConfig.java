@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Configuration;
 public class OpenApiConfig {
 
     private static final String BEARER_AUTH = "bearerAuth";
+    private static final String REFRESH_COOKIE = "refreshCookie";
 
     @Bean
     OpenAPI planningOpenApi() {
@@ -19,14 +20,24 @@ public class OpenApiConfig {
                 .info(new Info()
                         .title("AI Planning Backend API")
                         .version("v1")
-                        .description("Manual Planning Core API. AI features are outside the current MVP."))
+                        .description("Manual Planning Core API. Authentication uses 15-minute "
+                                + "Bearer access tokens and a rotated HttpOnly refresh cookie."))
                 .addSecurityItem(new SecurityRequirement().addList(BEARER_AUTH))
                 .components(new Components()
                         .addSecuritySchemes(
                                 BEARER_AUTH,
                                 new SecurityScheme()
+                                        .name(BEARER_AUTH)
                                         .type(SecurityScheme.Type.HTTP)
                                         .scheme("bearer")
-                                        .bearerFormat("JWT")));
+                                        .bearerFormat("JWT"))
+                        .addSecuritySchemes(
+                                REFRESH_COOKIE,
+                                new SecurityScheme()
+                                        .type(SecurityScheme.Type.APIKEY)
+                                        .in(SecurityScheme.In.COOKIE)
+                                        .name("refresh_token")
+                                        .description("Rotated HttpOnly refresh token set by login "
+                                                + "and refresh responses.")));
     }
 }

@@ -1,0 +1,1215 @@
+package com.codegym.aiplanning.service.daily;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.codegym.aiplanning.common.exception.BusinessException;
+import com.codegym.aiplanning.common.exception.ErrorCode;
+import com.codegym.aiplanning.controller.daily.dto.CreateDailyPlanRequest;
+import com.codegym.aiplanning.controller.daily.dto.CreateDailyTaskRequest;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanItemResponse;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanResponse;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanSummaryResponse;
+import com.codegym.aiplanning.controller.daily.dto.RecordPomodoroSessionRequest;
+import com.codegym.aiplanning.controller.daily.dto.RecordProgressRequest;
+import com.codegym.aiplanning.controller.daily.dto.UpdateDailyPlanBudgetRequest;
+import com.codegym.aiplanning.entity.daily.DailyPlan;
+import com.codegym.aiplanning.entity.daily.DailyPlanItem;
+import com.codegym.aiplanning.entity.daily.DailyPlanTaskStep;
+import com.codegym.aiplanning.entity.daily.DailyPlanTaskStepState;
+import com.codegym.aiplanning.entity.daily.DailyPlanVersion;
+import com.codegym.aiplanning.entity.daily.DailyPlanVersionOrigin;
+import com.codegym.aiplanning.entity.daily.DailyTaskCategory;
+import com.codegym.aiplanning.entity.daily.DailyTaskStatus;
+import com.codegym.aiplanning.entity.daily.ProgressEntry;
+import com.codegym.aiplanning.entity.daily.ProgressEntryStatus;
+import com.codegym.aiplanning.entity.roadmap.Roadmap;
+import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
+import com.codegym.aiplanning.entity.auth.UserAccount;
+import com.codegym.aiplanning.entity.auth.UserRole;
+import com.codegym.aiplanning.entity.auth.AccountStatus;
+import com.codegym.aiplanning.repository.daily.DailyPlanItemRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanTaskStepRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanTaskStepStateRepository;
+import com.codegym.aiplanning.repository.daily.DailyPlanVersionRepository;
+import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
+import com.codegym.aiplanning.repository.profile.UserProfileRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
+import com.codegym.aiplanning.service.audit.AuditLogService;
+import com.codegym.aiplanning.service.daily.impl.DailyPlanServiceImpl;
+import com.codegym.aiplanning.service.daily.step.TaskStepReadModelBuilder;
+import com.codegym.aiplanning.service.daily.step.TaskStepValidator;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import com.codegym.aiplanning.controller.daily.dto.DailyPlanVersionResponse;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanAiResponse;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanAiGenerator;
+import com.codegym.aiplanning.service.daily.ai.DailyPlanningContext;
+import com.codegym.aiplanning.service.daily.ai.PlanningContextBuilder;
+import com.codegym.aiplanning.service.daily.DailyPlanPersistenceService;
+import com.codegym.aiplanning.service.daily.AvailableMinutesResolver;
+import com.codegym.aiplanning.service.evaluation.WeakTopicService;
+import com.codegym.aiplanning.service.roadmap.RoadmapProgressService;
+import com.codegym.aiplanning.entity.daily.DailyPlanStatus;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.test.util.ReflectionTestUtils;
+
+@ExtendWith(MockitoExtension.class)
+class DailyPlanServiceTest {
+
+    @Mock
+    private DailyPlanRepository dailyPlanRepository;
+    @Mock
+    private DailyPlanVersionRepository dailyPlanVersionRepository;
+    @Mock
+    private DailyPlanItemRepository dailyPlanItemRepository;
+    @Mock
+    private DailyPlanTaskStepRepository taskStepRepository;
+    @Mock
+    private DailyPlanTaskStepStateRepository taskStepStateRepository;
+    @Mock
+    private ProgressEntryRepository progressEntryRepository;
+    @Mock
+    private UserProfileRepository userProfileRepository;
+    @Mock
+    private RoadmapRepository roadmapRepository;
+    @Mock
+    private RoadmapItemRepository roadmapItemRepository;
+    @Mock
+    private AuditLogService auditLogService;
+    @Mock
+    private PlanningContextBuilder contextBuilder;
+    @Mock
+    private DailyPlanAiGenerator aiGenerator;
+    @Mock
+    private DailyPlanPersistenceService persistenceService;
+    @Mock
+    private WeakTopicService weakTopicService;
+    @Mock
+    private RoadmapProgressService roadmapProgressService;
+    @Mock
+    private com.codegym.aiplanning.repository.roadmap.RoadmapItemProgressRepository roadmapItemProgressRepository;
+
+    private DailyPlanServiceImpl dailyPlanService;
+    private AvailableMinutesResolver availableMinutesResolver;
+
+    private UUID userId;
+    private Jwt userJwt;
+
+    @BeforeEach
+    void setUp() {
+        availableMinutesResolver = new AvailableMinutesResolver(userProfileRepository);
+        dailyPlanService = new DailyPlanServiceImpl(
+                dailyPlanRepository,
+                dailyPlanVersionRepository,
+                dailyPlanItemRepository,
+                taskStepRepository,
+                taskStepStateRepository,
+                progressEntryRepository,
+                userProfileRepository,
+                roadmapRepository,
+                roadmapItemRepository,
+                roadmapItemProgressRepository,
+                auditLogService,
+                contextBuilder,
+                aiGenerator,
+                persistenceService,
+                weakTopicService,
+                roadmapProgressService,
+                new TaskStepReadModelBuilder(
+                        taskStepRepository,
+                        taskStepStateRepository),
+                new TaskStepValidator(),
+                availableMinutesResolver);
+
+        userId = UUID.randomUUID();
+        userJwt = Jwt.withTokenValue("mock-token")
+                .header("alg", "HS256")
+                .claim("sub", userId.toString())
+                .claim("preferred_username", "testuser")
+                .build();
+    }
+
+    @Test
+    void createDailyPlan_success() {
+        LocalDate date = LocalDate.now();
+        CreateDailyPlanRequest request = new CreateDailyPlanRequest(date, 120, null);
+
+        when(dailyPlanRepository.findByUserIdAndPlanDate(userId, date)).thenReturn(Optional.empty());
+        when(userProfileRepository.findByUserId(userId)).thenReturn(Optional.empty());
+
+        when(dailyPlanRepository.save(any(DailyPlan.class))).thenAnswer(inv -> {
+            DailyPlan plan = inv.getArgument(0);
+            if (plan.getId() == null) {
+                ReflectionTestUtils.setField(plan, "id", UUID.randomUUID());
+            }
+            return plan;
+        });
+
+        when(dailyPlanVersionRepository.save(any(DailyPlanVersion.class))).thenAnswer(inv -> {
+            DailyPlanVersion version = inv.getArgument(0);
+            if (version.getId() == null) {
+                ReflectionTestUtils.setField(version, "id", UUID.randomUUID());
+            }
+            return version;
+        });
+
+        DailyPlanResponse response = dailyPlanService.createDailyPlan(request, userJwt);
+
+        assertThat(response).isNotNull();
+        assertThat(response.planDate()).isEqualTo(date);
+        assertThat(response.availableMinutes()).isEqualTo(120);
+        assertThat(response.completionPercentage()).isEqualTo(0.0);
+    }
+
+    @Test
+    void createDailyPlan_withoutRoadmapOrOverrideUsesProfileAndStaysUnlinked() {
+        LocalDate date = LocalDate.now().plusDays(1);
+        UserAccount account = UserAccount.create(
+                "profile@example.com", "Password@123", UserRole.USER, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(account, "id", userId);
+        com.codegym.aiplanning.entity.profile.UserProfile profile =
+                com.codegym.aiplanning.entity.profile.UserProfile.create(account, "Learner");
+        profile.update(null, null, null, 90);
+
+        when(dailyPlanRepository.findByUserIdAndPlanDate(userId, date))
+                .thenReturn(Optional.empty());
+        when(userProfileRepository.findByUserId(userId)).thenReturn(Optional.of(profile));
+        when(dailyPlanRepository.save(any(DailyPlan.class))).thenAnswer(invocation -> {
+            DailyPlan plan = invocation.getArgument(0);
+            ReflectionTestUtils.setField(plan, "id", UUID.randomUUID());
+            return plan;
+        });
+        when(dailyPlanVersionRepository.save(any(DailyPlanVersion.class)))
+                .thenAnswer(invocation -> {
+                    DailyPlanVersion version = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(version, "id", UUID.randomUUID());
+                    return version;
+                });
+
+        DailyPlanResponse response = dailyPlanService.createDailyPlan(
+                new CreateDailyPlanRequest(date, null, null), userJwt);
+
+        assertThat(response.roadmapId()).isNull();
+        assertThat(response.availableMinutes()).isEqualTo(90);
+        verify(roadmapRepository, never()).findAllByOwnerIdOrderByUpdatedAtDesc(userId);
+    }
+
+    @Test
+    void updateDraftBudget_updatesOnlyTheOwnedDraftSnapshot() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(
+                planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 0);
+        ReflectionTestUtils.setField(version, "id", versionId);
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanIdForUpdate(versionId, planId))
+                .thenReturn(Optional.of(version));
+        when(dailyPlanVersionRepository.saveAndFlush(version)).thenReturn(version);
+
+        DailyPlanVersionResponse response = dailyPlanService.updateDraftBudget(
+                planId,
+                versionId,
+                new UpdateDailyPlanBudgetRequest(270, 0L),
+                userJwt);
+
+        assertThat(response.availableMinutes()).isEqualTo(270);
+        assertThat(response.status()).isEqualTo(com.codegym.aiplanning.entity.daily.DailyPlanVersionStatus.DRAFT);
+    }
+
+    @Test
+    void createDailyPlan_duplicateDate_throwsException() {
+        LocalDate date = LocalDate.now();
+        CreateDailyPlanRequest request = new CreateDailyPlanRequest(date, 60, null);
+
+        DailyPlan existing = DailyPlan.create(userId, date, "UTC");
+        when(dailyPlanRepository.findByUserIdAndPlanDate(userId, date)).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> dailyPlanService.createDailyPlan(request, userJwt))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("already exists");
+    }
+
+    @Test
+    void getUserDailyPlansLoadsCurrentVersionsAndItemsInBulk() {
+        DailyPlan firstPlan = DailyPlan.create(
+                userId, LocalDate.now(), "Asia/Ho_Chi_Minh");
+        DailyPlan secondPlan = DailyPlan.create(
+                userId, LocalDate.now().minusDays(1), "Asia/Ho_Chi_Minh");
+        UUID firstPlanId = UUID.randomUUID();
+        UUID secondPlanId = UUID.randomUUID();
+        UUID firstVersionId = UUID.randomUUID();
+        UUID secondVersionId = UUID.randomUUID();
+        ReflectionTestUtils.setField(firstPlan, "id", firstPlanId);
+        ReflectionTestUtils.setField(secondPlan, "id", secondPlanId);
+        firstPlan.updateActiveVersion(firstVersionId);
+
+        DailyPlanVersion firstVersion = DailyPlanVersion.create(
+                firstPlanId, 1, DailyPlanVersionOrigin.MANUAL, 60, 30);
+        DailyPlanVersion secondVersion = DailyPlanVersion.create(
+                secondPlanId, 2, DailyPlanVersionOrigin.USER_EDITED, 90, 45);
+        ReflectionTestUtils.setField(firstVersion, "id", firstVersionId);
+        ReflectionTestUtils.setField(secondVersion, "id", secondVersionId);
+
+        DailyPlanItem firstItem = DailyPlanItem.create(
+                firstVersionId, DailyTaskCategory.CUSTOM, "Backend task", null, 30, 0);
+        DailyPlanItem secondItem = DailyPlanItem.create(
+                secondVersionId, DailyTaskCategory.CUSTOM, "Frontend task", null, 45, 0);
+        ReflectionTestUtils.setField(firstItem, "id", UUID.randomUUID());
+        ReflectionTestUtils.setField(secondItem, "id", UUID.randomUUID());
+
+        List<DailyPlan> plans = List.of(firstPlan, secondPlan);
+        List<DailyPlanVersion> versions = List.of(firstVersion, secondVersion);
+        List<DailyPlanItem> items = List.of(firstItem, secondItem);
+        List<UUID> planIds = plans.stream().map(DailyPlan::getId).toList();
+        List<UUID> versionIds = versions.stream().map(DailyPlanVersion::getId).toList();
+        PageRequest pageable = PageRequest.of(0, 20);
+
+        when(dailyPlanRepository.searchOwned(
+                        userId, null, null, null, null, pageable))
+                .thenReturn(new PageImpl<>(plans, pageable, plans.size()));
+        when(dailyPlanVersionRepository.findCurrentVersionsByDailyPlanIds(planIds))
+                .thenReturn(versions);
+        when(dailyPlanItemRepository.findByDailyPlanVersionIds(versionIds))
+                .thenReturn(items);
+
+        Page<DailyPlanSummaryResponse> response = dailyPlanService.getUserDailyPlans(
+                null, null, null, null, pageable, userJwt);
+
+        assertThat(response).hasSize(2);
+        assertThat(response.getContent())
+                .extracting(DailyPlanSummaryResponse::latestVersionId)
+                .containsExactly(firstVersionId, secondVersionId);
+        assertThat(response.getContent())
+                .extracting(DailyPlanSummaryResponse::totalItemsCount)
+                .containsExactly(1, 1);
+
+        verify(dailyPlanVersionRepository).findCurrentVersionsByDailyPlanIds(planIds);
+        verify(dailyPlanItemRepository).findByDailyPlanVersionIds(versionIds);
+        verify(dailyPlanVersionRepository, never())
+                .findTopByDailyPlanIdOrderByVersionNumberDesc(any());
+        verify(dailyPlanVersionRepository, never()).findById(any());
+        verify(dailyPlanItemRepository, never())
+                .findByDailyPlanVersionIdOrderByOrderIndexAsc(any());
+    }
+
+    @Test
+    void getUserDailyPlans_invalidDateRange_throwsValidationException() {
+        LocalDate from = LocalDate.now();
+        LocalDate to = from.minusDays(1);
+        PageRequest pageable = PageRequest.of(0, 20);
+
+        assertThatThrownBy(() -> dailyPlanService.getUserDailyPlans(
+                null, null, from, to, pageable, userJwt))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.VALIDATION_FAILED);
+    }
+
+    @Test
+    void getUserDailyPlans_roadmapNotOwned_throwsNotFound() {
+        UUID roadmapId = UUID.randomUUID();
+        PageRequest pageable = PageRequest.of(0, 20);
+
+        when(roadmapRepository.findByIdAndOwnerId(roadmapId, userId))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> dailyPlanService.getUserDailyPlans(
+                null, roadmapId, null, null, pageable, userJwt))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.RESOURCE_NOT_FOUND);
+    }
+
+    @Test
+    void addTaskToPlan_success() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        plan.updateActiveVersion(versionId);
+
+        DailyPlanVersion version = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 0);
+        ReflectionTestUtils.setField(version, "id", versionId);
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
+                .thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId)).thenReturn(List.of());
+        when(dailyPlanItemRepository.save(any(DailyPlanItem.class))).thenAnswer(inv -> {
+            DailyPlanItem item = inv.getArgument(0);
+            ReflectionTestUtils.setField(item, "id", UUID.randomUUID());
+            ReflectionTestUtils.setField(item, "createdAt", Instant.now());
+            return item;
+        });
+
+        CreateDailyTaskRequest taskRequest = new CreateDailyTaskRequest("Học Java", "Đọc tài liệu", DailyTaskCategory.CUSTOM, 30, null);
+        DailyPlanItemResponse response =
+                dailyPlanService.addTaskToPlan(planId, versionId, taskRequest, userJwt);
+
+        assertThat(response).isNotNull();
+        assertThat(response.title()).isEqualTo("Học Java");
+        assertThat(response.status()).isEqualTo(DailyTaskStatus.NOT_STARTED);
+    }
+
+    @Test
+    void recordProgress_completesAndCalculatesPercentage() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 30);
+        ReflectionTestUtils.setField(version, "id", versionId);
+        version.activate(Instant.now());
+        plan.activateVersion(versionId);
+
+        DailyPlanItem item = DailyPlanItem.create(versionId, DailyTaskCategory.CUSTOM, "Task 1", "Desc", 30, 0);
+        ReflectionTestUtils.setField(item, "id", itemId);
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
+                .thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(taskStepRepository.findByDailyPlanItemIdInOrderByItemAndOrder(
+                        List.of(itemId)))
+                .thenReturn(List.of());
+        when(dailyPlanItemRepository.save(any(DailyPlanItem.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(progressEntryRepository.save(any(ProgressEntry.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        RecordProgressRequest updateReq = new RecordProgressRequest(com.codegym.aiplanning.entity.daily.ProgressEntryStatus.COMPLETED, 30, "Done", 3, 4, "Notes");
+        DailyPlanItemResponse response = dailyPlanService.recordProgress(planId, itemId, updateReq, userJwt);
+
+        assertThat(response.status()).isEqualTo(DailyTaskStatus.COMPLETED);
+        assertThat(response.completedAt()).isNotNull();
+    }
+
+    @Test
+    void recordProgress_rejectsCompletionWhenRequiredStepsRemain() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID stepId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(
+                planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 30);
+        ReflectionTestUtils.setField(version, "id", versionId);
+        version.activate(Instant.now());
+        plan.activateVersion(versionId);
+
+        DailyPlanItem item = DailyPlanItem.create(
+                versionId, DailyTaskCategory.CUSTOM, "Task with steps", null, 30, 0);
+        ReflectionTestUtils.setField(item, "id", itemId);
+        DailyPlanTaskStep requiredStep = DailyPlanTaskStep.create(
+                itemId, "Required step", null, 0, 10, true);
+        ReflectionTestUtils.setField(requiredStep, "id", stepId);
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
+                .thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(taskStepRepository.findByDailyPlanItemIdInOrderByItemAndOrder(
+                        List.of(itemId)))
+                .thenReturn(List.of(requiredStep));
+        when(taskStepStateRepository.findByTaskStepIdIn(List.of(stepId)))
+                .thenReturn(List.of());
+
+        RecordProgressRequest request = new RecordProgressRequest(
+                ProgressEntryStatus.COMPLETED,
+                30,
+                "Done",
+                3,
+                4,
+                "Notes");
+
+        assertThatThrownBy(() -> dailyPlanService.recordProgress(
+                        planId, itemId, request, userJwt))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue(
+                        "errorCode",
+                        ErrorCode.TASK_REQUIRED_STEPS_INCOMPLETE);
+
+        verify(progressEntryRepository, never()).save(any(ProgressEntry.class));
+        verify(dailyPlanItemRepository, never()).save(any(DailyPlanItem.class));
+        verify(roadmapProgressService, never())
+                .recordOutcome(any(), any(), any(), any());
+    }
+
+    @Test
+    void recordProgress_allowsCompletionWhenAllRequiredStepsAreCompleted() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID stepId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(
+                planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 30);
+        ReflectionTestUtils.setField(version, "id", versionId);
+        version.activate(Instant.now());
+        plan.activateVersion(versionId);
+
+        DailyPlanItem item = DailyPlanItem.create(
+                versionId, DailyTaskCategory.CUSTOM, "Task with steps", null, 30, 0);
+        ReflectionTestUtils.setField(item, "id", itemId);
+        DailyPlanTaskStep requiredStep = DailyPlanTaskStep.create(
+                itemId, "Required step", null, 0, 10, true);
+        ReflectionTestUtils.setField(requiredStep, "id", stepId);
+        DailyPlanTaskStepState completedState = DailyPlanTaskStepState.create(stepId);
+        completedState.setCompleted(true, Instant.now());
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
+                .thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(taskStepRepository.findByDailyPlanItemIdInOrderByItemAndOrder(
+                        List.of(itemId)))
+                .thenReturn(List.of(requiredStep));
+        when(taskStepStateRepository.findByTaskStepIdIn(List.of(stepId)))
+                .thenReturn(List.of(completedState));
+        when(dailyPlanItemRepository.save(any(DailyPlanItem.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(progressEntryRepository.save(any(ProgressEntry.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        DailyPlanItemResponse response = dailyPlanService.recordProgress(
+                planId,
+                itemId,
+                new RecordProgressRequest(
+                        ProgressEntryStatus.COMPLETED,
+                        30,
+                        "Done",
+                        3,
+                        4,
+                        "Notes"),
+                userJwt);
+
+        assertThat(response.status()).isEqualTo(DailyTaskStatus.COMPLETED);
+        verify(progressEntryRepository).save(any(ProgressEntry.class));
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = ProgressEntryStatus.class,
+            names = {"PARTIALLY_COMPLETED", "SKIPPED"})
+    void recordProgress_preservesNonCompletedOutcomeInTaskSnapshot(
+            ProgressEntryStatus progressStatus) {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(
+                planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 30);
+        ReflectionTestUtils.setField(version, "id", versionId);
+        version.activate(Instant.now());
+        plan.activateVersion(versionId);
+
+        DailyPlanItem item = DailyPlanItem.create(
+                versionId, DailyTaskCategory.CUSTOM, "Task outcome", null, 30, 0);
+        ReflectionTestUtils.setField(item, "id", itemId);
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
+                .thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(dailyPlanItemRepository.save(any(DailyPlanItem.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        DailyPlanItemResponse response = dailyPlanService.recordProgress(
+                planId,
+                itemId,
+                new RecordProgressRequest(
+                        progressStatus,
+                        progressStatus == ProgressEntryStatus.PARTIALLY_COMPLETED ? 45 : null,
+                        10,
+                        null,
+                        null,
+                        null,
+                        null),
+                userJwt);
+
+        DailyTaskStatus expectedTaskStatus = DailyTaskStatus.valueOf(progressStatus.name());
+        assertThat(response.status()).isEqualTo(expectedTaskStatus);
+        assertThat(response.completedAt()).isNull();
+
+        ArgumentCaptor<ProgressEntry> entryCaptor =
+                ArgumentCaptor.forClass(ProgressEntry.class);
+        verify(progressEntryRepository).save(entryCaptor.capture());
+        assertThat(entryCaptor.getValue().getStatus()).isEqualTo(progressStatus);
+        assertThat(entryCaptor.getValue().getCompletionPercentage())
+                .isEqualTo(progressStatus == ProgressEntryStatus.PARTIALLY_COMPLETED ? 45 : 0);
+    }
+
+    @Test
+    void recordPomodoroSession_success() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 0);
+        ReflectionTestUtils.setField(version, "id", versionId);
+        version.activate(Instant.now());
+        plan.activateVersion(versionId);
+
+        DailyPlanItem item = DailyPlanItem.create(versionId, DailyTaskCategory.CUSTOM, "Pomodoro Task", "Desc", 25, 0);
+        ReflectionTestUtils.setField(item, "id", itemId);
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
+                .thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(dailyPlanItemRepository.save(any(DailyPlanItem.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(progressEntryRepository.save(any(ProgressEntry.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        RecordPomodoroSessionRequest pomodoroReq = new RecordPomodoroSessionRequest(25);
+        DailyPlanItemResponse response = dailyPlanService.recordPomodoroSession(planId, itemId, pomodoroReq, userJwt);
+
+        assertThat(response).isNotNull();
+        assertThat(response.status()).isEqualTo(DailyTaskStatus.IN_PROGRESS);
+
+        ArgumentCaptor<ProgressEntry> entryCaptor =
+                ArgumentCaptor.forClass(ProgressEntry.class);
+        verify(progressEntryRepository).save(entryCaptor.capture());
+        assertThat(entryCaptor.getValue().getActualMinutes()).isEqualTo(25);
+        assertThat(entryCaptor.getValue().getCompletionPercentage()).isZero();
+        verify(roadmapProgressService, never())
+                .recordOutcome(any(), any(), any(), any());
+    }
+
+    @Test
+    void createDailyPlanWithRoadmapKeepsManualDraftEmpty() {
+        LocalDate date = LocalDate.now();
+        UUID roadmapId = UUID.randomUUID();
+        UUID activeVersionId = UUID.randomUUID();
+        
+        CreateDailyPlanRequest request = new CreateDailyPlanRequest(date, 60, roadmapId);
+
+        UserAccount owner = UserAccount.create("owner@example.com", "Password@123", UserRole.USER, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(owner, "id", userId);
+        
+        Roadmap roadmap = Roadmap.manualDraft(owner, "Roadmap Title", "Desc");
+        ReflectionTestUtils.setField(roadmap, "id", roadmapId);
+        roadmap.activateVersion(activeVersionId);
+
+        when(dailyPlanRepository.findByUserIdAndPlanDate(userId, date)).thenReturn(Optional.empty());
+        when(userProfileRepository.findByUserId(userId)).thenReturn(Optional.empty());
+        when(roadmapRepository.findByIdAndOwnerId(roadmapId, userId)).thenReturn(Optional.of(roadmap));
+
+        when(dailyPlanRepository.save(any(DailyPlan.class))).thenAnswer(inv -> {
+            DailyPlan plan = inv.getArgument(0);
+            ReflectionTestUtils.setField(plan, "id", UUID.randomUUID());
+            return plan;
+        });
+        when(dailyPlanVersionRepository.save(any(DailyPlanVersion.class))).thenAnswer(inv -> {
+            DailyPlanVersion dpv = inv.getArgument(0);
+            ReflectionTestUtils.setField(dpv, "id", UUID.randomUUID());
+            return dpv;
+        });
+
+        DailyPlanResponse response = dailyPlanService.createDailyPlan(request, userJwt);
+
+        assertThat(response).isNotNull();
+        assertThat(response.roadmapId()).isEqualTo(roadmapId);
+        assertThat(response.items()).isEmpty();
+        assertThat(response.totalPlannedMinutes()).isZero();
+        verify(dailyPlanItemRepository, never()).save(any());
+    }
+
+    @Test
+    void addTaskToPlan_withRoadmapItemId_success() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID roadmapId = UUID.randomUUID();
+        UUID activeVersionId = UUID.randomUUID();
+        UUID roadmapItemId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        plan.updateActiveVersion(versionId);
+
+        DailyPlanVersion version = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 0);
+        ReflectionTestUtils.setField(version, "id", versionId);
+
+        UserAccount owner = UserAccount.create("owner@example.com", "Password@123", UserRole.USER, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(owner, "id", userId);
+
+        Roadmap roadmap = Roadmap.manualDraft(owner, "Roadmap Title", "Desc");
+        ReflectionTestUtils.setField(roadmap, "id", roadmapId);
+
+        RoadmapVersion rVersion = RoadmapVersion.draft(roadmap, 1, com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin.MANUAL);
+        ReflectionTestUtils.setField(rVersion, "id", activeVersionId);
+        rVersion.activate(Instant.now());
+        roadmap.activateVersion(activeVersionId);
+
+        RoadmapItem milestone = RoadmapItem.milestone(rVersion, "Milestone", null, 0);
+        ReflectionTestUtils.setField(milestone, "id", UUID.randomUUID());
+        RoadmapItem topic = RoadmapItem.topic(
+                rVersion,
+                milestone,
+                "Roadmap Topic",
+                "Desc",
+                0,
+                30);
+        ReflectionTestUtils.setField(topic, "id", UUID.randomUUID());
+        RoadmapItem learningUnit = RoadmapItem.learningUnit(
+                rVersion,
+                topic,
+                "Complete one concrete exercise",
+                "Desc",
+                0,
+                30);
+        ReflectionTestUtils.setField(learningUnit, "id", roadmapItemId);
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
+                .thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId)).thenReturn(List.of());
+        when(roadmapItemRepository.findOwnedById(roadmapItemId, userId))
+                .thenReturn(Optional.of(learningUnit));
+        when(dailyPlanItemRepository.save(any(DailyPlanItem.class))).thenAnswer(inv -> {
+            DailyPlanItem item = inv.getArgument(0);
+            ReflectionTestUtils.setField(item, "id", UUID.randomUUID());
+            ReflectionTestUtils.setField(item, "createdAt", Instant.now());
+            return item;
+        });
+
+        CreateDailyTaskRequest taskRequest = new CreateDailyTaskRequest("Học Java", "Đọc tài liệu", DailyTaskCategory.CUSTOM, 30, roadmapItemId);
+        DailyPlanItemResponse response =
+                dailyPlanService.addTaskToPlan(planId, versionId, taskRequest, userJwt);
+
+        assertThat(response).isNotNull();
+        assertThat(response.roadmapItemId()).isEqualTo(roadmapItemId);
+        assertThat(response.roadmapItemTitle()).isEqualTo("Complete one concrete exercise");
+        assertThat(response.parentTopicTitle()).isEqualTo("Roadmap Topic");
+        assertThat(plan.getRoadmapId()).isEqualTo(roadmapId);
+    }
+
+    @Test
+    void addTaskToPlan_withTopicReference_isRejected() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID roadmapId = UUID.randomUUID();
+        UUID activeVersionId = UUID.randomUUID();
+        UUID topicId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        plan.updateActiveVersion(versionId);
+        DailyPlanVersion dailyVersion = DailyPlanVersion.create(
+                planId,
+                1,
+                DailyPlanVersionOrigin.MANUAL,
+                60,
+                0);
+        ReflectionTestUtils.setField(dailyVersion, "id", versionId);
+
+        UserAccount owner = UserAccount.create(
+                "owner@example.com",
+                "Password@123",
+                UserRole.USER,
+                AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(owner, "id", userId);
+        Roadmap roadmap = Roadmap.manualDraft(owner, "Roadmap Title", "Desc");
+        ReflectionTestUtils.setField(roadmap, "id", roadmapId);
+        RoadmapVersion roadmapVersion = RoadmapVersion.draft(
+                roadmap,
+                1,
+                com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin.MANUAL);
+        ReflectionTestUtils.setField(roadmapVersion, "id", activeVersionId);
+        roadmapVersion.activate(Instant.now());
+        roadmap.activateVersion(activeVersionId);
+        RoadmapItem milestone = RoadmapItem.milestone(
+                roadmapVersion,
+                "Milestone",
+                null,
+                0);
+        RoadmapItem topic = RoadmapItem.topic(
+                roadmapVersion,
+                milestone,
+                "Broad Roadmap Topic",
+                "Desc",
+                0,
+                60);
+        ReflectionTestUtils.setField(topic, "id", topicId);
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
+                .thenReturn(Optional.of(dailyVersion));
+        when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId))
+                .thenReturn(List.of());
+        when(roadmapItemRepository.findOwnedById(topicId, userId))
+                .thenReturn(Optional.of(topic));
+
+        CreateDailyTaskRequest request = new CreateDailyTaskRequest(
+                "Study the broad Topic",
+                null,
+                DailyTaskCategory.CUSTOM,
+                30,
+                topicId);
+
+        assertThatThrownBy(() -> dailyPlanService.addTaskToPlan(
+                        planId,
+                        versionId,
+                        request,
+                        userJwt))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Learning Unit");
+        verify(dailyPlanItemRepository, never()).save(any());
+    }
+
+    @Test
+    void deleteTask_withProgressHistory_isSoftRemoved() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(
+                planId, 1, DailyPlanVersionOrigin.MANUAL, 60, 30);
+        ReflectionTestUtils.setField(version, "id", versionId);
+        DailyPlanItem item = DailyPlanItem.create(
+                versionId, DailyTaskCategory.CUSTOM, "Protected task", null, 30, 0);
+        ReflectionTestUtils.setField(item, "id", itemId);
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
+                .thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findById(itemId)).thenReturn(Optional.of(item));
+
+        dailyPlanService.deleteTask(planId, versionId, itemId, userJwt);
+
+        assertThat(item.isRemoved()).isTrue();
+        assertThat(version.getTotalPlannedMinutes()).isZero();
+        verify(dailyPlanItemRepository).saveAndFlush(item);
+        verify(dailyPlanItemRepository, never()).delete(any());
+    }
+
+    @Test
+    void generateAiDraftVersion_success() {
+        UUID planId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        ReflectionTestUtils.setField(plan, "status", DailyPlanStatus.READY);
+
+        DailyPlanningContext context = planningContext(planId, 60);
+        DailyPlanAiResponse response = new DailyPlanAiResponse(
+                "Balanced plan",
+                List.of(new DailyPlanAiResponse.AiPlanItemDto(
+                        null,
+                        "Task 1",
+                        null,
+                        DailyTaskCategory.PRACTICE,
+                        30,
+                        null,
+                        null,
+                        List.of(new DailyPlanAiResponse.AiTaskStepDto(
+                                "Solve one focused exercise",
+                                null,
+                                0,
+                                15,
+                                true)))),
+                List.of());
+
+        DailyPlanVersion savedDraft = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.AI_GENERATED, 60, 0);
+        ReflectionTestUtils.setField(savedDraft, "id", UUID.randomUUID());
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+        when(contextBuilder.buildContext(planId, userId)).thenReturn(context);
+        when(aiGenerator.generate(context))
+                .thenReturn(new DailyPlanAiGenerator.GeneratedDailyPlan(response, false));
+        when(persistenceService.persistAiGeneratedDraft(
+                any(),
+                any(),
+                any(),
+                any(Integer.class),
+                any(),
+                any(Boolean.class),
+                org.mockito.ArgumentMatchers.isNull(),
+                any()))
+                .thenReturn(savedDraft);
+        when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(savedDraft.getId()))
+                .thenReturn(List.of());
+
+        DailyPlanVersionResponse result =
+                dailyPlanService.generateAiDraftVersion(planId, null, userJwt);
+
+        assertThat(result).isNotNull();
+        assertThat(result.origin()).isEqualTo(DailyPlanVersionOrigin.AI_GENERATED);
+        verify(aiGenerator).generate(context);
+    }
+
+    @Test
+    void generateAiDraftVersion_planNotReadyOrDraft_throwsException() {
+        UUID planId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        ReflectionTestUtils.setField(plan, "status", DailyPlanStatus.IN_PROGRESS);
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+
+        assertThatThrownBy(() -> dailyPlanService.generateAiDraftVersion(planId, null, userJwt))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Cannot generate AI plan");
+    }
+
+    @Test
+    void generateAiDraftVersion_aiProviderFailure_isPropagatedWithoutChangingVersions() {
+        UUID planId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        ReflectionTestUtils.setField(plan, "status", DailyPlanStatus.DRAFT);
+        DailyPlanningContext context = planningContext(planId, 60);
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+        when(contextBuilder.buildContext(planId, userId)).thenReturn(context);
+        when(aiGenerator.generate(context)).thenThrow(new BusinessException(
+                com.codegym.aiplanning.common.exception.ErrorCode.AI_PROVIDER_UNAVAILABLE,
+                "Provider unavailable"));
+
+        assertThatThrownBy(() -> dailyPlanService.generateAiDraftVersion(planId, null, userJwt))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Provider unavailable");
+        verify(persistenceService, never()).persistAiGeneratedDraft(
+                any(), any(), any(), any(Integer.class), any(), any(Boolean.class), any(), any());
+    }
+
+    @Test
+    void generateAiDraftVersion_sameIdempotencyKey_returnsExistingVersion() {
+        UUID planId = UUID.randomUUID();
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC");
+        ReflectionTestUtils.setField(plan, "id", planId);
+        ReflectionTestUtils.setField(plan, "status", DailyPlanStatus.READY);
+        DailyPlanVersion existing = DailyPlanVersion.create(
+                planId,
+                2,
+                DailyPlanVersionOrigin.AI_GENERATED,
+                60,
+                30);
+        ReflectionTestUtils.setField(existing, "id", UUID.randomUUID());
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByDailyPlanIdAndGenerationRequestKey(
+                        planId,
+                        "request-123"))
+                .thenReturn(Optional.of(existing));
+        when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(existing.getId()))
+                .thenReturn(List.of());
+
+        DailyPlanVersionResponse result = dailyPlanService.generateAiDraftVersion(
+                planId,
+                " request-123 ",
+                userJwt);
+
+        assertThat(result.id()).isEqualTo(existing.getId());
+        verify(contextBuilder, never()).buildContext(any(), any());
+        verify(aiGenerator, never()).generate(any());
+    }
+
+    private DailyPlanningContext planningContext(UUID planId, int availableMinutes) {
+        return new DailyPlanningContext(
+                planId,
+                userId,
+                LocalDate.now(),
+                "UTC",
+                availableMinutes,
+                new DailyPlanningContext.RoadmapContext(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        1,
+                        "Roadmap",
+                        null,
+                        List.of()),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                null);
+    }
+
+    @Test
+    void getAvailableLearningUnits_returnsLearningUnitsWithProgress() {
+        UUID planId = UUID.randomUUID();
+        UUID roadmapId = UUID.randomUUID();
+        UUID activeVersionId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC", roadmapId);
+        ReflectionTestUtils.setField(plan, "id", planId);
+
+        UserAccount owner = UserAccount.create("owner@example.com", "Password@123", UserRole.USER, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(owner, "id", userId);
+        Roadmap roadmap = Roadmap.manualDraft(owner, "My Roadmap", "Desc");
+        ReflectionTestUtils.setField(roadmap, "id", roadmapId);
+        RoadmapVersion rVersion = RoadmapVersion.draft(roadmap, 1, com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin.MANUAL);
+        ReflectionTestUtils.setField(rVersion, "id", activeVersionId);
+        rVersion.activate(Instant.now());
+        roadmap.activateVersion(activeVersionId);
+
+        RoadmapItem milestone = RoadmapItem.milestone(rVersion, "Milestone 1", "Desc", 0);
+        ReflectionTestUtils.setField(milestone, "id", UUID.randomUUID());
+        RoadmapItem topic = RoadmapItem.topic(rVersion, milestone, "Topic 1", "Desc", 0, 60);
+        ReflectionTestUtils.setField(topic, "id", UUID.randomUUID());
+        RoadmapItem unit1 = RoadmapItem.learningUnit(rVersion, topic, "Unit 1", "Desc", 0, 30);
+        UUID unit1Id = UUID.randomUUID();
+        ReflectionTestUtils.setField(unit1, "id", unit1Id);
+
+        com.codegym.aiplanning.entity.roadmap.RoadmapItemProgress progress1 =
+                com.codegym.aiplanning.entity.roadmap.RoadmapItemProgress.create(userId, activeVersionId, unit1Id);
+        progress1.markInProgress(UUID.randomUUID(), 50);
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId)).thenReturn(Optional.of(plan));
+        when(roadmapRepository.findByIdAndOwnerId(roadmapId, userId)).thenReturn(Optional.of(roadmap));
+        when(roadmapItemRepository.findAllByRoadmapVersionIds(List.of(activeVersionId)))
+                .thenReturn(List.of(milestone, topic, unit1));
+        when(roadmapItemProgressRepository.findByUserIdAndRoadmapVersionId(userId, activeVersionId))
+                .thenReturn(List.of(progress1));
+
+        List<com.codegym.aiplanning.controller.daily.dto.AvailableLearningUnitResponse> units =
+                dailyPlanService.getAvailableLearningUnits(planId, userJwt);
+
+        assertThat(units).hasSize(1);
+        var unitResponse = units.get(0);
+        assertThat(unitResponse.id()).isEqualTo(unit1Id);
+        assertThat(unitResponse.title()).isEqualTo("Unit 1");
+        assertThat(unitResponse.topicTitle()).isEqualTo("Topic 1");
+        assertThat(unitResponse.milestoneTitle()).isEqualTo("Milestone 1");
+        assertThat(unitResponse.progressStatus()).isEqualTo(com.codegym.aiplanning.entity.roadmap.RoadmapItemProgressStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void updateTask_withValidLearningUnit_updatesRoadmapItemIdAndEnrichesResponse() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID roadmapId = UUID.randomUUID();
+        UUID activeVersionId = UUID.randomUUID();
+        UUID targetRoadmapItemId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC", roadmapId);
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.MANUAL, 120, 60);
+        ReflectionTestUtils.setField(version, "id", versionId);
+
+        DailyPlanItem existingItem = DailyPlanItem.create(versionId, DailyTaskCategory.CUSTOM, "Old Title", "Old Desc", 30, 0);
+        ReflectionTestUtils.setField(existingItem, "id", itemId);
+
+        UserAccount owner = UserAccount.create("owner@example.com", "Password@123", UserRole.USER, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(owner, "id", userId);
+        Roadmap roadmap = Roadmap.manualDraft(owner, "My Roadmap", "Desc");
+        ReflectionTestUtils.setField(roadmap, "id", roadmapId);
+        RoadmapVersion rVersion = RoadmapVersion.draft(roadmap, 1, com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin.MANUAL);
+        ReflectionTestUtils.setField(rVersion, "id", activeVersionId);
+        rVersion.activate(Instant.now());
+        roadmap.activateVersion(activeVersionId);
+
+        RoadmapItem milestone = RoadmapItem.milestone(rVersion, "Milestone 1", null, 0);
+        RoadmapItem topic = RoadmapItem.topic(rVersion, milestone, "Topic 1", null, 0, 60);
+        RoadmapItem learningUnit = RoadmapItem.learningUnit(rVersion, topic, "Unit 1", null, 0, 30);
+        ReflectionTestUtils.setField(learningUnit, "id", targetRoadmapItemId);
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId)).thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId)).thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId))
+                .thenReturn(List.of(existingItem));
+        when(roadmapItemRepository.findOwnedById(targetRoadmapItemId, userId)).thenReturn(Optional.of(learningUnit));
+        when(roadmapItemRepository.findAllOwnedByIdsWithParent(any(), any()))
+                .thenReturn(List.of(learningUnit));
+
+        com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest request =
+                new com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest(
+                        "New Title", "New Desc", DailyTaskCategory.PRACTICE, 45, 0, targetRoadmapItemId);
+
+        DailyPlanVersionResponse response = dailyPlanService.updateTask(planId, versionId, itemId, request, userJwt);
+
+        assertThat(response).isNotNull();
+        assertThat(response.items()).hasSize(1);
+        DailyPlanItemResponse updatedItem = response.items().get(0);
+        assertThat(updatedItem.title()).isEqualTo("New Title");
+        assertThat(updatedItem.roadmapItemId()).isEqualTo(targetRoadmapItemId);
+        assertThat(updatedItem.roadmapItemTitle()).isEqualTo("Unit 1");
+        assertThat(updatedItem.parentTopicTitle()).isEqualTo("Topic 1");
+    }
+
+    @Test
+    void updateTask_withInvalidItemType_throwsException() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID roadmapId = UUID.randomUUID();
+        UUID activeVersionId = UUID.randomUUID();
+        UUID topicId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC", roadmapId);
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(planId, 1, DailyPlanVersionOrigin.MANUAL, 120, 60);
+        ReflectionTestUtils.setField(version, "id", versionId);
+
+        DailyPlanItem existingItem = DailyPlanItem.create(versionId, DailyTaskCategory.CUSTOM, "Old Title", "Old Desc", 30, 0);
+        ReflectionTestUtils.setField(existingItem, "id", itemId);
+
+        UserAccount owner = UserAccount.create("owner@example.com", "Password@123", UserRole.USER, AccountStatus.ACTIVE);
+        ReflectionTestUtils.setField(owner, "id", userId);
+        Roadmap roadmap = Roadmap.manualDraft(owner, "My Roadmap", "Desc");
+        ReflectionTestUtils.setField(roadmap, "id", roadmapId);
+        RoadmapVersion rVersion = RoadmapVersion.draft(roadmap, 1, com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin.MANUAL);
+        ReflectionTestUtils.setField(rVersion, "id", activeVersionId);
+        rVersion.activate(Instant.now());
+        roadmap.activateVersion(activeVersionId);
+
+        RoadmapItem milestone = RoadmapItem.milestone(rVersion, "Milestone 1", null, 0);
+        RoadmapItem topic = RoadmapItem.topic(rVersion, milestone, "Topic 1", null, 0, 60);
+        ReflectionTestUtils.setField(topic, "id", topicId);
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId)).thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId)).thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId))
+                .thenReturn(List.of(existingItem));
+        when(roadmapItemRepository.findOwnedById(topicId, userId)).thenReturn(Optional.of(topic));
+
+        com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest request =
+                new com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest(
+                        "New Title", "New Desc", DailyTaskCategory.PRACTICE, 45, 0, topicId);
+
+        assertThatThrownBy(() -> dailyPlanService.updateTask(planId, versionId, itemId, request, userJwt))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void updateTask_withClearLearningUnit_removesTheLink() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID learningUnitId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC", null);
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(
+                planId, 1, DailyPlanVersionOrigin.MANUAL, 120, 30);
+        ReflectionTestUtils.setField(version, "id", versionId);
+        DailyPlanItem item = DailyPlanItem.create(
+                versionId,
+                DailyTaskCategory.CUSTOM,
+                "Linked task",
+                null,
+                30,
+                0,
+                learningUnitId);
+        ReflectionTestUtils.setField(item, "id", itemId);
+
+        when(dailyPlanRepository.findByIdAndUserIdForUpdate(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByIdAndDailyPlanId(versionId, planId))
+                .thenReturn(Optional.of(version));
+        when(dailyPlanItemRepository.findByDailyPlanVersionIdOrderByOrderIndexAsc(versionId))
+                .thenReturn(List.of(item));
+
+        var request = new com.codegym.aiplanning.controller.daily.dto.UpdateDailyTaskRequest(
+                "Linked task",
+                null,
+                DailyTaskCategory.CUSTOM,
+                30,
+                0,
+                null,
+                null,
+                true);
+
+        DailyPlanVersionResponse response = dailyPlanService.updateTask(
+                planId, versionId, itemId, request, userJwt);
+
+        assertThat(response.items()).hasSize(1);
+        assertThat(response.items().get(0).roadmapItemId()).isNull();
+    }
+
+    @Test
+    void getPlanProgressHistory_includesRemovedTasks() {
+        UUID planId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+
+        DailyPlan plan = DailyPlan.create(userId, LocalDate.now(), "UTC", null);
+        ReflectionTestUtils.setField(plan, "id", planId);
+        DailyPlanVersion version = DailyPlanVersion.create(
+                planId, 1, DailyPlanVersionOrigin.MANUAL, 120, 30);
+        ReflectionTestUtils.setField(version, "id", versionId);
+        DailyPlanItem removedItem = DailyPlanItem.create(
+                versionId,
+                DailyTaskCategory.CUSTOM,
+                "Removed task",
+                null,
+                30,
+                0);
+        ReflectionTestUtils.setField(removedItem, "id", itemId);
+        removedItem.remove(Instant.now());
+
+        ProgressEntry entry = ProgressEntry.create(
+                userId,
+                itemId,
+                ProgressEntryStatus.COMPLETED,
+                25,
+                100,
+                "Done",
+                2,
+                5,
+                null,
+                null);
+        ReflectionTestUtils.setField(entry, "id", UUID.randomUUID());
+        ReflectionTestUtils.setField(entry, "recordedAt", Instant.now());
+
+        when(dailyPlanRepository.findByIdAndUserId(planId, userId))
+                .thenReturn(Optional.of(plan));
+        when(dailyPlanVersionRepository.findByDailyPlanIdOrderByVersionNumberDesc(planId))
+                .thenReturn(List.of(version));
+        when(dailyPlanItemRepository.findIncludingRemovedByDailyPlanVersionIds(List.of(versionId)))
+                .thenReturn(List.of(removedItem));
+        when(progressEntryRepository.findByUserIdAndDailyPlanItemIdInOrderByRecordedAtDesc(
+                        userId, List.of(itemId)))
+                .thenReturn(List.of(entry));
+
+        var history = dailyPlanService.getPlanProgressHistory(planId, userJwt);
+
+        assertThat(history).hasSize(1);
+        assertThat(history.get(0).dailyPlanItemId()).isEqualTo(itemId);
+        assertThat(history.get(0).removedAt()).isNotNull();
+        assertThat(history.get(0).entries()).hasSize(1);
+    }
+}

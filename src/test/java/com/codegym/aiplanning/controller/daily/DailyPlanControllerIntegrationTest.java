@@ -1,0 +1,1005 @@
+package com.codegym.aiplanning.controller.daily;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.codegym.aiplanning.common.constant.ApiConstant;
+import com.codegym.aiplanning.entity.auth.AccountStatus;
+import com.codegym.aiplanning.entity.auth.UserAccount;
+import com.codegym.aiplanning.entity.auth.UserRole;
+import com.codegym.aiplanning.entity.profile.UserProfile;
+import com.codegym.aiplanning.entity.daily.ProgressEntry;
+import com.codegym.aiplanning.entity.daily.ProgressEntryStatus;
+import com.codegym.aiplanning.repository.auth.UserAccountRepository;
+import com.codegym.aiplanning.repository.daily.ProgressEntryRepository;
+import com.codegym.aiplanning.repository.profile.UserProfileRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapVersionRepository;
+import com.codegym.aiplanning.repository.roadmap.RoadmapItemRepository;
+import com.codegym.aiplanning.entity.roadmap.Roadmap;
+import com.codegym.aiplanning.entity.roadmap.RoadmapVersion;
+import com.codegym.aiplanning.entity.roadmap.RoadmapItem;
+import com.codegym.aiplanning.entity.roadmap.RoadmapVersionOrigin;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+
+@ActiveProfiles("test")
+@AutoConfigureMockMvc
+@SpringBootTest
+class DailyPlanControllerIntegrationTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    private UserAccountRepository userAccountRepository;
+
+    @Autowired
+    private UserProfileRepository userProfileRepository;
+
+    @Autowired
+    private RoadmapRepository roadmapRepository;
+
+    @Autowired
+    private RoadmapVersionRepository roadmapVersionRepository2;
+
+    @Autowired
+    private RoadmapItemRepository roadmapItemRepository;
+
+    @Autowired
+    private ProgressEntryRepository progressEntryRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Test
+    void createDailyPlan_and_addTask_and_checklistCompletion_flow() throws Exception {
+        UserAccount user = createUser("daily-user1", "Daily User 1");
+        String token = login("daily-user1");
+
+        LocalDate today = LocalDate.now();
+        String createPlanPayload = String.format("""
+                {
+                    "planDate": "%s",
+                    "availableMinutes": 120
+                }
+                """, today);
+
+        MvcResult createResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createPlanPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.planDate").value(today.toString()))
+                .andExpect(jsonPath("$.data.availableMinutes").value(120))
+                .andExpect(jsonPath("$.data.totalItemsCount").value(0))
+                .andExpect(jsonPath("$.data.completionPercentage").value(0.0))
+                .andReturn();
+
+        String planId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+        String versionId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("latestVersionId").asText();
+
+        String addTaskPayload = """
+                {
+                    "title": "Học Lập trình Java Core Module 1",
+                    "description": "Thực hành chuỗi và mảng trong Java",
+                    "category": "NEW_MATERIAL",
+                    "plannedMinutes": 45
+                }
+                """;
+
+        MvcResult addTaskResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId + "/items")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(addTaskPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.title").value("Học Lập trình Java Core Module 1"))
+                .andExpect(jsonPath("$.data.status").value("NOT_STARTED"))
+                .andReturn();
+
+        String itemId = objectMapper.readTree(addTaskResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+                
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/versions/" + versionId + "/activate")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + itemId + "/start")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"));
+
+        // Starting is idempotent and does not fabricate a learning outcome.
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + itemId + "/start")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"));
+        assertThat(progressEntryRepository
+                        .findByUserIdAndDailyPlanItemIdOrderByRecordedAtDesc(
+                                user.getId(), UUID.fromString(itemId)))
+                .isEmpty();
+
+        String progressPayload = """
+                {
+                    "status": "COMPLETED",
+                    "actualMinutes": 45,
+                    "difficulty": 3,
+                    "understandingRating": 4,
+                    "note": "Done"
+                }
+                """;
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + itemId + "/progress")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(progressPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.data.completedAt").isNotEmpty());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + itemId + "/start")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CONFLICT"));
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalItemsCount").value(1))
+                .andExpect(jsonPath("$.data.completedItemsCount").value(1))
+                .andExpect(jsonPath("$.data.completionPercentage").value(100.0));
+    }
+
+    @Test
+    void getTodayPlan_success() throws Exception {
+        UserAccount user = createUser("daily-user2", "Daily User 2");
+        String token = login("daily-user2");
+
+        // New profiles default to UTC, and the endpoint resolves "today" from that profile timezone.
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        String createPlanPayload = String.format("{\"planDate\": \"%s\", \"availableMinutes\": 60}", today);
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createPlanPayload))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/today")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.planDate").value(today.toString()));
+    }
+
+    @Test
+    void getTodayPlan_notFound_whenNoPlanExistsForToday() throws Exception {
+        createUser("daily-notfound-user", "No Plan User");
+        String token = login("daily-notfound-user");
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/today")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("DAILY_PLAN_NOT_FOUND"));
+    }
+
+    @Test
+    void getTodayPlan_respectsUserProfileIanaTimezone() throws Exception {
+        UserAccount user = createUser("daily-tz-user", "Timezone User");
+        String token = login("daily-tz-user");
+
+        // Set user profile timezone to Pacific/Auckland
+        UserProfile profile = userProfileRepository.findByUserId(user.getId()).orElseThrow();
+        profile.update("Timezone User", "Pacific/Auckland", "vi-VN", 60);
+        userProfileRepository.saveAndFlush(profile);
+
+        LocalDate aucklandToday = LocalDate.now(java.time.ZoneId.of("Pacific/Auckland"));
+        String payload = String.format("{\"planDate\": \"%s\", \"availableMinutes\": 60}", aucklandToday);
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/today")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.planDate").value(aucklandToday.toString()))
+                .andExpect(jsonPath("$.data.timeZoneSnapshot").value("Pacific/Auckland"));
+    }
+
+    @Test
+    void getTodayPlan_forbiddenForAdmin() throws Exception {
+        createAccount("daily-admin-test", "Admin User", UserRole.ADMIN);
+        String adminToken = login("daily-admin-test");
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/today")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void createDailyPlan_duplicateDate_returnsConflict() throws Exception {
+        createUser("daily-dup-user", "Duplicate Date User");
+        String token = login("daily-dup-user");
+
+        LocalDate date = LocalDate.now().plusDays(20);
+        String payload = String.format("{\"planDate\": \"%s\", \"availableMinutes\": 60}", date);
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DAILY_PLAN_EXISTS"));
+    }
+
+    @Test
+    void draftTaskCanBeEditedButAnActivatedTaskCannot() throws Exception {
+        createUser("daily-edit-task", "Daily Edit Task");
+        String token = login("daily-edit-task");
+        MvcResult createResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(String.format(
+                                "{\"planDate\":\"%s\",\"availableMinutes\":90}",
+                                LocalDate.now().plusDays(10))))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode created = objectMapper.readTree(
+                        createResult.getResponse().getContentAsString())
+                .path("data");
+        String planId = created.path("id").asText();
+        String versionId = created.path("latestVersionId").asText();
+
+        MvcResult taskResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId + "/items")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Draft task\",\"plannedMinutes\":30}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        String itemId = objectMapper.readTree(taskResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+
+        String itemPath = ApiConstant.DAILY_PLANS + "/" + planId
+                + "/versions/" + versionId + "/items/" + itemId;
+        mockMvc.perform(patch(itemPath)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "Edited draft task",
+                                  "description": "Editable before activation",
+                                  "category": "PRACTICE",
+                                  "plannedMinutes": 45,
+                                  "orderIndex": 0
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalPlannedMinutes").value(45))
+                .andExpect(jsonPath("$.data.items[0].title")
+                        .value("Edited draft task"))
+                .andExpect(jsonPath("$.data.items[0].category").value("PRACTICE"));
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId + "/activate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(patch(itemPath)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "Illegal active edit",
+                                  "category": "CUSTOM",
+                                  "plannedMinutes": 30,
+                                  "orderIndex": 0
+                                }
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DAILY_PLAN_LOCKED"));
+    }
+
+    @Test
+    void listDailyPlanHistoryReturnsMultiplePlansWithTheirCurrentVersions()
+            throws Exception {
+        createUser("daily-history-user", "Daily History User");
+        String token = login("daily-history-user");
+        LocalDate today = LocalDate.now();
+        LocalDate yesterday = today.minusDays(1);
+
+        for (LocalDate planDate : List.of(yesterday, today)) {
+            mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(String.format(
+                                    "{\"planDate\": \"%s\", \"availableMinutes\": 60}",
+                                    planDate)))
+                    .andExpect(status().isOk());
+        }
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(2))
+                .andExpect(jsonPath("$.data.content[0].planDate").value(today.toString()))
+                .andExpect(jsonPath("$.data.content[0].latestVersionId").isNotEmpty())
+                .andExpect(jsonPath("$.data.content[1].planDate").value(yesterday.toString()))
+                .andExpect(jsonPath("$.data.content[1].latestVersionId").isNotEmpty());
+
+        // AC1 - Tìm theo ngày (single local date)
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS)
+                        .param("from", today.toString())
+                        .param("to", today.toString())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content[0].planDate").value(today.toString()));
+
+        // AC2 - Lọc theo khoảng ngày (from and to inclusive)
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS)
+                        .param("from", yesterday.toString())
+                        .param("to", today.toString())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(2));
+
+        // AC2 validation - from sau to -> 400
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS)
+                        .param("from", today.toString())
+                        .param("to", yesterday.toString())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        // AC3 - roadmap không thuộc sở hữu -> 404
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS)
+                        .param("roadmapId", UUID.randomUUID().toString())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    void versionLifecycle_preservesHistoryAndOnlyDraftIsEditable() throws Exception {
+        UserAccount user = createUser("daily-version-user", "Daily Version User");
+        String token = login("daily-version-user");
+
+        MvcResult createResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(String.format(
+                                "{\"planDate\": \"%s\", \"availableMinutes\": 90}",
+                                LocalDate.now().plusDays(1))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                .andReturn();
+
+        String planId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+        String firstVersionId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("latestVersionId").asText();
+
+        MvcResult firstTaskResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + firstVersionId + "/items")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Original task\",\"plannedMinutes\":30}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        String firstTaskId = objectMapper.readTree(firstTaskResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + firstVersionId + "/activate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("READY"))
+                .andExpect(jsonPath("$.data.activeVersionId").value(firstVersionId));
+
+        MvcResult draftResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/versions")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.versionNumber").value(2))
+                .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                .andExpect(jsonPath("$.data.origin").value("USER_EDITED"))
+                .andExpect(jsonPath("$.data.items.length()").value(1))
+                .andExpect(jsonPath("$.data.items[0].title").value("Original task"))
+                .andExpect(jsonPath("$.data.items[0].status").value("NOT_STARTED"))
+                .andReturn();
+
+        String secondVersionId = objectMapper.readTree(draftResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+        String copiedTaskId = objectMapper.readTree(draftResult.getResponse().getContentAsString())
+                .path("data").path("items").path(0).path("id").asText();
+        assertThat(copiedTaskId).isNotEqualTo(firstTaskId);
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/versions")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DAILY_PLAN_DRAFT_EXISTS"));
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + firstVersionId + "/items")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Illegal edit\",\"plannedMinutes\":15}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DAILY_PLAN_LOCKED"));
+
+        mockMvc.perform(delete(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + firstVersionId + "/items/" + firstTaskId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DAILY_PLAN_LOCKED"));
+
+        MvcResult addedDraftTaskResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + secondVersionId + "/items")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"New task\",\"plannedMinutes\":15}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        String addedDraftTaskId = objectMapper
+                .readTree(addedDraftTaskResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+
+        mockMvc.perform(delete(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + secondVersionId + "/items/" + addedDraftTaskId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items.length()").value(1))
+                .andExpect(jsonPath("$.data.totalPlannedMinutes").value(30));
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + secondVersionId + "/items")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Replacement task\",\"plannedMinutes\":15}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + secondVersionId + "/activate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.activeVersionId").value(secondVersionId))
+                .andExpect(jsonPath("$.data.totalItemsCount").value(2));
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId + "/versions")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].id").value(secondVersionId))
+                .andExpect(jsonPath("$.data[0].status").value("ACTIVE"))
+                .andExpect(jsonPath("$.data[1].id").value(firstVersionId))
+                .andExpect(jsonPath("$.data[1].status").value("SUPERSEDED"))
+                .andExpect(jsonPath("$.data[1].supersededAt").isNotEmpty());
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + firstVersionId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("SUPERSEDED"))
+                .andExpect(jsonPath("$.data.items.length()").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value(firstTaskId));
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/items/" + copiedTaskId + "/progress")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"PARTIALLY_COMPLETED\",\"completionPercentage\":35,\"actualMinutes\":10}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PARTIALLY_COMPLETED"))
+                .andExpect(jsonPath("$.data.completionPercentage").value(35))
+                .andExpect(jsonPath("$.data.completedAt").doesNotExist());
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.data.completionPercentage").value(17.5));
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/versions")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DAILY_PLAN_LOCKED"));
+
+        int historyBeforeTaskRemoval = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM progress_entries WHERE daily_plan_item_id = ?",
+                Integer.class,
+                UUID.fromString(copiedTaskId));
+        assertThat(historyBeforeTaskRemoval).isEqualTo(1);
+
+        jdbcTemplate.update(
+                "DELETE FROM daily_plan_items WHERE id = ?",
+                UUID.fromString(copiedTaskId));
+
+        int retainedHistory = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM progress_entries "
+                        + "WHERE user_id = ? AND daily_plan_item_id IS NULL",
+                Integer.class,
+                user.getId());
+        assertThat(retainedHistory).isEqualTo(1);
+    }
+
+    @Test
+    void deletingDraftTask_softRemovesItAndPreservesOwnerProgressHistory()
+            throws Exception {
+        UserAccount user = createUser(
+                "daily-soft-remove-user",
+                "Daily Soft Remove User");
+        String token = login("daily-soft-remove-user");
+
+        MvcResult createResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(String.format(
+                                "{\"planDate\": \"%s\", \"availableMinutes\": 60}",
+                                LocalDate.now().plusDays(2))))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode createdPlan = objectMapper
+                .readTree(createResult.getResponse().getContentAsString())
+                .path("data");
+        String planId = createdPlan.path("id").asText();
+        String versionId = createdPlan.path("latestVersionId").asText();
+
+        MvcResult taskResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId + "/items")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Removable task\",\"plannedMinutes\":30}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        UUID taskId = UUID.fromString(objectMapper
+                .readTree(taskResult.getResponse().getContentAsString())
+                .path("data")
+                .path("id")
+                .asText());
+
+        ProgressEntry history = ProgressEntry.create(
+                user.getId(),
+                taskId,
+                ProgressEntryStatus.PARTIALLY_COMPLETED,
+                15,
+                50,
+                "Half complete",
+                3,
+                3,
+                null,
+                null);
+        progressEntryRepository.saveAndFlush(history);
+
+        mockMvc.perform(delete(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId + "/items/" + taskId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty())
+                .andExpect(jsonPath("$.data.totalPlannedMinutes").value(0));
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty());
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/items/" + taskId + "/progress")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].status")
+                        .value("PARTIALLY_COMPLETED"))
+                .andExpect(jsonPath("$.data[0].completionPercentage").value(50));
+
+        Boolean removed = jdbcTemplate.queryForObject(
+                "SELECT removed_at IS NOT NULL FROM daily_plan_items WHERE id = ?",
+                Boolean.class,
+                taskId);
+        assertThat(removed).isTrue();
+        assertThat(progressEntryRepository.findById(history.getId())).isPresent();
+    }
+
+    @Test
+    void userCannotAccessOrModifyAnotherUsersDailyPlan_returns404() throws Exception {
+        UserAccount owner = createUser("daily-owner", "Daily Owner");
+        UserAccount attacker = createUser("daily-attacker", "Attacker");
+
+        String ownerToken = login("daily-owner");
+        String attackerToken = login("daily-attacker");
+
+        LocalDate today = LocalDate.now();
+        MvcResult createResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(String.format("{\"planDate\": \"%s\", \"availableMinutes\": 60}", today)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String ownerPlanId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+        String ownerVersionId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("latestVersionId").asText();
+        MvcResult ownerTaskResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/"
+                        + ownerPlanId + "/versions/" + ownerVersionId + "/items")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Owner Task\", \"plannedMinutes\":30}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        String ownerTaskId = objectMapper
+                .readTree(ownerTaskResult.getResponse().getContentAsString())
+                .path("data")
+                .path("id")
+                .asText();
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + ownerPlanId)
+                        .header("Authorization", "Bearer " + attackerToken))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + ownerPlanId + "/versions")
+                        .header("Authorization", "Bearer " + attackerToken))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
+                        + "/available-learning-units")
+                        .header("Authorization", "Bearer " + attackerToken))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
+                        + "/items/" + ownerTaskId + "/progress")
+                        .header("Authorization", "Bearer " + attackerToken))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
+                        + "/items/" + ownerTaskId + "/start")
+                        .header("Authorization", "Bearer " + attackerToken))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
+                        + "/items/" + ownerTaskId + "/progress/"
+                        + UUID.randomUUID() + "/corrections")
+                        .header("Authorization", "Bearer " + attackerToken)
+                        .header("Idempotency-Key", "attacker-correction")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"SKIPPED\"}"))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
+                        + "/versions/" + ownerVersionId + "/items")
+                        .header("Authorization", "Bearer " + attackerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Attacker Task\", \"plannedMinutes\": 30}"))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + ownerPlanId
+                        + "/generate-ai")
+                        .header("Authorization", "Bearer " + attackerToken)
+                        .header("Idempotency-Key", "attacker-request"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void adminCannotAccessPersonalDailyPlans() throws Exception {
+        createAccount("daily-admin", "Daily Admin", UserRole.ADMIN);
+        String adminToken = login("daily-admin");
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/"
+                        + java.util.UUID.randomUUID()
+                        + "/available-learning-units")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/"
+                        + java.util.UUID.randomUUID()
+                        + "/generate-ai")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+    }
+
+    private UserAccount createUser(String emailPrefix, String displayName) {
+        return createAccount(emailPrefix, displayName, UserRole.USER);
+    }
+
+    private UserAccount createAccount(
+            String emailPrefix, String displayName, UserRole role) {
+        String email = emailPrefix + "@example.com";
+        UserAccount account = userAccountRepository.saveAndFlush(UserAccount.create(
+                email,
+                passwordEncoder.encode("Password@123"),
+                role,
+                AccountStatus.ACTIVE));
+        userProfileRepository.saveAndFlush(UserProfile.create(account, displayName));
+        return account;
+    }
+
+    private String login(String emailPrefix) throws Exception {
+        String email = emailPrefix + "@example.com";
+        MvcResult result = mockMvc.perform(post(ApiConstant.AUTH_LOGIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                java.util.Map.of(
+                                        "email", email,
+                                        "password", "Password@123"))))
+                .andExpect(status().isOk())
+                .andReturn();
+        return objectMapper
+                .readTree(result.getResponse().getContentAsString())
+                .path("data")
+                .path("accessToken")
+                .asText();
+    }
+
+    @Test
+    void createDailyPlan_withRoadmapIntegration_flow() throws Exception {
+        UserAccount user = createUser("daily-rmp-user", "Rmp User");
+        String token = login("daily-rmp-user");
+
+        // 1. Create a Roadmap and RoadmapVersion
+        Roadmap roadmap = roadmapRepository.saveAndFlush(Roadmap.manualDraft(user, "Integration Roadmap", "Desc"));
+        RoadmapVersion rVersion = roadmapVersionRepository2.saveAndFlush(RoadmapVersion.draft(roadmap, 1, RoadmapVersionOrigin.MANUAL));
+        
+        // Activate version
+        roadmap.activateVersion(rVersion.getId());
+        roadmap = roadmapRepository.saveAndFlush(roadmap);
+        rVersion.activate(java.time.Instant.now());
+        rVersion = roadmapVersionRepository2.saveAndFlush(rVersion);
+
+        // Add an executable Learning Unit to the active Roadmap version.
+        RoadmapItem milestone = roadmapItemRepository.saveAndFlush(RoadmapItem.milestone(rVersion, "Week 1", "Desc", 0));
+        RoadmapItem topic = roadmapItemRepository.saveAndFlush(RoadmapItem.topic(rVersion, milestone, "Learn Java Records", "Desc", 0, 45));
+        RoadmapItem learningUnit = roadmapItemRepository.saveAndFlush(
+                RoadmapItem.learningUnit(
+                        rVersion,
+                        topic,
+                        "Implement a Java record",
+                        "Create and use one immutable data carrier.",
+                        0,
+                        45));
+
+        // 2. Create Daily Plan linking to the Roadmap
+        LocalDate today = LocalDate.now();
+        String createPlanPayload = String.format("""
+                {
+                    "planDate": "%s",
+                    "availableMinutes": 120,
+                    "roadmapId": "%s"
+                }
+                """, today, roadmap.getId());
+
+        MvcResult createResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createPlanPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.roadmapId").value(roadmap.getId().toString()))
+                .andExpect(jsonPath("$.data.totalItemsCount").value(0))
+                .andExpect(jsonPath("$.data.totalPlannedMinutes").value(0))
+                .andExpect(jsonPath("$.data.items").isEmpty())
+                .andReturn();
+
+        String planId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+        String versionId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .path("data").path("latestVersionId").asText();
+
+        // 3. Add manual task with roadmapItemId
+        String addTaskPayload = String.format("""
+                {
+                    "title": "Học Lập trình Java Core Module 1",
+                    "description": "Thực hành chuỗi và mảng trong Java",
+                    "category": "NEW_MATERIAL",
+                    "plannedMinutes": 45,
+                    "roadmapItemId": "%s"
+                }
+                """, learningUnit.getId());
+
+        MvcResult addTaskResult = mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId + "/items")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(addTaskPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.roadmapItemId").value(learningUnit.getId().toString()))
+                .andExpect(jsonPath("$.data.roadmapItemTitle").value(learningUnit.getTitle()))
+                .andExpect(jsonPath("$.data.parentTopicTitle").value(topic.getTitle()))
+                .andExpect(jsonPath("$.data.roadmapItem.id").value(topic.getId().toString()))
+                .andExpect(jsonPath("$.data.roadmapItem.title").value(topic.getTitle()))
+                .andExpect(jsonPath("$.data.studyUnit.id").value(learningUnit.getId().toString()))
+                .andExpect(jsonPath("$.data.studyUnit.title").value(learningUnit.getTitle()))
+                .andReturn();
+
+        String taskId = objectMapper.readTree(addTaskResult.getResponse().getContentAsString())
+                .path("data").path("id").asText();
+
+        // 4. Query available learning units endpoint (RMP-PROG-02)
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId + "/available-learning-units")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data[0].id").value(learningUnit.getId().toString()))
+                .andExpect(jsonPath("$.data[0].title").value(learningUnit.getTitle()))
+                .andExpect(jsonPath("$.data[0].topicTitle").value(topic.getTitle()))
+                .andExpect(jsonPath("$.data[0].milestoneTitle").value(milestone.getTitle()))
+                .andExpect(jsonPath("$.data[0].progressStatus").value("NOT_STARTED"));
+
+        // 5. Update task and verify enriched response (RMP-PROG-02)
+        String updateTaskPayload = String.format("""
+                {
+                    "title": "Học Lập trình Java Core Module 1 - Đã cập nhật",
+                    "description": "Thực hành chuỗi và mảng nâng cao",
+                    "category": "PRACTICE",
+                    "plannedMinutes": 60,
+                    "orderIndex": 0,
+                    "roadmapItemId": "%s"
+                }
+                """, learningUnit.getId());
+
+        mockMvc.perform(patch(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId + "/items/" + taskId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updateTaskPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].title").value("Học Lập trình Java Core Module 1 - Đã cập nhật"))
+                .andExpect(jsonPath("$.data.items[0].roadmapItemId").value(learningUnit.getId().toString()))
+                .andExpect(jsonPath("$.data.items[0].roadmapItemTitle").value(learningUnit.getTitle()))
+                .andExpect(jsonPath("$.data.items[0].parentTopicTitle").value(topic.getTitle()));
+
+        // 6. Activate version
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/versions/" + versionId + "/activate")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].roadmapItemTitle").value(learningUnit.getTitle()))
+                .andExpect(jsonPath("$.data.items[0].parentTopicTitle").value(topic.getTitle()));
+
+        // 7. Record progress (RMP-PROG-03)
+        String progressPayload = """
+                {
+                    "status": "COMPLETED",
+                    "actualMinutes": 55,
+                    "actualResult": "Đã hoàn thành toàn bộ bài thực hành",
+                    "difficulty": 3,
+                    "understandingRating": 5,
+                    "note": "Nắm vững kiến thức"
+                }
+                """;
+
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/progress")
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", "complete-learning-unit-once")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(progressPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.data.roadmapItemTitle").value(learningUnit.getTitle()))
+                .andExpect(jsonPath("$.data.parentTopicTitle").value(topic.getTitle()));
+
+        // Retrying with the same key must not append duplicate progress history.
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId + "/items/" + taskId + "/progress")
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", "complete-learning-unit-once")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(progressPayload))
+                .andExpect(status().isOk());
+
+        MvcResult historyResult = mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/"
+                        + planId + "/items/" + taskId + "/progress")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].learningUnitId")
+                        .value(learningUnit.getId().toString()))
+                .andReturn();
+        UUID completedEntryId = UUID.fromString(objectMapper
+                .readTree(historyResult.getResponse().getContentAsString())
+                .path("data")
+                .get(0)
+                .path("id")
+                .asText());
+
+        mockMvc.perform(get(ApiConstant.ROADMAPS + "/" + roadmap.getId())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.progress.completionPercentage").value(100.0))
+                .andExpect(jsonPath("$.data.versions[0].milestones[0].topics[0]"
+                        + ".progress.completionState").value("COMPLETED"))
+                .andExpect(jsonPath("$.data.versions[0].milestones[0].topics[0]"
+                        + ".learningUnits[0].progress.completionState")
+                        .value("COMPLETED"));
+
+        String correctionPayload = """
+                {
+                    "status": "PARTIALLY_COMPLETED",
+                    "completionPercentage": 40,
+                    "actualMinutes": 40,
+                    "actualResult": "Needs more practice",
+                    "difficulty": 4,
+                    "understandingRating": 2,
+                    "note": "Corrected outcome"
+                }
+                """;
+        mockMvc.perform(post(ApiConstant.DAILY_PLANS + "/" + planId
+                        + "/items/" + taskId + "/progress/"
+                        + completedEntryId + "/corrections")
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", "correct-learning-unit-once")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(correctionPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PARTIALLY_COMPLETED"))
+                .andExpect(jsonPath("$.data.completionPercentage").value(40))
+                .andExpect(jsonPath("$.data.supersedesEntryId")
+                        .value(completedEntryId.toString()));
+
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/"
+                        + planId + "/items/" + taskId + "/progress")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2));
+
+        // 8. The append-only correction updates the current snapshot without deleting history.
+        mockMvc.perform(get(ApiConstant.DAILY_PLANS + "/" + planId + "/available-learning-units")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].progressStatus").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.data[0].latestOutcome")
+                        .value("PARTIALLY_COMPLETED"));
+
+        mockMvc.perform(get(ApiConstant.ROADMAPS + "/" + roadmap.getId())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.progress.completionPercentage").value(0.0))
+                .andExpect(jsonPath("$.data.versions[0].milestones[0].topics[0]"
+                        + ".progress.completionState").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.data.versions[0].milestones[0].topics[0]"
+                        + ".learningUnits[0].progress.latestOutcome")
+                        .value("PARTIALLY_COMPLETED"));
+    }
+}

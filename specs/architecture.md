@@ -1,29 +1,18 @@
 # Architecture baseline
 
-The backend follows a layered package structure. Each layer contains a
-sub-package for the corresponding requirement or entity group.
+The backend follows a layered, feature-oriented package structure. The retained
+foundation contains authentication, profile, audit, email, API, persistence,
+and security infrastructure. V2 business modules are added as independent
+USER-owned aggregates.
 
 ```text
 com.codegym.aiplanning
-├── controller
-│   ├── auth
-│   │   └── dto
-│   └── profile
-│       └── dto
-├── service
-│   └── auth
-│       └── impl
-├── repository
-│   └── auth
-├── entity
-│   ├── auth
-│   └── plan
-├── common
-│   ├── api
-│   ├── constant
-│   ├── entity
-│   └── exception
-└── config
+|-- controller/<feature>/dto/
+|-- service/<feature>/impl/
+|-- repository/<feature>/
+|-- entity/<feature>/
+|-- common/
+`-- config/
 ```
 
 ## Layer responsibilities
@@ -33,8 +22,8 @@ com.codegym.aiplanning
 | `controller` | HTTP endpoints, request validation, request/response DTOs |
 | `service` | Interfaces, transactions, use-case orchestration and business rules |
 | `service.<feature>.impl` | Implementations of service interfaces |
-| `repository` | Spring Data repositories and persistence queries |
-| `entity` | JPA entities and business enums |
+| `repository` | Persistence queries, including owner-scoped personal-resource queries |
+| `entity` | JPA entities, aggregate state and business enums |
 | `common` | Shared API models, constants, base entities and exceptions |
 | `config` | Security, OpenAPI, CORS and application configuration |
 
@@ -45,33 +34,43 @@ com.codegym.aiplanning
 3. Repositories use entities and must not call controllers or services.
 4. Entities do not depend on controllers, services or HTTP DTOs.
 5. DTOs must not be reused as JPA entities.
-6. Endpoint strings must come from `ApiConstant`.
-7. Business rules must be enforced and tested in the backend.
+6. Endpoint strings come from `ApiConstant`.
+7. Business rules are enforced and tested in the backend.
+8. Personal-resource queries include the authenticated owner in the database query.
+9. Aggregate children are authorized through their aggregate root.
+10. AI provider integrations remain behind the AI service boundary.
 
-## Feature package convention
+## V2 feature packages
 
-When implementing DailyPlan:
+The target feature packages are:
 
 ```text
-controller/daily/
-controller/daily/dto/
-service/daily/DailyPlanService.java
-service/daily/impl/DailyPlanServiceImpl.java
-repository/daily/DailyPlanRepository.java
-entity/daily/DailyPlan.java
+profile
+source
+roadmap
+progress
+daily
+review
+ai
 ```
 
-WeeklyPlan, curriculum, enrollment, progress and review follow the same
-structure.
+Instructor, StudyClass, Enrollment, WeeklyPlan, and institution-owned
+course/curriculum packages are outside the V2 MVP.
 
-## Planning invariants
+## V2 invariants
 
-- `PlanReviewStatus` and `PlanExecutionStatus` are independent.
-- Submitted revisions are immutable.
-- Progress is stored separately and never mutates a submitted revision.
-- A current DailyPlan is unique for an enrollment and plan date.
-- Current WeeklyPlan ranges must not overlap within an enrollment.
-- A DailyPlan may belong to a WeeklyPlan or be standalone.
+- Every personal resource belongs to one authenticated USER.
+- ADMIN has no implicit access to USER learning content.
+- Roadmap and DailyPlan are aggregate roots with historical content versions.
+- AI generation creates drafts and never overwrites USER-edited content.
+- Progress is stored separately from planned content.
+- AI Review is advisory and references one exact DailyPlanVersion.
+- Uploaded document content is untrusted data, not AI instruction.
+- Provider secrets and personal AI content do not enter logs or audit metadata.
+- Manual workflows remain available when AI is unavailable.
+- The active migration history starts from a clean V2 foundation baseline.
+  Pre-V2 migrations remain available through Git history and must never be
+  applied together with the clean baseline.
 
-These invariants must be protected at both service and database levels where
-PostgreSQL supports the required constraint.
+Ownership, state, and version invariants are protected at both the service and
+database levels where PostgreSQL can enforce them.
